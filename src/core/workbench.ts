@@ -33,10 +33,11 @@ import { TransferQueue } from './transfers';
 import { AgentRuntime, clearStoppedNativeFork } from './agents';
 import { ClaudeRuntime } from './claude-runtime';
 import { prepareCodexStorage } from './codex-storage';
+import { syncCodexDesktopHistory } from './codex-desktop-history';
 import type { McpMutation } from '../shared/mcp';
 import { CursorMcp } from './cursor-mcp';
 import type { SessionMode } from '../shared/session-mode';
-import { listNativeSessions as listProviderSessions, nativeRecordAllowed, resolveNativeSession } from './native-sessions';
+import { codexHome, listNativeSessions as listProviderSessions, nativeRecordAllowed, resolveNativeSession } from './native-sessions';
 import { publishToNativeList } from './native-publish';
 import { applyNativeTranscript, nativeTranscriptChanged, readCodexTranscript, readCursorTranscript, sameNativePath } from './native-transcript';
 import { sessionContext } from './session-context';
@@ -167,6 +168,7 @@ export class Workbench {
     linkConclusionPublications(this.store.conclusions, this.store.drafts, this.store.transfers);
     await this.store.save(); await this.restoreLocalWorkspace(); await this.detect();
     this.ensureNativeTranscriptSync();
+    for (const session of this.store.sessions) if (session.nativeLive && session.provider === 'codex' && !session.closedAt) await this.publishDesktopHistory(session);
   }
   async restoreLocalWorkspace() {
     const settings = this.store.settings;
@@ -1243,7 +1245,7 @@ export class Workbench {
     if (!this.closing && s.purpose === 'work' && !s.closedAt && !s.stoppedAt && s.status === 'idle' && !s.error) {
       s.completion = { id: randomUUID() }; this.changed();
     }
-    if (s.nativeLive && s.purpose === 'work') { try { await this.readNativeTranscriptInto(s); } catch (error: any) { this.sessionNotice(s, '原会话记录尚未刷新：' + error.message); } }
+    if (s.nativeLive && s.purpose === 'work') { try { await this.readNativeTranscriptInto(s); } catch (error: any) { this.sessionNotice(s, '原会话记录尚未刷新：' + error.message); } if (s.provider === 'codex') await this.publishDesktopHistory(s); }
     if (s.purpose === 'prepare') {
       const draft = this.store.drafts.find(d => d.prepareSessionId === id);
       if (draft && draft.generation === 'running') {
@@ -1394,6 +1396,7 @@ export class Workbench {
         for (const session of sessions) {
           try { if (await this.readNativeTranscriptInto(session, false)) changed = true; }
           catch { read = false; }
+          if (session.provider === 'codex') await this.publishDesktopHistory(session);
         }
         const after = await fs.stat(file).catch(() => undefined);
         const state = [...this.nativeSyncState.values()].find(item => sameNativePath(item.file, file));
@@ -1405,6 +1408,16 @@ export class Workbench {
       this.nativeSyncReading = false;
       if (this.nativeSyncPending.size && !this.nativeSyncQueued) this.queueNativeTranscript([...this.nativeSyncPending][0]);
     }
+  }
+  private async publishDesktopHistory(session: AgentSession, allowRetry = true) {
+    if (session.provider !== 'codex' || !session.nativeLive || !session.nativeId || session.closedAt) return;
+    try {
+      const result = await syncCodexDesktopHistory(session.nativeId, codexHome(), path.join(this.store.root, 'codex-home', 'sqlite'));
+      if (result === 'behind' && allowRetry) {
+        await new Promise(resolve => setTimeout(resolve, 200));
+        await this.publishDesktopHistory(session, false);
+      }
+    } catch (error: any) { this.sessionNotice(session, '桌面 Codex 还没有跟上这条会话：' + error.message); }
   }
   private async readNativeTranscriptInto(session: AgentSession, persist = true) {
     if (!session.nativeLive || !session.nativePath || this.nativeTranscriptBlocked(session)) return false;
