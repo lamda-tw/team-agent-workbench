@@ -339,7 +339,7 @@ export class SftpConnection {
       if (directions) await this.request({ op: 'directions_save', directions: prepareDirectionSave(directions) });
       return directionDirectorySchema.parse(await this.request({ op: 'directions_list' }));
     } catch (error: any) {
-      if (typeof error?.message === 'string' && error.message.includes('项目不存在或当前账号不属于此组')) throw new Error('服务器还没有工作方向功能。请管理员在管理端打开用户管理，更新服务端功能后再试。');
+      if (typeof error?.message === 'string' && error.message.includes('项目不存在或当前账号不属于此组')) throw new Error('服务器还没有成员名片功能。请管理员在管理端打开用户管理，更新服务端功能后再试。');
       throw error;
     }
   }

@@ -32,6 +32,6 @@ test('a person can keep several directions and cannot duplicate a title', () => 
   const merged = mergeDirectionUpdates([{ ...first[0], updatedAt: 'earlier' }], first, 'later');
   assert.equal(merged[0].updatedAt, 'earlier');
   assert.equal(merged[1].updatedAt, 'later');
-  assert.throws(() => prepareDirectionSave([{ id: id('6'), title: '评测集', summary: '' }, { id: id('7'), title: '评测集', summary: '另一条' }]), /方向名称不能重复/);
-  assert.throws(() => prepareDirectionSave(Array.from({ length: 13 }, (_, index) => ({ id: id(String(index + 1)), title: '方向' + index, summary: '' }))), /最多登记 12 条/);
+  assert.throws(() => prepareDirectionSave([{ id: id('6'), title: '评测集', summary: '' }, { id: id('7'), title: '评测集', summary: '另一条' }]), /内容名称不能重复/);
+  assert.throws(() => prepareDirectionSave(Array.from({ length: 13 }, (_, index) => ({ id: id(String(index + 1)), title: '方向' + index, summary: '' }))), /最多填写 12 条/);
 });

@@ -3,12 +3,12 @@ import { z } from 'zod';
 export const directionLimit = 12;
 export const directionTitleLimit = 40;
 export const directionSummaryLimit = 160;
-const directionId = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, '工作方向编号无效');
+const directionId = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i, '名片条目编号无效');
 
 export const directionDraftSchema = z.object({
   id: directionId,
-  title: z.string().trim().min(1, '请填写方向名称').max(directionTitleLimit, `方向名称不超过 ${directionTitleLimit} 字`),
-  summary: z.string().trim().max(directionSummaryLimit, `方向说明不超过 ${directionSummaryLimit} 字`).default(''),
+  title: z.string().trim().min(1, '请填写内容名称').max(directionTitleLimit, `内容名称不超过 ${directionTitleLimit} 字`),
+  summary: z.string().trim().max(directionSummaryLimit, `内容说明不超过 ${directionSummaryLimit} 字`).default(''),
 });
 export type DirectionDraft = z.infer<typeof directionDraftSchema>;
 export const directionRecordSchema = directionDraftSchema.extend({ updatedAt: z.string().min(1).max(40) });
@@ -26,15 +26,15 @@ export const savedDirectionsSchema = z.object({
 });
 
 export function prepareDirectionSave(raw: unknown): DirectionDraft[] {
-  const parsed = z.array(directionDraftSchema).max(directionLimit, `每人最多登记 ${directionLimit} 条工作方向`).safeParse(raw);
+  const parsed = z.array(directionDraftSchema).max(directionLimit, `每张名片最多填写 ${directionLimit} 条内容`).safeParse(raw);
   if (!parsed.success) throw new Error(parsed.error.issues[0].message);
   const titles = new Set<string>(), ids = new Set<string>();
   for (const item of parsed.data) {
     const id = item.id.toLowerCase();
-    if (ids.has(id)) throw new Error('工作方向编号重复');
+    if (ids.has(id)) throw new Error('名片条目编号重复');
     ids.add(id);
     const title = item.title.toLocaleLowerCase();
-    if (titles.has(title)) throw new Error('同一人的方向名称不能重复');
+    if (titles.has(title)) throw new Error('同一张名片的内容名称不能重复');
     titles.add(title);
   }
   return parsed.data.map(item => ({ ...item, id: item.id.toLowerCase() }));

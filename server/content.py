@@ -569,30 +569,30 @@ def direction_text(value, maximum, label):
 
 def normalize_directions(raw, previous):
     if not isinstance(raw, list) or len(raw) > DIRECTION_LIMIT:
-        raise ValueError('每人最多登记 %d 条工作方向' % DIRECTION_LIMIT)
+        raise ValueError('每张名片最多填写 %d 条内容' % DIRECTION_LIMIT)
     prior = {item.get('id'): item for item in previous if isinstance(item, dict)}
     seen_ids, seen_titles, result, stamp = set(), set(), [], now()
     for item in raw:
         if not isinstance(item, dict):
-            raise ValueError('工作方向格式无效')
+            raise ValueError('名片条目格式无效')
         identifier = item.get('id')
         if not isinstance(identifier, str):
-            raise ValueError('工作方向编号无效')
+            raise ValueError('名片条目编号无效')
         try:
             identifier = str(uuid.UUID(identifier))
         except ValueError:
-            raise ValueError('工作方向编号无效')
+            raise ValueError('名片条目编号无效')
         if identifier in seen_ids:
-            raise ValueError('工作方向编号重复')
+            raise ValueError('名片条目编号重复')
         seen_ids.add(identifier)
-        title = direction_text(item.get('title'), 40, '方向名称')
+        title = direction_text(item.get('title'), 40, '内容名称')
         if not title:
-            raise ValueError('请填写方向名称')
+            raise ValueError('请填写内容名称')
         folded = title.casefold()
         if folded in seen_titles:
-            raise ValueError('同一人的方向名称不能重复')
+            raise ValueError('同一张名片的内容名称不能重复')
         seen_titles.add(folded)
-        summary = direction_text(item.get('summary', ''), 160, '方向说明')
+        summary = direction_text(item.get('summary', ''), 160, '内容说明')
         old = prior.get(identifier)
         unchanged = isinstance(old, dict) and old.get('title') == title and old.get('summary') == summary and isinstance(old.get('updatedAt'), str)
         result.append(dict(id=identifier, title=title, summary=summary, updatedAt=old.get('updatedAt') if unchanged else stamp))
