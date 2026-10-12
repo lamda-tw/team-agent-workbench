@@ -38,6 +38,7 @@ export interface AgentSession {
   id: string; title: string; provider: Provider; model?: string; closedAt?: string; nativeId?: string; nativePath?: string; nativeLive?: boolean; codexStorage?: 'workbench'; codexNeedsRegistration?: boolean;
   cwd: string; purpose: 'work' | 'prepare'; networkRoute?: SessionNetworkRoute; parentId?: string; fork?: SubsessionFork; reports?: SubsessionReport[]; createdAt: string;
   status: 'idle' | 'starting' | 'running' | 'approval' | 'error'; error?: string; stoppedAt?: string;
+  completion?: { id: string; readAt?: string };
   messages: Message[]; approvals: Approval[]; sources: SourceFile[]; binding?: RemoteBinding;
   permissionMode?: PermissionMode; permissions?: PermissionReport; permissionIssue?: PermissionIssue; settingsPending?: boolean;
   cliConnection?: import('./cli-connection').CliConnection;

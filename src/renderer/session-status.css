@@ -1,0 +1,5 @@
+.session-state{display:inline-flex;align-items:center;justify-content:center;gap:4px;min-width:18px;flex:none;color:#328251}
+.session-state svg{flex:none}
+.session-state.pending-approval,.session-state.failed{color:#ac702e}
+.session-unread-dot{display:block;width:8px;height:8px;border-radius:50%;background:currentColor;flex:none}
+@media(prefers-reduced-motion:reduce){.session-state .spin{animation-duration:2.5s}}
