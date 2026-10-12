@@ -67,7 +67,7 @@ async function dispatch(action: string, raw: unknown, owner: BrowserWindow): Pro
   const context = contexts.get(owner); if (!context) throw new Error('当前窗口的独立工作台尚未就绪');
   const { workbench, egress, broadcast, notice } = context;
   if (!['snapshot', 'remote.connect', 'window.new'].includes(action)) workbench.assertAccountReady();
-  const setupActions = new Set(['snapshot', 'window.new', 'content.updates', 'content.updates.read', 'content.updates.clear', 'content.updates.dismiss', 'settings.save', 'layout.sidebar', 'providers.detect', 'provider.auth', 'provider.login.cancel', 'choose.directory', 'choose.executable', 'server.identity.forget', 'remote.connect', 'remote.disconnect', 'provider.login', 'open.data', 'open.link', 'copy', 'session.stop', 'remote.manifest', 'session.history', 'handoff.read', 'egress.configure', 'egress.test']);
+  const setupActions = new Set(['snapshot', 'window.new', 'content.updates', 'content.updates.read', 'content.updates.clear', 'content.updates.dismiss', 'settings.save', 'layout.sidebar', 'providers.detect', 'provider.auth', 'provider.login.cancel', 'choose.directory', 'choose.executable', 'server.identity.forget', 'remote.connect', 'remote.disconnect', 'provider.login', 'open.data', 'open.link', 'copy', 'session.stop', 'session.completion.read', 'remote.manifest', 'session.history', 'handoff.read', 'egress.configure', 'egress.test']);
   if (!setupActions.has(action)) workbench.assertWorkspace();
   switch (action) {
     case 'snapshot': {
@@ -181,6 +181,7 @@ async function dispatch(action: string, raw: unknown, owner: BrowserWindow): Pro
     case 'subsession.report.publish': { const p = z.object({ id, sourceHash: z.string().regex(/^[a-f0-9]{64}$/), body: z.string().min(1).max(128 * 1024) }).parse(raw); return workbench.publishSubsessionReport(p.id, p.sourceHash, p.body); }
     case 'subsession.report.review': { const p = z.object({ parentId: id, childId: id, reportId: id }).parse(raw); return workbench.reviewSubsessionReport(p.parentId, p.childId, p.reportId); }
     case 'subsession.report.attach': { const p = z.object({ parentId: id, childId: id, reportId: id }).parse(raw); return workbench.attachSubsessionReport(p.parentId, p.childId, p.reportId); }
+    case 'session.completion.read': { const p = z.object({ id, completionId: z.string().uuid() }).parse(raw); return workbench.readSessionCompletion(p.id, p.completionId); }
     case 'session.rename': { const p = z.object({ id, title: z.string().trim().min(1).max(120) }).parse(raw); return workbench.renameSession(p.id, p.title); }
     case 'project.brief': return workbench.remote.projectBrief(workbench.remote.binding(z.object({ projectId: z.string() }).parse(raw).projectId));
     case 'project.brief.save': { const p = z.object({ projectId: z.string(), brief: projectBriefSchema, revision: z.number().int().nonnegative() }).parse(raw); const value = await workbench.remote.saveProjectBrief(workbench.remote.binding(p.projectId), p.brief, p.revision); await workbench.refreshGroups(); return value; }

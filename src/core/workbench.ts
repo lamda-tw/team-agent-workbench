@@ -1242,6 +1242,9 @@ export class Workbench {
     // Completion may arrive during a same-account reconnect. Preserve the result
     // internally without using the user-facing accessor, which is locked at login.
     const s = this.store.sessions.find(session => session.id === id); if (!s) return;
+    if (!this.closing && s.purpose === 'work' && !s.closedAt && !s.stoppedAt && s.status === 'idle' && !s.error) {
+      s.completion = { id: randomUUID() }; this.changed();
+    }
     if (s.nativeLive && s.purpose === 'work') { try { await this.readNativeTranscriptInto(s); } catch (error: any) { this.sessionNotice(s, '原会话记录尚未刷新：' + error.message); } if (s.provider === 'codex') await this.publishDesktopHistory(s); }
     if (s.purpose === 'prepare') {
       const draft = this.store.drafts.find(d => d.prepareSessionId === id);
@@ -1264,6 +1267,15 @@ export class Workbench {
       }
     }
     if (!this.configuring && this.ownsLocal(s.binding) && s.autoUpload && s.binding && s.purpose === 'work') { try { await this.archive(id, true); } catch (e: any) { this.sessionNotice(s, '会话自动上传未完成：' + e.message); } }
+  }
+  async readSessionCompletion(id: string, completionId: string) {
+    const s = this.session(id), completion = s.completion;
+    // A delayed acknowledgement must never clear the next turn's notification.
+    if (s.purpose !== 'work' || !completion || completion.id !== completionId || completion.readAt) return false;
+    completion.readAt = new Date().toISOString();
+    try { await this.store.save(); }
+    catch (error) { delete completion.readAt; throw error; }
+    this.broadcast(); return true;
   }
   async stop(id: string) {
     const s = this.session(id);
