@@ -12,6 +12,7 @@ import { projectBriefMarkdown } from '../shared/project-brief';
 import { assignmentMarkdown, assignmentCreateSchema, type AssignmentCreate } from '../shared/assignments';
 import { AssignmentUploads } from './assignment-uploads';
 import fs from 'node:fs/promises';
+import { watch, type FSWatcher } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -29,7 +30,7 @@ import { isProjectOrganizationDraft, organizationRefusal, projectOrganizationBod
 import { selectedPreparationDirections, type PreparationDirections } from '../shared/preparation-directions';
 import { SharedFiles } from './shared-files';
 import { TransferQueue } from './transfers';
-import { AgentRuntime } from './agents';
+import { AgentRuntime, clearStoppedNativeFork } from './agents';
 import { ClaudeRuntime } from './claude-runtime';
 import { prepareCodexStorage } from './codex-storage';
 import type { McpMutation } from '../shared/mcp';
@@ -37,7 +38,7 @@ import { CursorMcp } from './cursor-mcp';
 import type { SessionMode } from '../shared/session-mode';
 import { listNativeSessions as listProviderSessions, nativeRecordAllowed, resolveNativeSession } from './native-sessions';
 import { publishToNativeList } from './native-publish';
-import { applyNativeTranscript, readCodexTranscript, readCursorTranscript } from './native-transcript';
+import { applyNativeTranscript, nativeTranscriptChanged, readCodexTranscript, readCursorTranscript, sameNativePath } from './native-transcript';
 import { sessionContext } from './session-context';
 import { isProtectedSessionSource, isRemovableSessionReference, sessionWithAvailableReferences } from '../shared/session-result-references';
 import { reconcileTeamResultReferences } from './session-result-references';
@@ -77,6 +78,12 @@ export class Workbench {
   private deletingDrafts = new Set<string>();
   private deletingSharedContent = new Set<string>();
   private timer?: NodeJS.Timeout; private eventWrites = new Map<string, Promise<void>>();
+  private nativeSyncTimer?: NodeJS.Timeout;
+  private nativeSyncFlush?: NodeJS.Timeout;
+  private nativeSyncQueued = false;
+  private nativeSyncReading = false;
+  private nativeSyncPending = new Set<string>();
+  private nativeSyncState = new Map<string, { file: string; watcher?: FSWatcher; signature?: string }>();
   private publishingConclusions = new Set<string>();
   private edits: Promise<unknown> = Promise.resolve();
   private unsavedEdits = new Map<string, () => Promise<unknown>>();
@@ -146,6 +153,7 @@ export class Workbench {
       session.networkRoute ??= this.store.settings.egress?.enabled ? 'management' : 'direct';
       // CLI processes do not survive an app restart; the saved choice is already effective.
       delete session.settingsPending;
+      clearStoppedNativeFork(session);
     }
     // Older versions saved prepared results automatically. Preserve those records
     // without creating new personal results from drafts during startup.
@@ -158,6 +166,7 @@ export class Workbench {
     }
     linkConclusionPublications(this.store.conclusions, this.store.drafts, this.store.transfers);
     await this.store.save(); await this.restoreLocalWorkspace(); await this.detect();
+    this.ensureNativeTranscriptSync();
   }
   async restoreLocalWorkspace() {
     const settings = this.store.settings;
@@ -1275,11 +1284,14 @@ export class Workbench {
     if (runtime) await runtime.close();
     this.deferredSettings.delete(id); s.settingsPending = undefined; s.permissions = undefined;
     s.status = 'idle'; s.approvals = []; await this.store.save(); this.broadcast();
+    this.ensureNativeTranscriptSync();
   }
   async reopenSession(id: string) {
     const s = this.session(id); if (s.purpose !== 'work') throw new Error('此任务不是工作会话');
     if (this.sending.has(id) || this.stoppingSessions.has(id)) throw new Error('正在停止此会话，请稍后重新打开');
-    s.closedAt = undefined; await this.store.save(); this.broadcast(); return s;
+    s.closedAt = undefined; await this.store.save(); this.broadcast();
+    this.ensureNativeTranscriptSync();
+    return s;
   }
   async listNativeSessions(provider: 'codex' | 'cursor') {
     this.assertWorkspace();
@@ -1287,15 +1299,117 @@ export class Workbench {
     for (const session of this.store.sessions) if (session.provider === provider && session.nativeId && this.ownsLocal(session.binding)) linked.set(session.nativeId, session.id);
     return listProviderSessions(provider, linked);
   }
-  private async readNativeTranscriptInto(session: AgentSession) {
-    if (!session.nativeLive || !session.nativePath || ['starting', 'running', 'approval'].includes(session.status)) return session;
-    if (session.provider !== 'codex' && session.provider !== 'cursor') return session;
+  private nativeTranscriptFile(session: AgentSession) {
+    if (!session.nativeLive || session.closedAt || session.purpose !== 'work' || !session.nativePath) return;
+    if (session.provider === 'codex' && nativeRecordAllowed('codex', session.nativePath)) return session.nativePath;
+    if (session.provider === 'cursor' && nativeRecordAllowed('cursor', session.nativePath)) return path.join(session.nativePath, 'store.db');
+  }
+  private nativeTranscriptKey(file: string) {
+    const resolved = path.resolve(file.replace(/^\\\\\?\\/, ''));
+    return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+  }
+  private nativeTranscriptBlocked(session: AgentSession) {
+    return ['starting', 'running', 'approval'].includes(session.status) || this.sending.has(session.id) || this.stoppingSessions.has(session.id);
+  }
+  private ensureNativeTranscriptSync() {
+    if (this.closing) return;
+    const files = new Map<string, string>();
+    for (const session of this.store.sessions) {
+      const file = this.nativeTranscriptFile(session);
+      if (file) files.set(this.nativeTranscriptKey(file), file);
+    }
+    for (const [key, state] of this.nativeSyncState) if (!files.has(key)) { state.watcher?.close(); this.nativeSyncState.delete(key); }
+    if (!files.size) { this.stopNativeTranscriptSync(); return; }
+    for (const [key, file] of files) {
+      const state = this.nativeSyncState.get(key);
+      if (state) state.file = file; else this.nativeSyncState.set(key, { file });
+    }
+    if (!this.nativeSyncTimer) this.nativeSyncTimer = setInterval(() => void this.pollNativeTranscripts(), 150);
+    void this.pollNativeTranscripts();
+  }
+  private stopNativeTranscriptSync() {
+    clearInterval(this.nativeSyncTimer); this.nativeSyncTimer = undefined;
+    clearTimeout(this.nativeSyncFlush); this.nativeSyncFlush = undefined;
+    this.nativeSyncQueued = false; this.nativeSyncPending.clear();
+    for (const state of this.nativeSyncState.values()) state.watcher?.close();
+    this.nativeSyncState.clear();
+  }
+  private armNativeTranscriptWatch(key: string, file: string) {
+    const state = this.nativeSyncState.get(key);
+    if (!state || state.watcher || this.closing) return;
+    try {
+      const watcher = watch(file, { persistent: true }, () => this.queueNativeTranscript(file));
+      watcher.on('error', () => { watcher.close(); if (this.nativeSyncState.get(key)?.watcher === watcher) this.nativeSyncState.get(key)!.watcher = undefined; });
+      state.watcher = watcher;
+    } catch { /* The file can be missing or locked. The short poll retries. */ }
+  }
+  private queueNativeTranscript(file: string) {
+    if (this.closing || !file) return;
+    this.nativeSyncPending.add(file);
+    if (this.nativeSyncQueued) return;
+    this.nativeSyncQueued = true;
+    this.nativeSyncFlush = setTimeout(() => { this.nativeSyncFlush = undefined; void this.flushNativeTranscripts(); }, 40);
+  }
+  private async pollNativeTranscripts() {
+    if (this.closing) return;
+    for (const [key, state] of this.nativeSyncState) {
+      if (this.closing || !this.nativeSyncState.has(key)) return;
+      const stat = await fs.stat(state.file).catch(() => undefined);
+      if (this.closing || !this.nativeSyncState.has(key) || !stat?.isFile()) continue;
+      this.armNativeTranscriptWatch(key, state.file);
+      const signature = stat.size + ':' + Math.trunc(stat.mtimeMs);
+      if (state.signature === signature) continue;
+      const sessions = this.store.sessions.filter(session => { const watched = this.nativeTranscriptFile(session); return !!watched && sameNativePath(watched, state.file); });
+      if (sessions.some(session => this.nativeTranscriptBlocked(session))) continue;
+      this.queueNativeTranscript(state.file);
+    }
+  }
+  private async flushNativeTranscripts() {
+    this.nativeSyncQueued = false;
+    const files = [...this.nativeSyncPending];
+    this.nativeSyncPending.clear();
+    if (this.closing || !files.length) return;
+    if (this.nativeSyncReading) { for (const file of files) this.nativeSyncPending.add(file); this.queueNativeTranscript(files[0]); return; }
+    this.nativeSyncReading = true;
+    try {
+      let changed = false;
+      for (const file of files) {
+        if (this.closing) return;
+        const sessions = this.store.sessions.filter(session => { const watched = this.nativeTranscriptFile(session); return !!watched && sameNativePath(watched, file); });
+        if (!sessions.length || sessions.some(session => this.nativeTranscriptBlocked(session))) continue;
+        const before = await fs.stat(file).catch(() => undefined);
+        let read = true;
+        for (const session of sessions) {
+          try { if (await this.readNativeTranscriptInto(session, false)) changed = true; }
+          catch { read = false; }
+        }
+        const after = await fs.stat(file).catch(() => undefined);
+        const state = [...this.nativeSyncState.values()].find(item => sameNativePath(item.file, file));
+        if (read && state && after) state.signature = after.size + ':' + Math.trunc(after.mtimeMs);
+        if (before && after && (before.size !== after.size || Math.trunc(before.mtimeMs) !== Math.trunc(after.mtimeMs))) this.queueNativeTranscript(file);
+      }
+      if (changed) this.changed();
+    } finally {
+      this.nativeSyncReading = false;
+      if (this.nativeSyncPending.size && !this.nativeSyncQueued) this.queueNativeTranscript([...this.nativeSyncPending][0]);
+    }
+  }
+  private async readNativeTranscriptInto(session: AgentSession, persist = true) {
+    if (!session.nativeLive || !session.nativePath || this.nativeTranscriptBlocked(session)) return false;
+    if (session.provider !== 'codex' && session.provider !== 'cursor') return false;
     if (!nativeRecordAllowed(session.provider, session.nativePath)) throw new Error(session.provider === 'codex' ? 'Codex 关联只能读取 Codex 自己的会话记录' : 'Cursor 关联只能读取 Cursor 自己的会话记录');
     const parsed = session.provider === 'codex' ? await readCodexTranscript(session.nativePath) : readCursorTranscript(session.nativePath);
-    session.messages = applyNativeTranscript(session.messages, parsed);
-    await this.store.save(); this.broadcast(); return session;
+    const next = applyNativeTranscript(session.messages, parsed);
+    if (!nativeTranscriptChanged(session.messages, next)) return false;
+    session.messages = next;
+    if (persist) { await this.store.save(); this.broadcast(); }
+    return true;
   }
-  async refreshNativeTranscript(id: string) { return this.readNativeTranscriptInto(this.session(id)); }
+  async refreshNativeTranscript(id: string) {
+    const session = this.session(id);
+    await this.readNativeTranscriptInto(session);
+    return session;
+  }
   async linkNativeSession(provider: 'codex' | 'cursor', nativeId: string, projectId: string) {
     return this.linkNativeSessions(provider, [nativeId], projectId).then(sessions => sessions[0]);
   }
@@ -1328,6 +1442,7 @@ export class Workbench {
         catch (error: any) { session.error = error.message; await this.store.save(); this.broadcast(); }
         sessions.push(session);
       }
+      this.ensureNativeTranscriptSync();
       return sessions;
     }, false);
   }
@@ -1340,6 +1455,7 @@ export class Workbench {
     const published = await publishToNativeList(session, path.join(this.store.root, 'codex-home'));
     session.nativeId = published.nativeId; session.nativePath = published.nativePath; session.nativeLive = true;
     delete session.codexStorage; delete session.codexNeedsRegistration;
+    this.ensureNativeTranscriptSync();
     if (published.replaceTranscript) try { await this.readNativeTranscriptInto(session); }
     catch (error: any) { session.error = error.message; }
     await this.store.save(); this.broadcast(); return session;
@@ -2269,5 +2385,5 @@ export class Workbench {
   async flushEdits() { await this.edits.catch(() => {}); for (const [key, fn] of this.unsavedEdits) { await fn(); if (this.unsavedEdits.get(key) === fn) this.unsavedEdits.delete(key); } await this.store.save(); }
   listDirections() { return this.remote.memberDirections(); }
   saveDirections(directions: unknown) { return this.remote.memberDirections(directions); }
-  async close() { this.closing = true; for (const timer of this.trajectoryTimers.values()) clearTimeout(timer); this.trajectoryTimers.clear(); await Promise.allSettled(this.archiving.values()); clearTimeout(this.timer); this.timer = undefined; try { await this.flushEdits(); } catch (error) { this.closing = false; this.changed(); throw error; } this.closing = true; for (const timer of this.preparationTimers.values()) clearTimeout(timer); this.preparationTimers.clear(); for (const job of this.catalogJobs.values()) job.controller.abort(); await Promise.allSettled([...this.catalogJobs.values()].map(job => job.promise)); await this.accounts.close(); await this.accountSync.close(); const interrupted = this.store.sessions.filter(s => s.purpose === 'work' && !s.closedAt && ['starting', 'running', 'approval'].includes(s.status) && !s.stoppedAt); await Promise.all([...this.runtimes.values()].map(runtime => runtime.close())); this.remote.disconnect(); for (const s of interrupted) { s.status = 'error'; s.error = '应用关闭时任务尚未完成，已中断；可检查已有结果后继续发送。'; } await Promise.all(this.eventWrites.values()); await this.store.save(); }
+  async close() { this.closing = true; this.stopNativeTranscriptSync(); for (const timer of this.trajectoryTimers.values()) clearTimeout(timer); this.trajectoryTimers.clear(); await Promise.allSettled(this.archiving.values()); clearTimeout(this.timer); this.timer = undefined; try { await this.flushEdits(); } catch (error) { this.closing = false; this.changed(); throw error; } this.closing = true; for (const timer of this.preparationTimers.values()) clearTimeout(timer); this.preparationTimers.clear(); for (const job of this.catalogJobs.values()) job.controller.abort(); await Promise.allSettled([...this.catalogJobs.values()].map(job => job.promise)); await this.accounts.close(); await this.accountSync.close(); const interrupted = this.store.sessions.filter(s => s.purpose === 'work' && !s.closedAt && ['starting', 'running', 'approval'].includes(s.status) && !s.stoppedAt); await Promise.all([...this.runtimes.values()].map(runtime => runtime.close())); this.remote.disconnect(); for (const s of interrupted) { s.status = 'error'; s.error = '应用关闭时任务尚未完成，已中断；可检查已有结果后继续发送。'; } await Promise.all(this.eventWrites.values()); await this.store.save(); }
 }

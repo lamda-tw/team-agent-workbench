@@ -117,6 +117,14 @@ export function readCursorTranscript(directory: string): Message[] {
   } finally { db.close(); }
 }
 
+export function nativeTranscriptChanged(existing: Message[], next: Message[]) {
+  if (existing.length !== next.length) return true;
+  return existing.some((message, index) => {
+    const other = next[index];
+    return message.id !== other.id || message.role !== other.role || message.text !== other.text || message.userText !== other.userText;
+  });
+}
+
 export function applyNativeTranscript(existing: Message[], parsed: Message[]) {
   if (!parsed.length) return existing;
   const nativeCount = existing.filter(message => message.id.startsWith('native:')).length;

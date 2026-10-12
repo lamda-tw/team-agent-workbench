@@ -3,8 +3,10 @@ import path from 'node:path';
 import os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { DatabaseSync } from 'node:sqlite';
 import type { AgentSession } from '../shared/types';
 import type { JsonRpc } from './rpc';
+import { sameNativePath } from './native-transcript';
 
 export interface CodexStorage { home: string; sourceHome: string; args: string[]; env: NodeJS.ProcessEnv; resumePath?: string; }
 const inside = (root: string, file: string) => { const rel = path.relative(root, file); return !!rel && !path.isAbsolute(rel) && rel !== '..' && !rel.startsWith('..' + path.sep); };
@@ -67,6 +69,27 @@ export async function findCodexRollout(home: string, id: string) {
   return await locateRollout(path.join(home, 'sessions'), id) || await locateRollout(path.join(home, 'archived_sessions'), id);
 }
 
+async function releaseIsolatedNativeCopy(home: string, id: string, resumePath: string) {
+  for (const dir of ['sessions', 'archived_sessions']) {
+    const copy = await locateRollout(path.join(home, dir), id);
+    if (copy && !sameNativePath(copy, resumePath)) await fs.rm(copy, { force: true });
+  }
+  for (const directory of [path.join(home, 'sqlite'), home]) {
+    const names = (await fs.readdir(directory).catch((error: any) => { if (error.code === 'ENOENT') return [] as string[]; throw error; })).filter(name => /^state_\d+\.sqlite$/.test(name));
+    for (const name of names) {
+      const file = path.join(directory, name);
+      let db: DatabaseSync;
+      try { db = new DatabaseSync(file, { timeout: 1500 }); }
+      catch (error: any) { throw new Error('隔离会话索引正被占用，请先停掉用户端的 Codex 后再继续：' + (error?.message || error)); }
+      try {
+        const columns = db.prepare('PRAGMA table_info(threads)').all() as { name: string }[];
+        if (!columns.some(column => column.name === 'rollout_path')) continue;
+        db.prepare('UPDATE threads SET rollout_path = ? WHERE id = ?').run(resumePath, id);
+      } finally { db.close(); }
+    }
+  }
+}
+
 export async function refreshCodexConfiguration({ home, sourceHome }: Pick<CodexStorage, 'home' | 'sourceHome'>) {
   const previous = jobs.get(home) || Promise.resolve();
   const job = previous.catch(() => {}).then(() => initialize(home, sourceHome)); jobs.set(home, job);
@@ -82,6 +105,9 @@ export async function prepareCodexStorage(root: string, session: AgentSession, s
     if (!session.nativeId || !/^[a-f0-9-]{36}$/i.test(session.nativeId)) throw new Error('原会话标识无效，无法恢复上下文');
     resumePath = await findCodexRollout(sourceHome, session.nativeId);
     if (!resumePath) throw new Error('找不到原会话记录，无法恢复上下文；请恢复原 Codex 会话文件后重试');
+    // An earlier resume may have left the same thread id pointing at a private copy.
+    // Drop that copy so the next resume continues the personal rollout.
+    await releaseIsolatedNativeCopy(home, session.nativeId, resumePath);
   }
   // Account migration copies each owned rollout, not another account's SQLite index.
   // Resume by its explicit file so the CLI can register it in the new private index.
