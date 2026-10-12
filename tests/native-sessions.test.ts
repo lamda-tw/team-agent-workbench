@@ -223,8 +223,10 @@ test('linking a Codex session keeps its project name and reads the original reco
 test('a linked Codex session follows later writes to the original rollout', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'wb-native-follow-'));
   const previous = process.env.CODEX_HOME;
-  let broadcasts = 0;
-  const wb = new Workbench(path.join(root, 'data'), () => { broadcasts += 1; }, () => {});
+  let broadcasts = 0, publishedReply = '';
+  const wb: Workbench = new Workbench(path.join(root, 'data'), () => {
+    broadcasts += 1; publishedReply = wb.store.sessions.find(session => session.nativeId === codexId)?.messages.at(-1)?.text || '';
+  }, () => {});
   const waitFor = async (check: () => boolean, timeoutMs = 3000) => {
     const started = Date.now();
     while (!check()) {
@@ -256,7 +258,8 @@ test('a linked Codex session follows later writes to the original rollout', asyn
     linked.status = 'idle';
     assert.equal(await waitFor(() => linked.messages.some(message => message.text === '还在运行时写入')), true);
     await fs.appendFile(file, line('a2', '桌面端新回复', 1700000002000));
-    assert.equal(await waitFor(() => linked.messages.some(message => message.text === '桌面端新回复')), true);
+    // The in-memory messages change before the filesystem checks and UI broadcast finish.
+    assert.equal(await waitFor(() => publishedReply === '桌面端新回复'), true);
     const settled = broadcasts;
     await new Promise(resolve => setTimeout(resolve, 500));
     assert.equal(broadcasts, settled);
