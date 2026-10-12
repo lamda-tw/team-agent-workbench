@@ -1297,40 +1297,39 @@ export class Workbench {
   }
   async refreshNativeTranscript(id: string) { return this.readNativeTranscriptInto(this.session(id)); }
   async linkNativeSession(provider: 'codex' | 'cursor', nativeId: string, projectId: string) {
+    return this.linkNativeSessions(provider, [nativeId], projectId).then(sessions => sessions[0]);
+  }
+  private async nativeImportSource(provider: 'codex' | 'cursor', nativeId: string) {
     this.assertWorkspace();
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(nativeId)) throw new Error('原会话标识无效');
-    const existing = this.store.sessions.find(session => session.provider === provider && session.nativeId === nativeId && this.ownsLocal(session.binding));
-    if (existing) {
-      if (existing.closedAt) await this.reopenSession(existing.id);
-      if (existing.nativeLive) await this.readNativeTranscriptInto(existing);
-      return existing;
-    }
+    const existing = this.store.sessions.find(session => session.provider === provider && session.nativeId?.toLowerCase() === nativeId.toLowerCase() && this.ownsLocal(session.binding));
+    if (existing) throw new Error('「' + existing.title + '」已在工作台，请从工作会话列表打开；不能重复导入');
     const source = await resolveNativeSession(provider, nativeId);
     if (!source || !nativeRecordAllowed(provider, source.nativePath)) throw new Error(provider === 'codex' ? '找不到这条 Codex 会话，请刷新列表后再选' : '找不到这条 Cursor 会话，请刷新列表后再选');
-    if (!source.cwd) throw new Error('这条会话没有工作目录，无法在工作台打开');
-    if (!(await fs.stat(source.cwd).catch(() => undefined))?.isDirectory()) throw new Error('这条会话的工作目录已经不在：' + source.cwd);
-    const session = await this.createSession(provider, source.cwd, projectId, 'work', undefined, source.model, 'inherit', false);
-    session.title = source.name; session.nativeId = nativeId; session.nativeLive = true; session.nativePath = source.nativePath;
-    try { await this.readNativeTranscriptInto(session); }
-    catch (error: any) { session.error = error.message; await this.store.save(); this.broadcast(); }
-    return session;
+    if (!source.cwd) throw new Error('「' + source.name + '」没有工作目录，无法在工作台打开');
+    if (!(await fs.stat(source.cwd).catch(() => undefined))?.isDirectory()) throw new Error('「' + source.name + '」的工作目录已经不在');
+    return source;
   }
   async linkNativeSessions(provider: 'codex' | 'cursor', nativeIds: string[], projectId: string) {
-    this.assertWorkspace();
-    const ids = [...new Set(nativeIds)];
-    if (!ids.length) throw new Error('请选择要导入的会话');
-    if (ids.length > 50) throw new Error('一次最多导入 50 条会话');
-    for (const nativeId of ids) {
-      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(nativeId)) throw new Error('原会话标识无效');
-      if (this.store.sessions.some(session => session.provider === provider && session.nativeId === nativeId && this.ownsLocal(session.binding))) continue;
-      const source = await resolveNativeSession(provider, nativeId);
-      if (!source || !nativeRecordAllowed(provider, source.nativePath)) throw new Error(provider === 'codex' ? '找不到这条 Codex 会话，请刷新列表后再选' : '找不到这条 Cursor 会话，请刷新列表后再选');
-      if (!source.cwd) throw new Error('「' + source.name + '」没有工作目录，无法在工作台打开');
-      if (!(await fs.stat(source.cwd).catch(() => undefined))?.isDirectory()) throw new Error('「' + source.name + '」的工作目录已经不在');
-    }
-    const sessions = [];
-    for (const nativeId of ids) sessions.push(await this.linkNativeSession(provider, nativeId, projectId));
-    return sessions;
+    // Recheck membership after waiting: two windows must not import the same chat.
+    // Validate all selected records before creating any sessions, including closed chats.
+    return this.edit('native-import', async () => {
+      this.assertWorkspace();
+      const ids = [...new Set(nativeIds.map(id => id.toLowerCase()))];
+      if (!ids.length) throw new Error('请选择要导入的会话');
+      if (ids.length > 50) throw new Error('一次最多导入 50 条会话');
+      const sources = [];
+      for (const nativeId of ids) sources.push(await this.nativeImportSource(provider, nativeId));
+      const sessions = [];
+      for (const source of sources) {
+        const session = await this.createSession(provider, source.cwd, projectId, 'work', undefined, source.model, 'inherit', false);
+        session.title = source.name; session.nativeId = source.nativeId; session.nativeLive = true; session.nativePath = source.nativePath;
+        try { await this.readNativeTranscriptInto(session); }
+        catch (error: any) { session.error = error.message; await this.store.save(); this.broadcast(); }
+        sessions.push(session);
+      }
+      return sessions;
+    }, false);
   }
   async publishToDesktop(id: string) {
     const session = this.session(id);

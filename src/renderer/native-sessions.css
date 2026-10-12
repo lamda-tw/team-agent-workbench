@@ -1,0 +1,11 @@
+.native-session-layout{display:grid;grid-template-columns:minmax(150px,220px) minmax(0,1fr);gap:18px}
+.native-project-nav{display:flex;flex-direction:column;gap:5px;max-height:52vh;overflow:auto;padding:5px 10px 5px 0;border-right:1px solid #e4e9ee}
+.native-project-nav button{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;border:0;text-align:left;background:transparent;padding:10px;border-radius:7px}
+.native-project-nav button.selected{background:#e7f2ef;color:#17705d;font-weight:650}
+.native-project-nav button span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.native-project-nav button small{color:#6b7d87;font-weight:400}
+.native-session-main{min-width:0}.native-session-main .native-session-list{max-height:47vh}
+.native-session-group h3 small{color:#6b7d87;font-size:12px;font-weight:400;margin-left:auto}
+.native-session-modal .native-session-list button.native-session-row:disabled{cursor:default}
+.native-session-modal .native-session-row.linked:disabled small{color:#718779}
+@media(max-width:650px){.native-session-layout{grid-template-columns:1fr}.native-project-nav{flex-direction:row;max-height:none;overflow:auto;border-right:0;border-bottom:1px solid #e4e9ee;padding:0 0 8px}.native-project-nav button{width:auto;flex-shrink:0;max-width:180px}.native-session-main .native-session-list{max-height:40vh}}

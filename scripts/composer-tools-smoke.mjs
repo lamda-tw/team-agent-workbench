@@ -42,6 +42,27 @@ try {
   await page.goto(pathToFileURL(path.join(out, 'index.html')).href);
   const input = page.getByLabel('任务输入'), plus = page.getByRole('button', { name: '添加内容或工具', exact: true });
   await expect(plus).toBeVisible(); await expect(page.getByRole('button', { name: '选择 Skill 和插件' })).toHaveCount(0);
+  const verifyModeMenu = async () => {
+    for (const width of [1050, 600]) {
+      await page.setViewportSize({ width, height: 800 });
+      await page.getByLabel('选择对话模式', { exact: true }).click();
+      const modeMenu = page.getByRole('dialog', { name: '对话模式', exact: true });
+      await expect(modeMenu.getByRole('button', { name: /Plan/ })).toBeVisible();
+      const geometry = await modeMenu.evaluate(element => {
+        const lines = node => { const range = document.createRange(); range.selectNodeContents(node); return range.getClientRects().length; };
+        return { width: element.getBoundingClientRect().width, headingLines: lines(element.querySelector('header strong')),
+          nameLines: [...element.querySelectorAll('.setting-option>span')].map(span => lines(span.firstChild)),
+          descriptions: [...element.querySelectorAll('.setting-option small')].map(small => small.getBoundingClientRect().height / Number.parseFloat(getComputedStyle(small).lineHeight)) };
+      });
+      assert(geometry.width >= 250, 'mode menu must not collapse to the width of its trigger');
+      assert.equal(geometry.headingLines, 1, 'mode menu heading must stay horizontal');
+      assert(geometry.nameLines.every(lines => lines === 1), 'Agent, Plan and Ask names must stay on one line');
+      assert(geometry.descriptions.every(lines => lines <= 3), 'mode descriptions must not wrap one character per line');
+      await page.keyboard.press('Escape'); await expect(modeMenu).toHaveCount(0);
+    }
+    await page.setViewportSize({ width: 1050, height: 800 });
+  };
+  await verifyModeMenu();
   await input.fill('/mcp'); await input.press('Enter');
   const mcp = page.getByRole('dialog', { name: 'MCP 服务器', exact: true });
   await expect(mcp).toBeVisible(); await expect(input).toHaveValue(''); assert.equal(await page.evaluate(()=>window.sent.length),0);
@@ -73,6 +94,7 @@ try {
   await input.fill('保留草稿'); await input.press('Shift+Tab'); await expect(page.getByLabel('选择对话模式')).toContainText('Plan'); await expect(input).toHaveValue('保留草稿');
   await input.fill('/plan'); await input.press('Enter'); await expect(page.getByLabel('选择对话模式')).toContainText('Agent'); assert(!await page.evaluate(()=>window.sent.some(item=>item.text==='/plan')));
   await page.getByRole('button',{name:'模拟 Cursor',exact:true}).click();
+  await verifyModeMenu();
   await input.fill('/rev'); await expect(page.getByRole('option').filter({hasText:'代码检查'})).toBeVisible(); await input.press('Tab'); await expect(page.getByLabel('已选择能力')).toContainText('代码检查');
   await input.fill('@rev'); await expect(page.getByRole('dialog',{name:'选择 Skill',exact:true})).toBeVisible(); await input.press('Escape');
   await input.fill('/ask'); await input.press('Enter'); await expect(page.getByLabel('选择对话模式')).toContainText('Ask');

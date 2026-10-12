@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { DatabaseSync } from 'node:sqlite';
@@ -11,7 +12,7 @@ import { Workbench } from '../src/core/workbench';
 import { prepareCodexStorage } from '../src/core/codex-storage';
 import { listNativeSessions, nativeRecordAllowed } from '../src/core/native-sessions';
 import { applyNativeTranscript, readCodexTranscript, sameNativePath } from '../src/core/native-transcript';
-import { firstSelectableNativeSession, NativeSessionBrowser, NativeSessionPicker, nextNativeGroupSelection, nextNativeSelection } from '../src/renderer/native-sessions';
+import { firstSelectableNativeSession, NativeSessionBrowser, NativeSessionPicker, nativeSessionsInGroup, nextNativeGroupSelection, nextNativeSelection } from '../src/renderer/native-sessions';
 import type { AgentSession, Message } from '../src/shared/types';
 import { grantTestWorkspace, offlineProjectId } from './fixtures/offline-workspace';
 
@@ -66,6 +67,65 @@ test('native session names follow Codex project groups and Cursor workspace titl
       const catalog = await listNativeSessions('cursor');
       assert.deepEqual(catalog.groups.map(group => group.name), ['C:\\Users\\me', 'C:\\windows\\system32']);
       assert.deepEqual(catalog.sessions.map(session => session.name).sort(), ['Hello There', 'Team Agent Workbench']);
+    });
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
+
+test('Codex projects follow desktop membership during migration, then unambiguous workspace roots', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'wb-native-projects-'));
+  const home = path.join(root, 'codex'), workspace = path.join(root, 'workspace'), nested = path.join(workspace, 'nested');
+  const ids = Array.from({ length: 8 }, () => randomUUID());
+  try {
+    await fs.mkdir(path.join(home, 'sessions'), { recursive: true });
+    await fs.mkdir(nested, { recursive: true });
+    for (const id of ids) await fs.writeFile(path.join(home, 'sessions', 'rollout-' + id + '.jsonl'), '{}\n');
+    const db = new DatabaseSync(path.join(home, 'state_5.sqlite'));
+    db.exec(`CREATE TABLE projects (id TEXT, name TEXT, position INTEGER);
+      CREATE TABLE project_roots (project_id TEXT, path TEXT);
+      CREATE TABLE project_idempotency_keys (key TEXT, project_id TEXT);
+      CREATE TABLE thread_sections (id TEXT, name TEXT);
+      CREATE TABLE threads (id TEXT, name TEXT, title TEXT, first_user_message TEXT, cwd TEXT, project_id TEXT, thread_section_id TEXT, archived INTEGER, recency_at_ms INTEGER, model TEXT);`);
+    const project = db.prepare('INSERT INTO projects VALUES (?, ?, ?)');
+    project.run('project-a', '项目甲', 0); project.run('project-b', '项目乙', 1); project.run('project-c', '共享目录项目', 2);
+    const roots = db.prepare('INSERT INTO project_roots VALUES (?, ?)');
+    roots.run('project-a', workspace); roots.run('project-b', nested); roots.run('project-c', workspace);
+    db.prepare('INSERT INTO project_idempotency_keys VALUES (?, ?)').run('legacy-c', 'project-c');
+    const thread = db.prepare('INSERT INTO threads VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    const formattedNested = process.platform === 'win32' ? '\\\\?\\' + nested.toUpperCase() + '\\' : nested;
+    thread.run(ids[0], '迁移中的会话', '', '', workspace, null, null, 0, 10, null);
+    thread.run(ids[1], '子目录会话', '', '', formattedNested, null, null, 0, 9, null);
+    thread.run(ids[2], '同目录多个项目', '', '', workspace, null, null, 0, 8, null);
+    thread.run(ids[3], '明确无项目', '', '', nested, null, null, 0, 7, null);
+    thread.run(ids[4], '索引已有归属', '', '', nested, 'project-a', null, 0, 6, null);
+    thread.run(ids[5], '只有桌面旧项目', '', '', root, null, null, 0, 5, null);
+    thread.run(ids[6], '已删除的项目归属', '', '', nested, null, null, 0, 4, null);
+    thread.run(ids[7], '通过幂等键迁移', '', '', workspace, null, null, 0, 3, null);
+    db.close();
+    const desktop = {
+      'local-projects': { 'legacy-a': { name: '项目甲', rootPaths: [workspace] }, 'legacy-c': { name: '共享目录项目', rootPaths: [workspace] }, 'legacy-only': { name: '旧版桌面项目', rootPaths: [] } },
+      'project-order': ['legacy-only', 'legacy-c', 'legacy-a'],
+      'app-server-project-id-by-legacy-project-id-by-host': { ['remote:' + home]: { 'legacy-a': 'project-b' }, ['local:' + home]: { 'legacy-a': 'project-a' } },
+      'thread-project-assignments': { [ids[0]]: { projectKind: 'local', projectId: 'legacy-a' }, [ids[5]]: { projectKind: 'local', projectId: 'legacy-only' }, [ids[6]]: { projectKind: 'local', projectId: 'deleted' }, [ids[7]]: { projectKind: 'local', projectId: 'legacy-c' } },
+      'projectless-thread-ids': [ids[3]],
+    };
+    const state = path.join(home, '.codex-global-state.json'), bytes = JSON.stringify(desktop);
+    await fs.writeFile(state, bytes);
+    await withEnv('CODEX_HOME', home, async () => {
+      const catalog = await listNativeSessions('codex'), indexed = new Map(catalog.sessions.map(session => [session.nativeId, session]));
+      assert.equal(indexed.get(ids[0])?.groupId, 'project-a');
+      assert.equal(indexed.get(ids[1])?.groupId, 'project-b', 'deepest root matches extended/case-insensitive Windows paths');
+      assert.equal(indexed.get(ids[2])?.groupId, undefined, 'shared roots must not choose a project arbitrarily');
+      assert.equal(indexed.get(ids[3])?.groupId, undefined, 'explicit projectless membership overrides root matching');
+      assert.equal(indexed.get(ids[4])?.groupId, 'project-a', 'native membership overrides root inference');
+      assert.equal(indexed.get(ids[5])?.groupId, 'legacy-only');
+      assert.equal(indexed.get(ids[6])?.groupId, undefined);
+      assert.equal(indexed.get(ids[7])?.groupId, 'project-c');
+      assert.equal(catalog.groups.filter(group => group.name === '项目甲').length, 1, 'migration aliases must not duplicate project groups');
+      assert.equal(catalog.groups[0].name, '旧版桌面项目');
+      assert.equal(await fs.readFile(state, 'utf8'), bytes, 'listing never changes desktop membership');
+      await fs.writeFile(state, 'invalid JSON');
+      const fallback = await listNativeSessions('codex');
+      assert.equal(fallback.sessions.find(session => session.nativeId === ids[1])?.groupId, 'project-b', 'SQLite roots still work with unreadable desktop JSON');
     });
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
@@ -134,16 +194,22 @@ test('linking a Codex session keeps its project name and reads the original reco
     assert.equal(linked.nativePath, file);
     assert.equal(linked.codexStorage, undefined);
     assert.equal(linked.messages[0].text, '继续修复用户端');
-    const again = await wb.linkNativeSession('codex', codexId, offlineProjectId);
-    assert.equal(again.id, linked.id);
+    await assert.rejects(() => wb.linkNativeSession('codex', codexId, offlineProjectId), /不能重复导入/);
     assert.equal(wb.store.sessions.filter(session => session.nativeId === codexId).length, 1);
     await assert.rejects(() => wb.linkNativeSessions('codex', [looseId, pinnedId], offlineProjectId), /目录丢了/);
     assert.equal(wb.store.sessions.filter(session => session.nativeId === looseId).length, 0);
-    const imported = await wb.linkNativeSessions('codex', [codexId, looseId, codexId], offlineProjectId);
-    assert.deepEqual(imported.map(session => session.nativeId), [codexId, looseId]);
-    assert.equal(imported[0].id, linked.id);
-    assert.equal(imported[1].nativeLive, true);
-    assert.equal(imported[1].nativePath, otherFile);
+    await assert.rejects(() => wb.linkNativeSessions('codex', [looseId, codexId], offlineProjectId), /不能重复导入/);
+    assert.equal(wb.store.sessions.filter(session => session.nativeId === looseId).length, 0, 'reject stale batches before importing their new records');
+    await wb.closeSession(linked.id);
+    const closedAt = linked.closedAt;
+    await assert.rejects(() => wb.linkNativeSession('codex', codexId.toUpperCase(), offlineProjectId), /不能重复导入/);
+    assert.equal(linked.closedAt, closedAt, 'import must not reopen an existing closed session');
+    const race = await Promise.allSettled([wb.linkNativeSessions('codex', [looseId, looseId], offlineProjectId), wb.linkNativeSession('codex', looseId, offlineProjectId)]);
+    assert.equal(race.filter(result => result.status === 'fulfilled').length, 1);
+    assert.equal(race.filter(result => result.status === 'rejected').length, 1);
+    const imported = wb.store.sessions.find(session => session.nativeId === looseId)!;
+    assert.equal(imported.nativeLive, true);
+    assert.equal(imported.nativePath, otherFile);
     assert.equal(wb.store.sessions.filter(session => session.nativeId === codexId || session.nativeId === looseId).length, 2);
   } finally {
     if (previous === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = previous;
@@ -348,4 +414,19 @@ test('session picker shows Codex group and session names without inventing a gro
   assert.match(cursorPicker, /接入 Cursor 会话/);
   assert.match(cursorPicker, /Cursor 自己的工作目录和会话名/);
   assert.doesNotMatch(cursorPicker, /Codex/);
+});
+
+test('import selection excludes linked and closed workbench chats while project filtering preserves selection', () => {
+  const catalog = { provider: 'codex' as const, groups: [{ id: 'p', name: '项目甲', position: 0 }], sessions: [
+    { nativeId: 'linked', name: '已加入的会话', groupId: 'p', cwd: '', updatedAt: 20, linkedSessionId: 'closed-workbench-session' },
+    { nativeId: 'new', name: '新的会话', groupId: 'p', cwd: '', updatedAt: 10 },
+    { nativeId: 'other', name: '其他会话', cwd: '', updatedAt: 1 },
+  ] };
+  assert.equal(firstSelectableNativeSession(catalog)?.nativeId, 'new');
+  assert.deepEqual(nativeSessionsInGroup(catalog, 'p').map(session => session.nativeId), ['linked', 'new']);
+  assert.deepEqual(nativeSessionsInGroup(catalog, '__ungrouped__').map(session => session.nativeId), ['other']);
+  const html = renderToStaticMarkup(React.createElement(NativeSessionBrowser, { catalog, groupId: 'p', selectedIds: ['linked', 'new'], onChange: () => {} }));
+  const linked = [...html.matchAll(/<button[\s\S]*?<\/button>/g)].find(match => match[0].includes('已加入的会话'))?.[0] || '';
+  assert.match(linked, /disabled=""/); assert.match(linked, /aria-checked="false"/); assert.match(linked, /已在工作台/);
+  assert.doesNotMatch(html, /其他会话/);
 });

@@ -21,6 +21,7 @@
     "test:codex-isolation": "tsx scripts/codex-isolation-smoke.ts",
     "test:composer-ui": "node scripts/composer-smoke.mjs",
     "test:composer-tools-ui": "node scripts/composer-tools-smoke.mjs",
+    "test:native-sessions-ui": "node scripts/native-session-import-smoke.mjs",
     "test:mcp-protocol": "tsx scripts/codex-mcp-protocol-smoke.ts",
     "test:onboarding-ui": "node scripts/project-onboarding-smoke.mjs",
     "package": "npm run build && node scripts/package.mjs",

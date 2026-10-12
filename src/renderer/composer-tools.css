@@ -16,7 +16,10 @@
 .mcp-server li{margin:10px 0;overflow-wrap:anywhere}.mcp-server li p{margin:4px 0;color:#718278;line-height:1.6}
 .mcp-form{padding:15px 0;display:grid;gap:12px}.mcp-form label{display:grid;gap:6px;font-size:12px}.mcp-form textarea{min-height:70px}
 .mcp-form details label{margin-top:10px}
-.composer-mode{position:relative}.composer-mode .composer-popover{left:0;right:auto;width:270px}
+.composer-mode{position:relative;flex:none}.composer-mode>.composer-setting{white-space:nowrap}
+.composer-mode .composer-popover{left:0;right:auto;width:270px;max-width:calc(100vw - 36px)}
+.composer-mode .composer-popover>header>strong{white-space:nowrap}
+.composer-mode .setting-option>span{overflow-wrap:normal;word-break:normal}
 .agent-customization{width:min(740px,calc(100vw - 36px));max-height:85vh}.agent-customization>.modal-body{overflow:auto}
 .mcp-embedded{overflow:auto}.mcp-embedded .mcp-panel{width:100%;max-height:none}.mcp-embedded .mcp-panel>header{padding:16px 24px}.mcp-embedded .mcp-panel>header h2{font-size:14px}.mcp-embedded footer{padding:16px 24px}
 .proposed-plan{padding:18px;border:1px solid #dce7df;border-radius:12px;background:#f8fbf9}.proposed-plan>strong{display:block;margin-bottom:12px}.proposed-plan>.row{margin-top:14px;gap:8px;flex-wrap:wrap}
