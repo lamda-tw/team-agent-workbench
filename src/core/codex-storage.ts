@@ -62,11 +62,15 @@ async function locateRollout(root: string, id: string): Promise<string | undefin
   }
 }
 
-export async function prepareCodexStorage(root: string, session: AgentSession, sourceHome = path.resolve(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'))): Promise<CodexStorage> {
-  const home = path.resolve(root, 'codex-home');
+export async function refreshCodexConfiguration({ home, sourceHome }: Pick<CodexStorage, 'home' | 'sourceHome'>) {
   const previous = jobs.get(home) || Promise.resolve();
   const job = previous.catch(() => {}).then(() => initialize(home, sourceHome)); jobs.set(home, job);
   try { await job; } finally { if (jobs.get(home) === job) jobs.delete(home); }
+}
+
+export async function prepareCodexStorage(root: string, session: AgentSession, sourceHome = path.resolve(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'))): Promise<CodexStorage> {
+  const home = path.resolve(root, 'codex-home');
+  await refreshCodexConfiguration({ home, sourceHome });
   let resumePath: string | undefined;
   // Account migration copies each owned rollout, not another account's SQLite index.
   // Resume by its explicit file so the CLI can register it in the new private index.

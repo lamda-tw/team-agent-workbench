@@ -13,6 +13,7 @@ import { assignmentMarkdown, assignmentCreateSchema, type AssignmentCreate } fro
 import { AssignmentUploads } from './assignment-uploads';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { inspectPermissions, setCursorManualReview } from './permissions';
 import type { PermissionMode } from '../shared/types';
@@ -31,6 +32,9 @@ import { TransferQueue } from './transfers';
 import { AgentRuntime } from './agents';
 import { ClaudeRuntime } from './claude-runtime';
 import { prepareCodexStorage } from './codex-storage';
+import type { McpMutation } from '../shared/mcp';
+import { CursorMcp } from './cursor-mcp';
+import type { SessionMode } from '../shared/session-mode';
 import { sessionContext } from './session-context';
 import { isProtectedSessionSource, isRemovableSessionReference, sessionWithAvailableReferences } from '../shared/session-result-references';
 import { reconcileTeamResultReferences } from './session-result-references';
@@ -787,6 +791,69 @@ export class Workbench {
     await this.requireAuth(s.provider, s.cwd, s.networkRoute);
     return (await this.runtime(s)).capabilities(forceRefresh, kind);
   }
+  private async mcpRuntime(id: string) {
+    const s = this.session(id); this.assertCanWork(s.binding);
+    if (s.closedAt || s.purpose !== 'work' || s.provider !== 'codex') throw new Error('请在打开的 Codex 工作会话中管理 MCP');
+    await this.requireAuth(s.provider, s.cwd, s.networkRoute);
+    return await this.runtime(s) as AgentRuntime;
+  }
+  private async cursorMcp(id: string) {
+    const s = this.session(id); this.assertCanWork(s.binding);
+    if (s.closedAt || s.purpose !== 'work' || s.provider !== 'cursor') throw new Error('请在打开的 Cursor 工作会话中管理 MCP');
+    const executable = await resolveProvider('cursor', this.store.settings.providerPaths.cursor);
+    return new CursorMcp(s.cwd, executable, this.providerEnvironment(s.networkRoute));
+  }
+  async toolConfiguration(id: string, kind: 'mcp' | 'skill' | 'plugin') {
+    const s = this.session(id); this.assertCanWork(s.binding);
+    if (s.closedAt || s.purpose !== 'work' || s.provider === 'claude') throw new Error('请选择打开的 Codex 或 Cursor 会话');
+    const home = s.provider === 'codex' ? path.resolve(process.env.CODEX_HOME || path.join(os.homedir(), '.codex')) : path.join(os.homedir(), '.cursor');
+    const file = kind === 'mcp' ? path.join(home, s.provider === 'codex' ? 'config.toml' : 'mcp.json') : path.join(home, kind === 'skill' ? 'skills' : 'plugins');
+    if (kind === 'mcp') { await fs.mkdir(home, { recursive: true }); try { await fs.writeFile(file, s.provider === 'codex' ? '' : '{"mcpServers":{}}\n', { flag: 'wx', mode: 0o600 }); } catch (e: any) { if (e.code !== 'EEXIST') throw e; } }
+    else await fs.mkdir(file, { recursive: true });
+    return file;
+  }
+  async configureSkill(id: string, skillId: string, enabled: boolean) {
+    const runtime = await this.mcpRuntime(id); await runtime.configureSkill(skillId, enabled);
+    const others = [...this.runtimes.values()].filter(value => value !== runtime && value instanceof AgentRuntime && value.session.provider === 'codex' && value.session.purpose === 'work');
+    await Promise.allSettled(others.map(value => (value as AgentRuntime).mcpReload(false)));
+    return true;
+  }
+  async mcpCatalog(id: string, refresh = false) {
+    if (this.session(id).provider === 'cursor') {
+      const service = await this.cursorMcp(id);
+      if (refresh) await this.refreshCursorTools();
+      return service.list();
+    }
+    const runtime = await this.mcpRuntime(id);
+    if (refresh) await runtime.mcpReload();
+    return runtime.mcpCatalog();
+  }
+  async mcpLogin(id: string, name: string) { return this.session(id).provider === 'cursor' ? (await this.cursorMcp(id)).login(name) : (await this.mcpRuntime(id)).mcpLogin(name); }
+  async mcpEditable(id: string, name: string) { return this.session(id).provider === 'cursor' ? (await this.cursorMcp(id)).editable(name) : (await this.mcpRuntime(id)).mcpEditable(name); }
+  async mcpWrite(id: string, input: McpMutation) {
+    if (this.session(id).provider === 'cursor') {
+      await (await this.cursorMcp(id)).write(input);
+      return this.refreshCursorTools();
+    }
+    const runtime = await this.mcpRuntime(id);
+    await runtime.mcpWrite(input);
+    const others = [...this.runtimes.values()].filter(value => value !== runtime && value instanceof AgentRuntime && value.session.provider === 'codex' && value.session.purpose === 'work');
+    // A saved configuration must not be reported as an unsaved failure if reload fails.
+    try { await runtime.mcpReload(); } catch { return { pendingReload: others.length + 1 }; }
+    const results = await Promise.allSettled(others.map(value => (value as AgentRuntime).mcpReload(false)));
+    return { pendingReload: results.filter(value => value.status === 'rejected').length };
+  }
+  private async refreshCursorTools() {
+    const sessions = this.store.sessions.filter(s => s.provider === 'cursor' && s.purpose === 'work' && !s.closedAt && this.runtimes.has(s.id));
+    // ACP has no hot reload. Preserve both running replies and messages being submitted.
+    const results = await Promise.allSettled(sessions.map(async s => {
+      if (s.status === 'starting') {
+        this.deferredSettings.add(s.id); s.settingsPending = true; await this.store.save(); this.broadcast();
+      } else await this.updateSessionSettings(s, () => {});
+    }));
+    // A reload failure must not present a successfully saved config as an unsaved failure.
+    return { pendingReload: sessions.filter((s, index) => s.settingsPending || results[index].status === 'rejected').length };
+  }
   assertWorkspace() { this.assertAccountReady(); if (!this.workspaceReady) throw new Error(this.remote.connected ? '还没有加入工作组，请联系管理员；未分组账号没有工作台' : '请先验证团队账号'); }
   async saveProjectDirectory(projectId: string, directory: string, contextKey: string) {
     const checkContext = () => {
@@ -896,6 +963,38 @@ export class Workbench {
     if (s.provider === 'cursor' && mode === 'auto') throw new Error('当前 Cursor 接入方式暂不支持切换 Auto-review，请选择其他模式');
     if (s.status === 'starting') throw new Error('CLI 正在启动，请启动完成后重试');
     return this.updateSessionSettings(s, () => { s.permissionMode = mode; s.permissionIssue = undefined; });
+  }
+  async modes(id: string) {
+    const s = this.session(id); this.assertCanWork(s.binding);
+    if (s.closedAt || s.purpose !== 'work' || s.provider === 'claude') throw new Error('此会话不支持模式切换');
+    await this.requireAuth(s.provider, s.cwd, s.networkRoute);
+    return (await this.runtime(s) as AgentRuntime).modes();
+  }
+  async changeMode(id: string, mode: SessionMode) {
+    const s = this.session(id); this.assertCanWork(s.binding);
+    if (this.changingSettings.has(id)) throw new Error('正在切换会话设置，请稍后重试');
+    if (s.status === 'starting' && this.sending.has(id)) throw new Error('消息正在提交，请完成后再切换模式');
+    if (!['default', 'plan', 'ask'].includes(mode)) throw new Error('无效会话模式');
+    const catalog = await this.modes(id);
+    if (s.status === 'starting' && this.sending.has(id)) throw new Error('消息正在提交，请完成后再切换模式');
+    if (!catalog.modes.some(value => value.id === mode)) throw new Error(catalog.error || '当前 CLI 不支持此模式');
+    return this.updateSessionSettings(s, () => { s.mode = mode; });
+  }
+  async executePlan(id: string, messageId: string) {
+    const s = this.session(id); this.assertCanWork(s.binding);
+    const plan = s.proposedPlan;
+    if (s.provider !== 'codex' || s.closedAt || s.purpose !== 'work' || s.status !== 'idle' || !plan?.ready || plan.accepted || plan.messageId !== messageId) throw new Error('此计划当前不能执行，请查看最新计划');
+    // Use the original thread. Drafts and selected references are not consumed by this action.
+    await this.changeMode(id, 'default');
+    const sent = await this.send(id, '按以下已确认的计划开始执行：\n\n' + plan.text);
+    if (sent) { plan.accepted = true; await this.store.save(); this.broadcast(); }
+    return sent;
+  }
+  async revisePlan(id: string, messageId: string, text: string) {
+    const s = this.session(id); this.assertCanWork(s.binding);
+    if (s.provider !== 'codex' || s.closedAt || s.status !== 'idle' || !s.proposedPlan?.ready || s.proposedPlan.accepted || s.proposedPlan.messageId !== messageId || !text.trim() || text.length > 100000) throw new Error('此计划当前不能修改，请查看最新计划');
+    await this.changeMode(id, 'plan');
+    return this.send(id, '请根据以下修改重新制定计划，继续处于 Plan 模式，等待我确认执行：\n\n' + text);
   }
   private async applyDeferredSettings(s: AgentSession) {
     if (!this.deferredSettings.has(s.id) || ['starting', 'running', 'approval'].includes(s.status) || this.changingSettings.has(s.id)) return;
@@ -1178,7 +1277,7 @@ export class Workbench {
     if (this.sending.has(id) || this.stoppingSessions.has(id)) throw new Error('正在停止此会话，请稍后重新打开');
     s.closedAt = undefined; await this.store.save(); this.broadcast(); return s;
   }
-  answer(id: string, requestId: string, option: string, answers?: Record<string, string | string[]>) { this.session(id); const runtime = this.runtimes.get(id); if (!runtime) throw new Error('CLI 连接已关闭'); runtime.answer(requestId, option, answers); }
+  answer(id: string, requestId: string, option: string, answers?: Record<string, string | string[]>) { this.session(id); const runtime = this.runtimes.get(id); if (!runtime) throw new Error('CLI 连接已关闭'); return runtime.answer(requestId, option, answers); }
   async attachLocal(id: string, files: string[]) {
     const s = this.session(id); if (s.closedAt || s.purpose !== 'work') throw new Error('请选择未关闭的工作会话');
     const directory = path.join(s.cwd, '.workbench', 'sources', id);

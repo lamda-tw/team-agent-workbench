@@ -33,6 +33,11 @@ export class CodexAuthBridge {
     try { const credential = await this.credential(); if (credential) await runtime.request('account/login/start', credential, 15000); }
     catch { throw new Error('无法沿用个人 Codex 登录，请检查登录状态和网络后重试'); }
   }
+  async configuration(method: 'config/read' | 'config/value/write' | 'skills/config/write', params: unknown) {
+    if (!this.source) await this.credential();
+    if (!this.source || this.closed) throw new Error('个人 Codex 配置连接已关闭');
+    return this.source.request(method, params, 20000);
+  }
   async refresh(runtime: JsonRpc, requestId: string | number) {
     try {
       const credential = await this.credential();

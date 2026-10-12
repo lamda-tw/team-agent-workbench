@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { spawnCLI, stopCLI } from './rpc';
 import type { AgentCapabilityCatalog, AgentCapabilityOption, Provider } from '../shared/types';
 
@@ -9,8 +10,11 @@ const unique = (items: AgentCapabilityOption[]) => [...new Map(items.map(item =>
 
 export function codexCapabilities(skillsResult: any, installedPlugins: any): AgentCapabilityCatalog {
   const entries = Array.isArray(skillsResult?.data) ? skillsResult.data : [];
-  const skills = unique(entries.flatMap((entry: any) => Array.isArray(entry?.skills) ? entry.skills : []).filter((item: any) => clean(item?.name) && clean(item?.path)).map((item: any) => ({
-    id: 'skill:' + clean(item.name), kind: 'skill' as const, name: clean(item.interface?.displayName) || clean(item.name),
+  const discovered = entries.flatMap((entry: any) => Array.isArray(entry?.skills) ? entry.skills : []).filter((item: any) => clean(item?.name) && clean(item?.path));
+  const pathsByName = new Map<string, Set<string>>();
+  for (const item of discovered) { const paths = pathsByName.get(item.name) || new Set<string>(); paths.add(item.path); pathsByName.set(item.name, paths); }
+  const skills = unique(discovered.map((item: any) => ({
+    id: 'skill:' + clean(item.name) + (pathsByName.get(item.name)!.size > 1 ? ':' + createHash('sha256').update(item.path).digest('hex').slice(0, 16) : ''), kind: 'skill' as const, name: clean(item.interface?.displayName) || clean(item.name),
     description: clean(item.interface?.shortDescription) || clean(item.shortDescription) || clean(item.description), invocation: clean(item.name), path: clean(item.path),
     source: item.pluginId ? '插件 · ' + clean(item.pluginId) : ({ user: '个人', repo: '当前项目', system: '内置', admin: '管理员' } as Record<string, string>)[item.scope] || clean(item.scope),
     enabled: item.enabled !== false, unavailableReason: item.enabled === false ? '已在 Codex 中停用' : undefined,
@@ -34,17 +38,6 @@ export function cursorCommandCapabilities(commands: any[]): AgentCapabilityOptio
   })));
 }
 
-async function readMcp(file: string, source: string): Promise<AgentCapabilityOption[]> {
-  try {
-    const value = JSON.parse(await fs.readFile(file, 'utf8'));
-    if (!value?.mcpServers || typeof value.mcpServers !== 'object' || Array.isArray(value.mcpServers)) return [];
-    return Object.entries(value.mcpServers).flatMap(([name, config]: [string, any]) => {
-      const invocation = clean(name); if (!invocation) return [];
-      const transport = clean(config?.type) || (config?.command ? 'stdio' : config?.url ? 'HTTP' : 'MCP');
-      return [{ id: 'plugin:mcp:' + invocation, kind: 'plugin' as const, name: invocation, description: `${transport} 工具；Cursor CLI 会按自身配置加载`, invocation, source, enabled: config?.disabled !== true, unavailableReason: config?.disabled === true ? '已在配置中停用' : undefined }];
-    });
-  } catch (error: any) { if (error.code === 'ENOENT' || error instanceof SyntaxError) return []; throw error; }
-}
 
 function ancestors(cwd: string) {
   const result: string[] = []; let current = path.resolve(cwd);
@@ -52,12 +45,23 @@ function ancestors(cwd: string) {
   return result;
 }
 
-export async function cursorPluginCapabilities(cwd: string): Promise<AgentCapabilityOption[]> {
-  const files = [path.join(os.homedir(), '.cursor', 'mcp.json'), ...ancestors(cwd).map(dir => path.join(dir, '.cursor', 'mcp.json'))];
-  const lists = await Promise.all(files.map((file, index) => readMcp(file, index === 0 ? '个人 MCP' : '项目 MCP')));
-  // Project definitions override personal definitions with the same server name.
-  const merged = new Map<string, AgentCapabilityOption>(); for (const list of lists) for (const item of list) merged.set(item.id, item);
-  return [...merged.values()];
+export async function cursorPluginCapabilities(cwd: string, home = os.homedir()): Promise<AgentCapabilityOption[]> {
+  const roots = [path.join(home, '.cursor', 'plugins', 'local'), path.join(cwd, '.cursor', 'plugins')];
+  const plugins: AgentCapabilityOption[] = [];
+  for (const root of roots) {
+    let dirs: import('node:fs').Dirent[] = [];
+    try { dirs = await fs.readdir(root, { withFileTypes: true }); } catch (e: any) { if (e.code === 'ENOENT') continue; throw e; }
+    for (const dir of dirs.filter(dir => dir.isDirectory())) {
+      for (const manifest of ['plugin.json', '.cursor-plugin/plugin.json']) {
+        try {
+          const file = path.join(root, dir.name, manifest), value = JSON.parse(await fs.readFile(file, 'utf8'));
+          if (typeof value.name !== 'string' || !value.name.trim()) continue;
+          plugins.push({ id: 'plugin:' + value.name, kind: 'plugin', name: clean(value.displayName || value.name), invocation: clean(value.name), description: clean(value.description), path: path.join(root, dir.name), source: root === roots[0] ? '个人本地插件' : '当前项目', enabled: true }); break;
+        } catch (e: any) { if (e.code !== 'ENOENT' && !(e instanceof SyntaxError)) throw e; }
+      }
+    }
+  }
+  return unique(plugins);
 }
 
 export function emptyCapabilityCatalog(provider: Provider): AgentCapabilityCatalog { return { provider, skills: [], plugins: [], checkedAt: new Date().toISOString() }; }

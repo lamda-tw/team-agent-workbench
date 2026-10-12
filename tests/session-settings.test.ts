@@ -21,14 +21,16 @@ for (const provider of ['codex', 'cursor'] as const) test(provider + ': switch m
     await wb.send(session.id, 'Remember the project plan'); await until(() => session.status === 'idle' && session.messages.filter(m => m.role === 'assistant').length === 1);
     const native = session.nativeId, history = structuredClone(session.messages), input = { text: '未发送的草稿', sourceIds: [], answers: {} };
     wb.store.inputs[session.id] = input;
-    const turns = (await calls()).filter(c => ['turn/start', 'session/prompt'].includes(c.method)).length;
+    // Background helpers also use the same CLI; count only this original work session.
+    const workPrompt = (c: any) => c.method === 'turn/start' ? c.params.threadId === native : c.method === 'session/prompt' && c.params.sessionId === native;
+    const turns = (await calls()).filter(workPrompt).length;
     const changing = wb.changeModel(session.id, 'second-model');
     await assert.rejects(wb.send(session.id, 'Do not race a settings change'), /正在切换/);
     await assert.rejects(wb.changePermissions(session.id, 'full'), /正在切换/);
     await changing;
     assert.equal(session.nativeId, native); assert.equal(session.model, 'second-model'); assert.equal(session.permissionMode, 'inherit');
     assert.deepEqual(session.messages, history); assert.deepEqual(wb.store.inputs[session.id], input);
-    assert.equal((await calls()).filter(c => ['turn/start', 'session/prompt'].includes(c.method)).length, turns);
+    assert.equal((await calls()).filter(workPrompt).length, turns);
     await wb.send(session.id, 'Continue the same plan'); await until(() => session.status === 'idle');
     const changedCalls = await calls();
     if (provider === 'codex') {
@@ -44,15 +46,15 @@ for (const provider of ['codex', 'cursor'] as const) test(provider + ': switch m
     await assert.rejects(wb.changeModel(session.id, ''), /有效/);
     await fixture.write({ status: 'ready', turn: 'success', turnDelay: 5000, permissionRuntime: true });
     const send = wb.send(session.id, 'Long-running work'); await until(() => session.status === 'running');
-    await until(async () => (await calls()).filter(c => ['turn/start', 'session/prompt'].includes(c.method)).length === 3);
-    const beforeSwitch = (await calls()).filter(c => ['turn/start', 'session/prompt'].includes(c.method)).length;
+    await until(async () => (await calls()).filter(workPrompt).length === 3);
+    const beforeSwitch = (await calls()).filter(workPrompt).length;
     const runningSince = Date.now();
     await wb.changeModel(session.id, 'third-model');
     await wb.changePermissions(session.id, 'full');
     assert.equal(session.status, 'running', 'changing settings must not cancel the active turn');
     assert.equal(session.settingsPending, true);
     assert.equal(session.nativeId, native);
-    assert.equal((await calls()).filter(c => ['turn/start', 'session/prompt'].includes(c.method)).length, beforeSwitch);
+    assert.equal((await calls()).filter(workPrompt).length, beforeSwitch);
     assert.deepEqual(wb.store.inputs[session.id], input);
     await send; await until(() => session.status === 'idle');
     assert(Date.now() - runningSince >= 3000, 'the current turn must finish on its own, not be canceled by switching');

@@ -1,8 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Check, ChevronDown, Puzzle, RefreshCw, Search, X } from 'lucide-react';
 import type { AgentCapabilityCatalog, AgentCapabilityKind, AgentCapabilityOption, AgentCapabilitySelection, AgentSession } from '../shared/types';
+import { CodexComposerTools, type ComposerToolProps } from './composer-codex-tools';
 
-export function ComposerCapabilities({ session, selected, change }: { session: AgentSession; selected: AgentCapabilitySelection[]; change: (items: AgentCapabilitySelection[]) => void }) {
+export function ComposerCapabilities(props: ComposerToolProps) {
+  return props.session.provider === 'claude' ? <LegacyComposerCapabilities {...props}/> : <CodexComposerTools {...props}/>;
+}
+function LegacyComposerCapabilities({ session, selected, change }: { session: AgentSession; selected: AgentCapabilitySelection[]; change: (items: AgentCapabilitySelection[]) => void }) {
   const [open, setOpen] = useState(false), [catalog, setCatalog] = useState<AgentCapabilityCatalog>(), [loadingKinds, setLoadingKinds] = useState<AgentCapabilityKind[]>([]), [query, setQuery] = useState('');
   const loading = loadingKinds.length > 0;
   const root = useRef<HTMLDivElement>(null), button = useRef<HTMLButtonElement>(null), sequence = useRef(0);

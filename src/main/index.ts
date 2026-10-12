@@ -14,6 +14,7 @@ import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 import { serverIdentityKey } from '../shared/server-identity';
 import { Workbench } from '../core/workbench';
+import { mcpServerInputSchema } from '../core/codex-mcp';
 import { SharedFiles } from '../core/shared-files';
 import { atomicJson } from '../core/store';
 import { AccountWorkspacePool, migrateAccountWorkspace } from '../core/account-workspaces';
@@ -114,6 +115,22 @@ async function dispatch(action: string, raw: unknown, owner: BrowserWindow): Pro
     case 'provider.login.cancel': workbench.accounts.cancel(z.object({ provider }).parse(raw).provider); return true;
     case 'provider.catalog': { const p = z.object({ provider, cwd: text.min(1), networkRoute: z.enum(['direct', 'management']).optional(), forceRefresh: z.boolean().optional() }).parse(raw); return workbench.catalog(p.provider, p.cwd, p.networkRoute, p.forceRefresh); }
     case 'session.capabilities': { const p = z.object({ id, forceRefresh: z.boolean().optional(), kind: z.enum(['skill', 'plugin']).optional() }).parse(raw); return workbench.capabilities(p.id, p.forceRefresh, p.kind); }
+    case 'session.modes': return workbench.modes(z.object({ id }).parse(raw).id);
+    case 'session.mode': { const p = z.object({ id, mode: z.enum(['default', 'plan', 'ask']) }).parse(raw); return workbench.changeMode(p.id, p.mode); }
+    case 'session.plan.execute': { const p = z.object({ id, messageId: id }).parse(raw); return workbench.executePlan(p.id, p.messageId); }
+    case 'session.plan.revise': { const p = z.object({ id, messageId: id, text: z.string().trim().min(1).max(100000) }).parse(raw); return workbench.revisePlan(p.id, p.messageId, p.text); }
+    case 'session.tools.configuration': { const p = z.object({ id, kind: z.enum(['mcp', 'skill', 'plugin']) }).parse(raw); const file = await workbench.toolConfiguration(p.id, p.kind); const error = await shell.openPath(file); if (error) throw new Error('无法打开配置，请检查本机文件关联。'); return true; }
+    case 'session.skills.configure': { const p = z.object({ id, skillId: z.string().min(1).max(1000), enabled: z.boolean() }).parse(raw); return workbench.configureSkill(p.id, p.skillId, p.enabled); }
+    case 'session.mcp': { const p = z.object({ id, refresh: z.boolean().optional() }).parse(raw); return workbench.mcpCatalog(p.id, p.refresh); }
+    case 'session.mcp.add': { const p = z.object({ id, server: mcpServerInputSchema }).parse(raw); return workbench.mcpWrite(p.id, p.server); }
+    case 'session.mcp.toggle': { const p = z.object({ id, name: z.string().regex(/^[a-zA-Z0-9_-]{1,80}$/), enabled: z.boolean() }).parse(raw); return workbench.mcpWrite(p.id, { name: p.name, enabled: p.enabled }); }
+    case 'session.mcp.editable': { const p = z.object({ id, name: z.string().regex(/^[a-zA-Z0-9_-]{1,80}$/) }).parse(raw); return workbench.mcpEditable(p.id, p.name); }
+    case 'session.mcp.update': { const p = z.object({ id, server: mcpServerInputSchema }).parse(raw); return workbench.mcpWrite(p.id, { operation: 'update', server: p.server }); }
+    case 'session.mcp.remove': { const p = z.object({ id, name: z.string().regex(/^[a-zA-Z0-9_-]{1,80}$/) }).parse(raw); return workbench.mcpWrite(p.id, { operation: 'remove', name: p.name }); }
+    case 'session.mcp.login': {
+      const p = z.object({ id, name: z.string().min(1).max(200) }).parse(raw);
+      const url = await workbench.mcpLogin(p.id, p.name); if (typeof url === 'string') await shell.openExternal(url); return true;
+    }
     case 'provider.permissions': { const p = z.object({ provider, cwd: text.min(1) }).parse(raw); return workbench.inspectPermissions(p.provider, p.cwd); }
     case 'provider.cursorReview': return workbench.configureCursorReview(z.object({ cwd: text.min(1) }).parse(raw).cwd);
     case 'session.permissions': { const p = z.object({ id, mode: z.enum(['inherit', 'review', 'auto', 'full']), stop: z.boolean().optional() }).parse(raw); return workbench.changePermissions(p.id, p.mode, p.stop); }

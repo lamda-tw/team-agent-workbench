@@ -1,9 +1,12 @@
 import { randomUUID } from 'node:crypto';
+import { modeOption, planSteps, type SessionModeCatalog } from '../shared/session-mode';
 import type { AgentCapabilityCatalog, AgentCapabilityKind, AgentCapabilityOption, AgentSession, Approval, Message, MessageContext } from '../shared/types';
 import { CapabilityCache } from './capability-cache';
 import { JsonRpc, type RpcMessage } from './rpc';
 import { codexPermissionParams, codexPermissions, cursorPermissionArgs, cursorPermissions, permissionIssue, probeCodexCommand } from './permissions';
-import { validateCodexStorage, type CodexStorage } from './codex-storage';
+import { refreshCodexConfiguration, validateCodexStorage, type CodexStorage } from './codex-storage';
+import { CodexMcp } from './codex-mcp';
+import type { McpMutation } from '../shared/mcp';
 import { CodexAuthBridge } from './codex-auth-bridge';
 import { permissionLabels } from '../shared/permission-presentation';
 import { codexCapabilities, cursorCommandCapabilities, cursorPluginCapabilities, emptyCapabilityCatalog } from './provider-capabilities';
@@ -15,6 +18,7 @@ const pretty = (x: unknown) => typeof x === 'string' ? x : JSON.stringify(x, nul
 export class AgentRuntime {
   rpc: JsonRpc;
   private requests = new Map<string, RpcMessage>();
+  private answeringPlans = new Set<string>();
   private fileChanges = new Map<string, { turnId?: string; changes: unknown[] }>();
   private turnId?: string;
   private initialized = false;
@@ -23,12 +27,17 @@ export class AgentRuntime {
   private turnActive = false;
   private steering = false;
   private authBridge?: CodexAuthBridge;
+  private mcp?: CodexMcp;
   private cursorCommands: any[] = [];
   private cursorCommandWaiters = new Set<() => void>();
   private cursorCommandsKnown = false;
   private capabilityCache: CapabilityCache;
   private starting?: Promise<void>;
   private codexConnected = false;
+  private modePresets?: any[];
+  private cursorModes: string[] = [];
+  private nativeModel?: string;
+  private nativeEffort?: string | null;
   private connecting?: Promise<void>;
   private connection: CliConnectionTracker;
   constructor(readonly session: AgentSession, executable: string, private hooks: AgentHooks, private storage?: CodexStorage, networkEnv: NodeJS.ProcessEnv = {}) {
@@ -38,6 +47,7 @@ export class AgentRuntime {
     this.connection = new CliConnectionTracker(session, hooks.changed, hooks.connectionChanged);
     this.rpc = new JsonRpc(executable, session.provider === 'codex' ? storage?.args || ['app-server'] : cursorPermissionArgs(session), session.cwd, session.provider === 'cursor', { ...networkEnv, ...storage?.env });
     if (session.provider === 'codex' && storage) this.authBridge = new CodexAuthBridge(executable, session.cwd, storage.sourceHome, networkEnv);
+    if (storage && this.authBridge) this.mcp = new CodexMcp(this.rpc, storage, (method, params) => this.authBridge!.configuration(method, params), () => this.initialized ? session.nativeId : undefined);
     this.rpc.on('message', (m: RpcMessage) => this.onMessage(m));
     this.rpc.on('diagnostic', (value: string) => { if (!this.closing) this.connection.diagnostic(value); });
     this.rpc.on('closed', (e: Error) => { this.initialized = false; this.codexConnected = false; this.capabilityCache.invalidate(); this.fileChanges.clear(); void this.authBridge?.close(); if (!this.closing) this.finish(e.message); });
@@ -82,6 +92,7 @@ export class AgentRuntime {
       const params = { cwd: s.cwd, ...(s.model ? { model: s.model } : {}), ...codexPermissionParams(s) };
       const result = s.nativeId ? await this.rpc.request('thread/resume', { ...params, threadId: s.nativeId, ...(this.storage?.resumePath ? { path: this.storage.resumePath } : {}) }) : await this.rpc.request('thread/start', params);
       s.nativeId = result.thread.id; s.nativePath = result.thread.path || this.storage?.resumePath || s.nativePath;
+      this.nativeModel = result.model; this.nativeEffort = result.reasoningEffort;
       if (this.storage) { s.codexStorage = 'workbench'; delete s.codexNeedsRegistration; }
       s.permissions = codexPermissions(result, 'runtime');
       await probeCodexCommand(this.rpc, s.permissions, s.cwd, result.sandbox);
@@ -99,8 +110,13 @@ export class AgentRuntime {
       await this.rpc.request('authenticate', { methodId: 'cursor_login' }, 120000);
       const result = s.nativeId ? await this.rpc.request('session/load', { sessionId: s.nativeId, cwd: s.cwd, mcpServers: [] }) : await this.rpc.request('session/new', { cwd: s.cwd, mcpServers: [] });
       s.nativeId = result.sessionId || s.nativeId;
+      this.cursorModes = (result.modes?.availableModes || []).map((mode: any) => mode.id);
       if (s.model) await this.rpc.request('session/set_model', { sessionId: s.nativeId, modelId: s.model });
-      if (s.permissionMode && s.permissionMode !== 'inherit') await this.rpc.request('session/set_mode', { sessionId: s.nativeId, modeId: 'agent' });
+      if (s.mode || s.permissionMode && s.permissionMode !== 'inherit') {
+        const modeId = s.mode === 'plan' || s.mode === 'ask' ? s.mode : 'agent';
+        if (modeId !== 'agent' && !this.cursorModes.includes(modeId)) throw new Error('当前 Cursor CLI 不支持此模式，请更新 CLI');
+        await this.rpc.request('session/set_mode', { sessionId: s.nativeId, modeId });
+      }
       if (s.permissionMode === 'full') s.permissions.warnings.push('本会话已请求 Run Everything；明确拒绝规则和团队策略仍由 Cursor 执行。');
       if (s.permissionMode === 'inherit' && ['ask', 'plan'].includes(result.modes?.currentModeId)) s.permissions.warnings.push('当前 Cursor 为 Ask 或 Plan 模式，无法直接修改代码。');
     }
@@ -108,6 +124,45 @@ export class AgentRuntime {
   }
   async ensureStarted() {
     try { await this.start(); } catch (error) { this.connection.error(error, false); const issue = permissionIssue(error); if (issue) { this.session.permissionIssue = issue; this.hooks.changed(); } else this.hooks.authFailed?.(error); throw error; }
+  }
+  async mcpCatalog() { await this.connectCodex(); if (!this.mcp) throw new Error('当前 CLI 不支持 MCP 管理'); return this.mcp.list(); }
+  async modes(): Promise<SessionModeCatalog> {
+    if (this.session.provider === 'cursor') {
+      await this.ensureStarted();
+      return { current: this.session.mode || 'default', modes: [modeOption('default'), ...(['plan', 'ask'] as const).filter(id => this.cursorModes.includes(id)).map(modeOption)] };
+    }
+    await this.connectCodex();
+    try {
+      this.modePresets ||= (await this.rpc.request('collaborationMode/list', {}, 10000)).data || [];
+      return { current: this.session.mode || 'default', modes: [modeOption('default'), ...(this.modePresets!.some(value => value.mode === 'plan') ? [modeOption('plan')] : [])] };
+    } catch { return { current: this.session.mode || 'default', modes: [modeOption('default')], error: '当前 Codex CLI 未提供 Plan 模式，请更新 CLI 后重试。' }; }
+  }
+  private async collaborationMode() {
+    if (!this.session.mode) return undefined;
+    const catalog = await this.modes();
+    if (catalog.error && this.session.mode === 'default') return undefined;
+    if (!catalog.modes.some(value => value.id === this.session.mode)) throw new Error(catalog.error || '当前 CLI 不支持此模式');
+    const preset = this.modePresets?.find(value => value.mode === this.session.mode);
+    const model = this.session.model || this.nativeModel || preset?.model;
+    if (!model) throw new Error('无法确定 Plan 模式使用的模型，请先选择模型');
+    return { mode: this.session.mode, settings: { model, reasoning_effort: this.nativeEffort ?? preset?.reasoning_effort ?? null, developer_instructions: null } };
+  }
+  async mcpLogin(name: string) { await this.connectCodex(); if (!this.mcp) throw new Error('当前 CLI 不支持 MCP 管理'); return this.mcp.login(name); }
+  async mcpEditable(name: string) { await this.connectCodex(); if (!this.mcp) throw new Error('当前 CLI 不支持 MCP 管理'); return this.mcp.editable(name); }
+  async configureSkill(id: string, enabled: boolean) {
+    await this.connectCodex();
+    const skill = (await this.capabilities(true, 'skill')).skills.find(value => value.id === id);
+    if (!skill?.path || skill.source !== '个人') throw new Error('此 Skill 由项目、插件或管理员提供，请在对应配置中修改');
+    await this.authBridge!.configuration('skills/config/write', { path: skill.path, enabled });
+    await this.mcpReload(); this.capabilityCache.invalidate('skill');
+  }
+  async mcpWrite(input: McpMutation) {
+    await this.connectCodex(); if (!this.mcp) throw new Error('当前 CLI 不支持 MCP 管理'); await this.mcp.write(input);
+  }
+  async mcpReload(sync = true) {
+    await this.connectCodex();
+    if (sync && this.storage) await refreshCodexConfiguration(this.storage);
+    await this.rpc.request('config/mcpServer/reload', null, 20000);
   }
   async capabilities(forceRefresh = false, kind?: AgentCapabilityKind): Promise<AgentCapabilityCatalog> {
     if (this.closing) throw new Error('CLI 连接已关闭');
@@ -134,6 +189,7 @@ export class AgentRuntime {
     });
   }
   async resolveCapabilities(selections: { id: string; kind: 'skill' | 'plugin' }[]): Promise<AgentCapabilityOption[]> {
+    if (this.session.provider === 'cursor' && selections.some(item => item.kind === 'plugin')) throw new Error('Cursor 插件和 MCP 按配置自动加载，请移除消息中的旧工具选择');
     if (!selections.length) return [];
     const kinds = new Set(selections.map(item => item.kind));
     const catalog = await this.capabilities(false, kinds.size === 1 ? selections[0].kind : undefined), available = new Map([...catalog.skills, ...catalog.plugins].map(item => [item.id, item]));
@@ -151,9 +207,9 @@ export class AgentRuntime {
     if (this.session.status === 'running' || this.session.status === 'approval') throw new Error('当前会话仍在运行，可以新建独立会话继续工作');
     await this.ensureStarted();
     if (this.closing) return false;
+    const collaborationMode = this.session.provider === 'codex' ? await this.collaborationMode() : undefined;
     const selected = options?.capabilities || [], prefixes = selected.filter(item => item.kind === 'skill' || this.session.provider === 'codex').map(item => this.session.provider === 'cursor' ? '/' + item.invocation : item.kind === 'skill' ? '$' + item.invocation : '@' + item.invocation);
-    const cursorPlugins = this.session.provider === 'cursor' ? selected.filter(item => item.kind === 'plugin') : [];
-    const nativeText = [prefixes.join(' '), text].filter(Boolean).join(' ') + (cursorPlugins.length ? `\n\n[本轮用户选择的插件工具：${cursorPlugins.map(item => item.name).join('、')}。请在与当前任务相关时使用这些已由 Cursor CLI 加载的工具。]` : '');
+    const nativeText = [prefixes.join(' '), text].filter(Boolean).join(' ');
     const context = options ? { ...options.context, capabilities: selected.map(({ id, kind, name }) => ({ id, kind, name })), nativeId: this.session.nativeId!, accepted: false } : undefined;
     this.message(randomUUID(), 'user', nativeText, false, options ? { userText: options.userText, context } : {});
     this.hooks.event({ direction: 'user', text: nativeText, ...(options ? { userText: options.userText, capabilities: context?.capabilities } : {}) });
@@ -162,7 +218,7 @@ export class AgentRuntime {
     try {
       if (this.session.provider === 'codex') {
         const input: any[] = [{ type: 'text', text: nativeText, text_elements: [] }, ...selected.map(item => item.kind === 'skill' ? { type: 'skill', name: item.invocation, path: item.path } : { type: 'mention', name: item.invocation, path: item.path })];
-        const result = await this.rpc.request('turn/start', { threadId: this.session.nativeId, ...(this.session.model ? { model: this.session.model } : {}), input }, 60000, options?.submitted);
+        const result = await this.rpc.request('turn/start', { threadId: this.session.nativeId, ...(this.session.model ? { model: this.session.model } : {}), ...(collaborationMode ? { collaborationMode } : {}), input }, 60000, options?.submitted);
         if (this.turnActive) { this.turnId = result.turn.id; this.hooks.changed(); }
       } else {
         const result = await this.rpc.request('session/prompt', { sessionId: this.session.nativeId, prompt: [{ type: 'text', text: nativeText }] }, 0, options?.submitted);
@@ -211,15 +267,27 @@ export class AgentRuntime {
   private onMessage(m: RpcMessage) {
     if (this.closing) return;
     const method = m.method!, p = m.params || {}, s = this.session;
+    if (method === 'mcpServer/oauthLogin/completed') {
+      this.mcp?.completed(p); this.hooks.changed();
+      if (p.success) void this.mcpReload(false).catch(() => {});
+      return;
+    }
     if (method === 'account/chatgptAuthTokens/refresh' && m.id !== undefined && this.authBridge) { void this.authBridge.refresh(this.rpc, m.id); return; }
     // Only session events are archived. Account/authentication messages are never stored here.
     if (/^(item\/|turn\/|session\/|cursor\/|error$)/.test(method)) this.hooks.event({ method, params: p });
     if (m.id !== undefined) { this.onRequest(m); return; }
+    if (s.provider === 'cursor' && p.sessionId && s.nativeId && p.sessionId !== s.nativeId) return;
     if (s.provider === 'codex') {
       if (p.threadId && s.nativeId && p.threadId !== s.nativeId) return;
       if (p.turnId && this.turnId && p.turnId !== this.turnId) return;
       if (method === 'item/agentMessage/delta' || method === 'item/reasoning/textDelta' || method === 'item/reasoning/summaryTextDelta' || method === 'item/completed' && p.item?.type === 'agentMessage') this.connection.responded();
       if (method === 'item/agentMessage/delta') this.message(p.itemId, 'assistant', p.delta || '', true);
+      if (method === 'item/plan/delta') {
+        this.message(p.itemId, 'assistant', p.delta || '', true);
+        const message = s.messages.find(value => value.id === p.itemId)!; message.kind = 'plan';
+        s.proposedPlan = { messageId: message.id, text: message.text, ready: false }; this.hooks.changed();
+      }
+      if (method === 'turn/plan/updated') this.updatePlanSteps('steps-' + p.turnId, p.plan);
       if (method === 'item/commandExecution/outputDelta') this.message(p.itemId, 'tool', p.delta || '', true);
       if (method === 'item/started' && p.item?.type === 'commandExecution') this.message(p.item.id, 'tool', '$ ' + p.item.command + '\n');
       if (method === 'item/started' && p.item?.type === 'fileChange' && Array.isArray(p.item.changes)) this.fileChanges.set(p.item.id, { turnId: p.turnId, changes: p.item.changes });
@@ -227,7 +295,11 @@ export class AgentRuntime {
         const i = p.item || {};
         if (i.type === 'fileChange' && i.status !== 'failed') s.outputFiles = [...new Set([...(s.outputFiles || []), ...(i.changes || this.fileChanges.get(i.id)?.changes || []).map((change: any) => change.path).filter((value: unknown): value is string => typeof value === 'string')])];
         this.fileChanges.delete(i.id);
-        if (i.type === 'agentMessage') this.message(i.id, 'assistant', i.text || '');
+        if (i.type === 'plan') {
+          this.message(i.id, 'assistant', i.text || ''); s.messages.find(value => value.id === i.id)!.kind = 'plan';
+          s.proposedPlan = { messageId: i.id, text: i.text || '', ready: !!i.text?.trim() }; this.hooks.changed();
+        }
+        else if (i.type === 'agentMessage') this.message(i.id, 'assistant', i.text || '');
         else if (i.type === 'commandExecution') { if (i.exitCode !== 0 || i.status === 'failed') { const issue = permissionIssue(i.aggregatedOutput); if (issue) { s.permissionIssue = issue; this.hooks.changed(); } } this.message(i.id, 'tool', '$ ' + i.command + '\n' + (i.aggregatedOutput || '') + '\n退出码：' + i.exitCode); }
         else if (i.type !== 'userMessage' && i.type !== 'reasoning') this.message(i.id || randomUUID(), 'tool', pretty(i));
       }
@@ -245,8 +317,14 @@ export class AgentRuntime {
         if (u.status === 'failed') { const issue = permissionIssue(text); if (issue) { s.permissionIssue = issue; this.hooks.changed(); } }
         this.message(u.toolCallId, 'tool', text, u.sessionUpdate === 'tool_call_update');
       }
-      if (u.sessionUpdate === 'plan') this.message('plan-' + this.cursorMessageId, 'tool', pretty(u.entries));
-    } else if (method.startsWith('cursor/')) this.message(randomUUID(), 'tool', pretty(p));
+      if (u.sessionUpdate === 'plan') this.updatePlanSteps('steps-' + this.cursorMessageId, u.entries);
+    } else if (method === 'cursor/update_todos') this.updatePlanSteps('steps-' + this.cursorMessageId, p.todos);
+    else if (method.startsWith('cursor/')) this.message(randomUUID(), 'tool', pretty(p));
+  }
+  private updatePlanSteps(id: string, raw: unknown) {
+    const steps = planSteps(raw); if (!steps.length) return;
+    this.message(id, 'assistant', '执行计划'); const message = this.session.messages.find(value => value.id === id)!;
+    message.kind = 'planSteps'; message.steps = steps; this.hooks.changed();
   }
   private onRequest(m: RpcMessage) {
     const p = m.params || {}, method = m.method!, id = randomUUID();
@@ -279,18 +357,35 @@ export class AgentRuntime {
       approval.options = [{ id: 'answer', label: '提交回答', kind: 'answer' }, { id: 'skip', label: method === 'cursor/ask_question' ? '跳过' : '不提供信息，继续', kind: 'deny' }];
     } else if (method === 'cursor/create_plan') {
       approval.title = p.name || 'Cursor 方案确认'; approval.details = p.plan || pretty(p);
-      approval.options = [{ id: 'accept', label: '采用方案', kind: 'allow' }, { id: 'decline', label: '不采用', kind: 'deny' }];
+      approval.options = [{ id: 'accept', label: '执行计划', kind: 'allow' }, { id: 'decline', label: '返回修改', kind: 'deny' }, { id: 'cancel', label: '取消', kind: 'deny' }];
     } else if (method === 'mcpServer/elicitation/request') {
       this.rpc.respond(m.id!, { action: 'decline', content: null }); this.message(randomUUID(), 'system', '已拒绝当前界面尚不支持的 MCP 表单请求。'); return;
     } else { this.rpc.reject(m.id!); this.message(randomUUID(), 'system', 'CLI 请求暂不支持，已明确返回错误：' + method); return; }
     this.requests.set(id, m); this.session.approvals.push(approval); this.session.status = 'approval'; this.hooks.changed(); this.hooks.needsApproval?.(approval.questions ? 'question' : 'approval');
   }
-  answer(id: string, option: string, answers: Record<string, string | string[]> = {}) {
+  answer(id: string, option: string, answers: Record<string, string | string[]> = {}): void | Promise<void> {
     const req = this.requests.get(id), approval = this.session.approvals.find(a => a.id === id);
     if (!req || !approval || !approval.options.some(x => x.id === option)) throw new Error('确认项已过期或选项无效');
+    if (this.answeringPlans.has(id)) throw new Error('正在提交计划，请稍候');
+    const complete = (result: unknown) => {
+      if (this.closing || this.requests.get(id) !== req) throw new Error('此确认已失效');
+      this.rpc.respond(req.id!, result); this.hooks.event({ direction: 'user', method: req.method, result });
+      this.requests.delete(id); this.session.approvals = this.session.approvals.filter(x => x.id !== id);
+      this.session.status = this.session.approvals.length ? 'approval' : 'running'; this.hooks.changed();
+    };
     const p = req.params || {}; let result: unknown;
     if (req.method === 'session/request_permission') result = { outcome: { outcome: 'selected', optionId: option } };
-    else if (req.method === 'cursor/create_plan') result = { outcome: { outcome: option === 'accept' ? 'accepted' : 'rejected' } };
+    else if (req.method === 'cursor/create_plan') {
+      if (option === 'accept') {
+        this.answeringPlans.add(id);
+        return this.rpc.request('session/set_mode', { sessionId: this.session.nativeId, modeId: 'agent' }).then(() => {
+          if (this.closing || this.requests.get(id) !== req) throw new Error('此计划已失效');
+          this.session.mode = 'default'; complete({ outcome: { outcome: 'accepted' } });
+        }).finally(() => { this.answeringPlans.delete(id); });
+      }
+      const reason = typeof answers.reason === 'string' ? answers.reason.trim().slice(0, 100000) : '';
+      result = { outcome: option === 'accept' ? { outcome: 'accepted' } : option === 'cancel' ? { outcome: 'cancelled' } : { outcome: 'rejected', ...(reason ? { reason } : {}) } };
+    }
     else if (req.method === 'cursor/ask_question') {
       if (option === 'skip') result = { outcome: { outcome: 'skipped', reason: '用户跳过' } };
       else {
@@ -313,9 +408,7 @@ export class AgentRuntime {
     }
     else if (req.method === 'item/permissions/requestApproval') result = { permissions: option === 'accept' ? p.permissions : {}, scope: 'turn' };
     else result = { decision: option };
-    this.rpc.respond(req.id!, result); this.hooks.event({ direction: 'user', method: req.method, result });
-    this.requests.delete(id); this.session.approvals = this.session.approvals.filter(x => x.id !== id);
-    this.session.status = this.session.approvals.length ? 'approval' : 'running'; this.hooks.changed();
+    complete(result);
   }
   async cancel() {
     if (this.session.provider === 'codex' && this.turnId) await this.rpc.request('turn/interrupt', { threadId: this.session.nativeId, turnId: this.turnId });

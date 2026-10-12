@@ -1,0 +1,24 @@
+.composer-plus{border-radius:50%;width:29px;height:29px;color:#425d4b}
+.codex-tools-popover{width:min(360px,calc(100vw - 40px));left:0;right:auto;max-height:min(420px,60vh)}
+.codex-tools-popover .composer-options{padding:5px 8px;overflow:auto;max-height:310px}
+.codex-tools-popover .setting-option{justify-content:space-between;gap:12px;text-align:left;width:100%}
+.codex-tools-popover .setting-option code{font-size:11px;color:#718278;flex:none}
+.codex-tools-popover .keyboard-active{background:#edf4ef}
+.composer-extra-actions{padding-bottom:5px;margin-bottom:5px;border-bottom:1px solid #e5ebe7}
+.codex-tools-popover .capability-search{margin:8px 12px}
+.mcp-panel{width:min(680px,calc(100vw - 36px));max-height:85vh}
+.mcp-panel .modal-body{overflow:auto;min-height:90px}
+.mcp-panel footer{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.mcp-server{border-bottom:1px solid #e7ece8;padding:12px 0}
+.mcp-server .row{flex-wrap:wrap;gap:8px}
+.mcp-state{font-size:11px;color:#7b857f}.mcp-state.connected{color:#287554}.mcp-state.failed,.mcp-state.authenticationRequired{color:#936227}
+.mcp-server small{display:block;margin-top:5px}.mcp-server details{font-size:12px;margin-top:9px}
+.mcp-server li{margin:10px 0;overflow-wrap:anywhere}.mcp-server li p{margin:4px 0;color:#718278;line-height:1.6}
+.mcp-form{padding:15px 0;display:grid;gap:12px}.mcp-form label{display:grid;gap:6px;font-size:12px}.mcp-form textarea{min-height:70px}
+.mcp-form details label{margin-top:10px}
+.composer-mode{position:relative}.composer-mode .composer-popover{left:0;right:auto;width:270px}
+.agent-customization{width:min(740px,calc(100vw - 36px));max-height:85vh}.agent-customization>.modal-body{overflow:auto}
+.mcp-embedded{overflow:auto}.mcp-embedded .mcp-panel{width:100%;max-height:none}.mcp-embedded .mcp-panel>header{padding:16px 24px}.mcp-embedded .mcp-panel>header h2{font-size:14px}.mcp-embedded footer{padding:16px 24px}
+.proposed-plan{padding:18px;border:1px solid #dce7df;border-radius:12px;background:#f8fbf9}.proposed-plan>strong{display:block;margin-bottom:12px}.proposed-plan>.row{margin-top:14px;gap:8px;flex-wrap:wrap}
+.plan-editor{display:block;width:100%;min-height:250px;max-height:50vh;margin:12px 0;font-size:13px;line-height:1.7}
+.plan-steps{padding:12px 0}.plan-step{display:flex;gap:9px;padding:5px 0}.plan-step.completed,.plan-step.cancelled{color:#849088}.plan-step.inProgress{color:#287554;font-weight:600}

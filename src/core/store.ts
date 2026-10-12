@@ -49,6 +49,10 @@ export class Store {
     }
     try { this.inputs = JSON.parse(await fs.readFile(path.join(this.root, 'inputs.json'), 'utf8')); } catch (e: any) { if (e.code !== 'ENOENT') throw new Error('本地 inputs.json 无法读取'); }
     this.sessions.forEach(s => { delete s.cliConnection; if (['starting', 'running', 'approval'].includes(s.status)) { s.status = s.closedAt || s.stoppedAt ? 'idle' : 'error'; if (s.status === 'error') s.error = '应用关闭时任务尚未完成，已中断；可检查已有结果后继续发送。'; } s.approvals = []; migrateSessionContext(s); });
+    // MCP now belongs to configuration, not the next-message selection. Keep historic messages intact.
+    for (const session of this.sessions) if (session.provider === 'cursor' && this.inputs[session.id]?.capabilities) {
+      this.inputs[session.id].capabilities = this.inputs[session.id].capabilities!.filter(item => !item.id.startsWith('plugin:mcp:'));
+    }
     this.drafts.forEach(d => {
       if (!d.preparationVersion && !d.submitted) {
         // Preserve the user's previous final explanation when upgrading older drafts.

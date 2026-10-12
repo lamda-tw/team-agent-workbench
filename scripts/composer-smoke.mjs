@@ -11,7 +11,7 @@ const fixture = await authLauncher(path.join(data, 'cli'), { status: 'ready', tu
 await fs.mkdir(path.join(data, '.cursor'), { recursive: true });
 await fs.writeFile(path.join(data, '.cursor', 'mcp.json'), JSON.stringify({ mcpServers: { 'fixture-mcp': { type: 'http', url: 'https://example.invalid/mcp' } } }));
 await fs.writeFile(path.join(data, 'settings.json'), JSON.stringify({ ...offlineSettings(), connections: [], providerPaths: { codex: fixture.launcher, cursor: fixture.launcher }, lastWorkspace: data, localWorkspace: data, verifiedLocalWorkspace: data }));
-const env = { ...process.env, WORKBENCH_TEST: '1', WORKBENCH_DATA_DIR: data, CURSOR_CONFIG_DIR: path.join(data, 'cursor-config') }; delete env.ELECTRON_RUN_AS_NODE;
+const env = { ...process.env, WORKBENCH_TEST: '1', WORKBENCH_DATA_DIR: data, CODEX_HOME: path.join(data, 'codex-personal'), CURSOR_CONFIG_DIR: path.join(data, 'cursor-config') }; delete env.ELECTRON_RUN_AS_NODE;
 const app = await electron.launch({ args: ['dist/user'], cwd: root, env, timeout: 60000 });
 try {
   const page = await app.firstWindow(), errors = []; page.on('pageerror', e => errors.push(e.message));
@@ -30,7 +30,7 @@ try {
     await expect(page.locator('.composer-bottom')).toContainText('Enter 发送 · Shift+Enter 换行');
     await expect(page.locator('.composer').getByLabel('选择模型')).toBeVisible();
     await expect(page.locator('.composer').getByLabel('当前执行权限')).toBeVisible();
-    await expect(page.locator('.composer').getByLabel('选择 Skill 和插件')).toBeVisible();
+    await expect(page.locator('.composer').getByLabel('添加内容或工具')).toBeVisible();
     await expect(page.locator('.session-permission-line')).toHaveCount(0);
     const chatBox = await page.locator('.messages').boundingBox();
     assert(chatBox.height >= 400 && chatBox.y < 200, 'chat must occupy the main area at 1100 × 760');
@@ -48,16 +48,43 @@ try {
     await expect(page.getByRole('dialog', { name: '执行权限', exact: true })).toBeVisible();
     if (provider === 'cursor') await expect(page.getByRole('button', { name: 'Auto-review（自动审查）', exact: true })).toBeDisabled();
     await input.click(); await expect(page.getByRole('dialog')).toHaveCount(0);
-    await page.getByLabel('选择 Skill 和插件').click();
-    const capabilities = page.getByRole('dialog', { name: 'Skill 与插件', exact: true });
     const skillName = provider === 'codex' ? 'codex-fixture-skill' : 'cursor-fixture-skill', pluginName = provider === 'codex' ? 'Fixture Plugin' : 'fixture-mcp';
-    await expect(capabilities.getByRole('group', { name: '可用 Skills' }).getByRole('button').filter({ hasText: skillName })).toBeVisible();
-    await capabilities.getByRole('group', { name: '可用 Skills' }).getByRole('button').filter({ hasText: skillName }).click();
-    await expect(capabilities.getByRole('group', { name: '可用插件' }).getByRole('button').filter({ hasText: pluginName })).toBeVisible();
-    await capabilities.getByRole('group', { name: '可用插件' }).getByRole('button').filter({ hasText: pluginName }).click();
-    await page.screenshot({ path: path.join(artifacts, 'composer-capabilities-' + provider + '.png') });
-    await capabilities.getByRole('button', { name: '关闭选项' }).click();
-    await expect(page.getByLabel('下一条消息使用的能力').getByRole('button')).toHaveCount(2);
+    if (provider === 'codex') {
+      await input.fill('$codex-fixture');
+      const skills = page.getByRole('dialog', { name: '选择 Skill', exact: true });
+      await expect(skills.getByRole('option').filter({ hasText: skillName })).toBeVisible();
+      await input.press('Enter'); await expect(input).toHaveValue('');
+      await input.fill('@fixture'); await expect(page.getByRole('dialog', { name: '选择插件', exact: true }).getByRole('option').filter({ hasText: pluginName })).toBeVisible(); await input.press('Tab'); await expect(input).toHaveValue('');
+      await expect(page.getByLabel('下一条消息使用的能力')).toContainText(pluginName);
+      await input.fill('/mcp'); await input.press('Enter');
+      const mcp = page.getByRole('dialog', { name: 'MCP 服务器', exact: true });
+      await expect(mcp).toContainText('还没有配置 MCP');
+      const before = await current();
+      await expect(mcp.getByRole('button', { name: '添加 MCP', exact: true })).toHaveCount(0);
+      await mcp.getByRole('button', { name: '打开设置', exact: true }).click();
+      const tools = page.getByRole('dialog', { name: 'Codex 设置', exact: true }), manager = tools.getByRole('region', { name: 'MCP 服务器', exact: true });
+      await manager.getByRole('button', { name: '添加 MCP', exact: true }).click();
+      await manager.getByLabel('名称', { exact: true }).fill('fixture_docs');
+      await manager.getByLabel('服务地址').fill('https://example.invalid/mcp');
+      await manager.getByRole('button', { name: '保存', exact: true }).click();
+      await expect(manager).toContainText('fixture_docs');
+      await manager.getByRole('button', { name: '停用', exact: true }).click(); await expect(manager).toContainText('已停用');
+      assert.equal((await current()).nativeId, before.nativeId); assert.equal((await current()).messages.length, 0);
+      assert.equal((await rpcCalls()).filter(message => message.method === 'turn/start').length, 0);
+      await page.screenshot({ path: path.join(artifacts, 'composer-mcp-workbench.png') });
+      await tools.getByRole('button', { name: '关闭工具设置' }).click();
+    } else {
+      await input.fill('/cursor-fixture');
+      const commands = page.getByRole('dialog', { name: '添加内容或工具', exact: true });
+      await expect(commands.getByRole('option').filter({ hasText: skillName })).toBeVisible();
+      await input.press('Tab'); await expect(input).toHaveValue('');
+      await input.fill('/mcp'); await input.press('Enter');
+      const mcp = page.getByRole('dialog', { name: 'MCP 服务器', exact: true });
+      await expect(mcp).toContainText('fixture-mcp');
+      await expect(mcp.getByRole('button', { name: '停用', exact: true })).toHaveCount(0);
+      await mcp.getByRole('button', { name: '关闭 MCP' }).click();
+    }
+    await expect(page.getByLabel('下一条消息使用的能力').getByRole('button')).toHaveCount(provider === 'codex' ? 2 : 1);
     await input.fill('   '); await input.press('Enter'); await expect(input).toHaveValue('   '); assert.equal((await current()).messages.length, 0);
     await input.fill('中文选词');
     // Chromium IME confirmation, Windows legacy 229, and held-key repeats must not submit.
@@ -73,16 +100,26 @@ try {
     await expect(input).toHaveValue(''); assert((await current()).messages.find(m => m.role === 'user').userText.startsWith('第一行\n第二行'));
     await expect(page.getByLabel('下一条消息使用的能力')).toHaveCount(0);
     await expect(page.locator('.message.user .message-capabilities')).toContainText(skillName);
-    const invocation = (await rpcCalls()).filter(message => message.method === (provider === 'codex' ? 'turn/start' : 'session/prompt')).at(-1);
+    const invocation = (await rpcCalls()).find(message => message.method === (provider === 'codex' ? 'turn/start' : 'session/prompt') && (message.params.input?.[0]?.text || message.params.prompt?.[0]?.text || '').includes('第一行\n第二行'));
     if (provider === 'codex') {
       assert(invocation.params.input[0].text.startsWith('$codex-fixture-skill @fixture-plugin 第一行\n第二行'));
       assert(invocation.params.input.some(item => item.type === 'skill' && item.name === 'codex-fixture-skill'));
       assert(invocation.params.input.some(item => item.type === 'mention' && item.path === 'plugin://fixture-plugin@fixture-marketplace'));
     } else {
       assert(invocation.params.prompt[0].text.startsWith('/cursor-fixture-skill 第一行\n第二行'));
-      assert(invocation.params.prompt[0].text.includes('fixture-mcp'));
+      assert(!invocation.params.prompt[0].text.includes('本轮用户选择的插件工具'), 'MCP is available to Cursor without a per-message prompt');
     }
     const native = (await current()).nativeId;
+    await input.fill('切换模式也保留草稿');
+    await page.getByLabel('选择对话模式').click();
+    const modes = page.getByRole('dialog', { name: '对话模式', exact: true });
+    await modes.getByRole('button').filter({ hasText: /^Plan/ }).click();
+    await expect(modes).toHaveCount(0); await expect(input).toHaveValue('切换模式也保留草稿');
+    assert.equal((await current()).mode, 'plan'); assert.equal((await current()).nativeId, native);
+    await input.fill('/agent'); await input.press('Enter');
+    try { await expect.poll(async () => (await current()).mode).toBe('default'); }
+    catch (error) { console.log('Mode UI diagnostic', provider, await input.inputValue(), await page.locator('.inline-error').allTextContents(), (await rpcCalls()).slice(-12).map(c=>({method:c.method,mode:c.params?.modeId}))); await page.screenshot({path:path.join(artifacts,'composer-mode-failure.png')}); throw error; }
+    assert.equal((await current()).messages.filter(m=>m.role==='user').length,1);
     await input.fill('切换模型也保留草稿');
     await page.getByLabel('选择模型').click();
     await menu.getByRole('group', { name: '可用模型' }).getByRole('button').nth(1).click();
