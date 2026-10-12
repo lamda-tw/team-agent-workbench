@@ -29,7 +29,10 @@ import ipaddress
 if "acl_apply" not in globals():
     exec(compile(pathlib.Path(__file__).with_name("acl_support.py").read_text(encoding="utf-8"), "acl_support.py", "exec"))
 
-OPS = {"probe", "environment_prepare", "initialize", "status", "storage_usage", "storage_upgrade", "project_catalog", "project_purge", "user_create", "user_password", "user_enabled", "group_create", "user_groups", "group_member", "workspace_prepare", "recover", "egress_jump", "egress_jump_probe"}
+
+if "tg_handle" not in globals():
+    exec(compile(pathlib.Path(__file__).with_name("group_ops.py").read_text(encoding="utf-8"), "group_ops.py", "exec"))
+OPS = {"group_control", "probe", "environment_prepare", "initialize", "status", "storage_usage", "storage_upgrade", "project_catalog", "project_purge", "user_create", "user_password", "user_enabled", "group_create", "user_groups", "group_member", "workspace_prepare", "recover", "egress_jump", "egress_jump_probe"}
 REQUIRED_COMMANDS = ["useradd", "usermod", "groupadd", "gpasswd", "chpasswd", "pkill", "sshd", "setfacl"]
 MANAGED_SUPERVISOR = pathlib.Path('/etc/team-agent-workbench')
 SUPERVISOR_CONFIGS = [pathlib.Path('/etc/supervisor/supervisord.conf'), pathlib.Path('/etc/supervisord.conf'), MANAGED_SUPERVISOR / 'supervisord.conf']
@@ -393,7 +396,7 @@ def project_catalog(root, state):
     projects = []
     for group_id, group in (state.get("groups") or {}).items():
         workspace = group.get("workspace") or ""
-        if not workspace or group.get("provisioning"):
+        if not workspace or group.get("provisioning") or group.get('deletedAt') or group.get('purgedAt'):
             continue
         base = child(root, workspace[1:] if workspace.startswith("/") else workspace)
         if not base.is_dir() or base.is_symlink():
@@ -530,7 +533,7 @@ def storage_usage(root, state, request):
     categories = {key: {"key": key, "label": label, **storage_metrics()} for key, label in STORAGE_LABELS.items()}
     groups, users, project_names = {}, {}, {}
     for group_id, group in state.get("groups", {}).items():
-        if not group.get("workspace") or group.get("provisioning"):
+        if not group.get("workspace") or group.get("provisioning") or group.get('deletedAt') or group.get('purgedAt'):
             continue
         group_path = group["workspace"].lstrip("/")
         groups[group_id] = {
@@ -750,11 +753,17 @@ def assign_groups(root, state, request):
     ensure_user(state, username)
     login = user_login(state, username)
     groups = request.get("groups", [])
-    if not isinstance(groups, list) or any(g not in state["groups"] or not state["groups"][g].get("workspace") for g in groups):
+    archived = [name for name in state['users'][username].get('groups',[]) if state['groups'].get(name,{}).get('deletedAt') and not state['groups'][name].get('purgedAt')]
+    archived_admins = [name for name in archived if name in state['users'][username].get('contentAdminGroups',[])]
+    if isinstance(groups,list): groups = [name for name in groups if name not in archived]
+    if not isinstance(groups, list) or any(g not in state["groups"] or not state["groups"][g].get("workspace") or state["groups"][g].get("deletedAt") or state["groups"][g].get("purgedAt") for g in groups):
         raise ValueError("仅可分配已准备好工作目录的团队用户组")
     content_admin_groups = request.get("contentAdminGroups", [])
+    if isinstance(content_admin_groups,list): content_admin_groups = [name for name in content_admin_groups if name not in archived]
     if not isinstance(content_admin_groups, list) or any(g not in groups for g in content_admin_groups):
         raise ValueError("组管理员必须是对应项目组成员")
+    tg_creator_change(state, username, groups, content_admin_groups)
+    groups = list(dict.fromkeys(groups + archived)); content_admin_groups = list(dict.fromkeys(content_admin_groups + archived_admins))
     desired = set(groups) | {state["groups"][g]["adminGroup"] for g in content_admin_groups}
     managed = set(state["groups"]) | {g["adminGroup"] for g in state["groups"].values()}
     import grp
@@ -777,17 +786,10 @@ def load(root):
     return json.loads(file.read_text(encoding="utf-8"))
 
 def write_roles(root, state):
-    roles = {"version": 1, "membershipVersion": 1, "root": str(root), "storageVersion": state.get("storageVersion", 0), "users": {}}
-    for username, user in state["users"].items():
-        if user["enabled"] and not user.get("missing") and not user.get("provisioning"):
-            groups = [{"id": name, "name": state["groups"][name]["label"], "workspace": state["groups"][name].get("workspace") if not state["groups"][name].get("provisioning") else None} for name in user.get("groups", []) if name in state["groups"]]
-            assigned = [group for group in groups if group["id"] in user.get("contentAdminGroups", [])]
-            roles["users"][username] = {"groups": groups, "contentGroups": assigned}
-    role_file = child(root, ".workbench/roles.json")
-    atomic_json(role_file, roles)
-    os.chmod(role_file, 0o644)
+    tg_publish_roles(root, state)
     if state.get("storageVersion") == 1:
         prepare_request_directories(root, state)
+    return
 
 
 def save(root, state):
@@ -1042,6 +1044,7 @@ def actual_state(state):
             record = pwd.getpwnam(login)
             shadow = shadows[login]
             expires = int(shadow[7]) if shadow[7] else -1
+            user["identity"] = tg_identity(user)
             user["missing"] = record.pw_uid != user["uid"]
             user["enabled"] = not user["missing"] and not shadow[1].startswith(("!", "*")) and (expires < 0 or expires > today)
             user["groups"] = [g.gr_name for g in grp.getgrall() if login in g.gr_mem or g.gr_gid == record.pw_gid]
@@ -1076,6 +1079,8 @@ def enforce_continuity(root, state, request):
         return
     promotions = []
     for group in user.get('contentAdminGroups', []):
+        if current['groups'][group].get('deletedAt') or current['groups'][group].get('purgedAt'):
+            continue
         op = request['op']
         losing = (op == 'user_enabled' and request.get('enabled') is False) or (op == 'group_member' and request.get('group') == group and request.get('role') != 'admin') or (op == 'user_groups' and (group not in request.get('groups', []) or group not in request.get('contentAdminGroups', [])))
         others = [u for name, u in current['users'].items() if name != username and u.get('enabled') and not u.get('missing') and not u.get('provisioning') and group in u.get('groups', []) and group in u.get('contentAdminGroups', [])]
@@ -1150,7 +1155,7 @@ def _execute(request):
         login = system_username(username)
         password = check_password(request.get("password", ""))
         groups = request.get("groups", [])
-        if any(g not in state["groups"] or not state["groups"][g].get("workspace") for g in groups) or any(g not in groups for g in request.get("contentAdminGroups", [])):
+        if any(g not in state["groups"] or not state["groups"][g].get("workspace") or state["groups"][g].get("deletedAt") or state["groups"][g].get("purgedAt") for g in groups) or any(g not in groups for g in request.get("contentAdminGroups", [])):
             raise ValueError("请选择已准备好的用户组，组管理员须属于对应组")
         if not member_access_ready(root, state):
             configure_member_access(root, state)
@@ -1198,8 +1203,11 @@ def _execute(request):
         enabled = request.get("enabled") is True
         run(["usermod", "--expiredate", "" if enabled else "1", login])
         state["users"][username]["enabled"] = enabled
+        checkpoint(root, state, "账号登录状态已设置")
         if not enabled:
             terminate_connections(login)
+    elif op == "group_control":
+        result = tg_handle(root, state, None, request.get('command'), system=True)
     elif op == "group_create":
         label = group_label(request.get("label"))
         name = "wb_" + state["teamId"] + "_" + group_slug(label)
@@ -1251,7 +1259,7 @@ def _execute(request):
         group = request.get('group')
         record = state['groups'].get(group)
         role = request.get('role')
-        if not record or not record.get('workspace') or record.get('provisioning'):
+        if not record or not record.get('workspace') or record.get('provisioning') or record.get('deletedAt') or record.get('purgedAt'):
             raise ValueError('项目组不存在或工作目录尚未准备好')
         if role not in ['member', 'admin', 'remove']:
             raise ValueError('无效成员操作')

@@ -17,8 +17,9 @@ export class AdminConnection {
   async connect(profile: AdminProfile, password: string, sudoPassword: string, trust: (key: string) => Promise<boolean>, login = profile.username): Promise<AdminProfile> {
     this.disconnect();
     const acl = await fs.readFile(path.join(path.dirname(this.scriptPath), 'acl_support.py'));
-    const worker = deflateSync(Buffer.concat([acl, Buffer.from('\n'), await fs.readFile(path.join(path.dirname(this.scriptPath), 'content.py'))])).toString('base64');
-    this.code = deflateSync(Buffer.concat([acl, Buffer.from("\n"), Buffer.from("CONTENT_WORKER_ZLIB_BASE64 = '" + worker + "'\n"), await fs.readFile(this.scriptPath)])).toString('base64');
+    const groupCode = await fs.readFile(path.join(path.dirname(this.scriptPath), 'group_ops.py'));
+    const worker = deflateSync(Buffer.concat([acl, Buffer.from('\n'), groupCode, Buffer.from('\n'), await fs.readFile(path.join(path.dirname(this.scriptPath), 'content.py'))])).toString('base64');
+    this.code = deflateSync(Buffer.concat([acl, Buffer.from("\n"), groupCode, Buffer.from("\n"), Buffer.from("CONTENT_WORKER_ZLIB_BASE64 = '" + worker + "'\n"), await fs.readFile(this.scriptPath)])).toString('base64');
     const client = new Client(); this.client = client; this.sudoPassword = sudoPassword || password;
     try {
       let fingerprint = '', identityChanged = false, firstConnectionCancelled = false;
@@ -40,11 +41,6 @@ export class AdminConnection {
         throw error;
       });
       this.snapshot.profile = { ...profile, fingerprint }; this.rawReady = true;
-      const contentGroups = await this.readContentRoles(profile);
-      if (contentGroups.length) {
-        this.snapshot = { ...this.snapshot, connected: true, verified: true, role: 'project_admin', actor: profile.username, contentGroups };
-        this.sudoPassword = ''; this.changed(); return this.snapshot.profile!;
-      }
       // id -u is fixed and runs under the authenticated SSH account.
       const uid = await this.simple('id -u');
       const probe = await this.execute({ op: 'probe' }, uid.trim() !== '0');
@@ -63,38 +59,10 @@ export class AdminConnection {
     }
   }
   private useSudo = true;
-  private async readContentRoles(profile: AdminProfile): Promise<{ id: string; name: string }[]> {
-    // This root-owned, non-writable manifest is only an entry-point assignment.
-    // Filesystem permissions still govern all actual access. No client role flag grants sudo.
-    return new Promise(resolve => {
-      let done = false; let channel: import('ssh2').SFTPWrapper | undefined;
-      const finish = (roles: { id: string; name: string }[]) => { if (done) return; done = true; clearTimeout(timer); channel?.end(); resolve(roles); };
-      const timer = setTimeout(() => finish([]), 10000);
-      this.client!.sftp(async (error, sftp) => {
-        if (error) { finish([]); return; } channel = sftp;
-        if (done) { sftp.end(); return; }
-        for (const base of ['', profile.root]) {
-          try {
-            for (const file of [base || '/', base + '/.workbench', base + '/.workbench/roles.json']) {
-              const stat = await new Promise<import('ssh2').Stats>((resolve, reject) => sftp.lstat(file, (e, value) => e ? reject(e) : resolve(value)));
-              if (stat.uid !== 0 || (stat.mode & 0o022) || stat.isSymbolicLink()) throw new Error('角色文件权限不可信');
-              if (file.endsWith('.json') && (!stat.isFile() || stat.size > 256 * 1024)) throw new Error('角色文件异常');
-            }
-            const data = await new Promise<Buffer>((resolve, reject) => sftp.readFile(base + '/.workbench/roles.json', (e, buffer) => e ? reject(e) : resolve(buffer)));
-            const manifest = JSON.parse(data.toString('utf8'));
-            if (manifest.version !== 1 || manifest.root !== profile.root) continue;
-            const roles = manifest.users?.[profile.username]?.contentGroups;
-            if (Array.isArray(roles) && roles.every(g => typeof g.id === 'string' && typeof g.name === 'string')) { finish(roles); return; }
-          } catch {}
-        }
-        finish([]);
-      });
-    });
-  }
   private simple(command: string) {
     return new Promise<string>((resolve, reject) => {
       let channel: ClientChannel | undefined;
-      const timer = setTimeout(() => { channel?.close(); reject(new Error('此账号未取得管理员或项目组管理员资格；请由总管理员分配权限')); }, 15000);
+      const timer = setTimeout(() => { channel?.close(); reject(new Error('管理端需要 Linux root 或 sudo 账号；组内管理请使用用户端')); }, 15000);
       this.client!.exec(command, (error, stream) => {
         if (error) { clearTimeout(timer); reject(error); return; }
         channel = stream;

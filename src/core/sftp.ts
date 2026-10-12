@@ -1,3 +1,4 @@
+import { groupCommandSchema, type GroupCommand, type TeamGroup } from '../shared/team-groups';
 import { storageRequest } from './storage-requests';
 import { forwardEgress } from './ssh-egress';
 import type { AssignmentCreate, AssignmentMember, AssignmentStatusChange, ProjectAssignment, AssignmentUpload, AssignmentFile } from '../shared/assignments';
@@ -129,7 +130,7 @@ export class SftpConnection {
         // An unrecognised path may simply be newer than this client; keep the reason visible instead of calling the record corrupt.
         if (typeof workspace !== 'string' || (workspace && (!groupWorkspacePattern.test(workspace) || roots.has(workspace)))) throw new Error('用户组的共享目录路径无法识别，请先升级用户版；若仍失败，请联系管理员核对成员信息');
         seen.add(g.id); if (workspace) roots.add(workspace);
-        return { groupName: g.id, groupLabel: g.name, path: workspace, canonicalPath: workspace, canCreateProject: !!workspace && Array.isArray(user.contentGroups) && user.contentGroups.some((a: any) => a.id === g.id && a.workspace === workspace), ...(!workspace ? { accessError: '管理员尚未完成工作组目录配置' } : {}) };
+        return { role: ['creator','manager','member'].includes(g.role) ? g.role : undefined, creator: typeof g.creator === 'string' ? g.creator : undefined, groupName: g.id, groupLabel: g.name, path: workspace, canonicalPath: workspace, canCreateProject: !!workspace && Array.isArray(user.contentGroups) && user.contentGroups.some((a: any) => a.id === g.id && a.workspace === workspace), ...(!workspace ? { accessError: '管理员尚未完成工作组目录配置' } : {}) };
       });
     } catch (e: any) { throw new Error('无法读取账号的工作组信息：' + e.message); }
   }
@@ -188,6 +189,19 @@ export class SftpConnection {
   private request(data: Record<string, unknown>, binding?: RemoteBinding, local?: string, progress?: (bytes: number, total: number) => void, requestId?: string, phase?: (value: TransferPhase) => Promise<void> | void) {
     this.requireStorage(); const s = this.channel(binding), profile = this.profile!;
     return storageRequest(s, profile.username, data, () => { if (this.channel(binding) !== s || this.profile !== profile) throw new Error('请求期间连接已改变'); }, local, progress, requestId, phase);
+  }
+  async groupCommand(raw: GroupCommand): Promise<TeamGroup | TeamGroup[] | {username:string;name:string}[]> {
+    const command = groupCommandSchema.parse(raw);
+    const result = await this.request({ op:'team_group', command }).catch((error:Error)=>{
+      if (/不支持的内容操作/.test(error.message)) throw new Error('服务器尚未支持项目组管理，请系统管理员在新版管理端点击“更新服务端功能”后重试');
+      throw error;
+    });
+    if (!['list','details','directory'].includes(command.action)) {
+      const profile = this.profile && structuredClone(this.profile), password = this.sessionPassword;
+      if (profile && password) await this.connect(profile, password, async()=>false);
+      await this.loadManifest();
+    }
+    return result;
   }
   async createProject(name: string, groupName?: string, brief?: ProjectBrief): Promise<Project> {
     await this.loadManifest();

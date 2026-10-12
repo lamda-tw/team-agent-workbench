@@ -161,14 +161,14 @@ test('remote storage usage is a scoped read-only administrator operation', async
     await assert.rejects(pending, /取消空间统计/);
   } finally { remote.disconnect(); await f.close(); }
 });
-test('project subadmin authenticates through protected server assignment and cannot manage users', async () => {
+test('group content managers cannot log into the system administration app', async () => {
   const f = await fixture('project'), remote = new AdminConnection(path.resolve('server/admin.py'), () => {});
   try {
-    await remote.connect({ host: '127.0.0.1', port: f.port, username: 'worker', fingerprint: '', root: '/srv/teamspace' }, 'login-secret', '', async () => true);
-    assert.equal(remote.snapshot.role, 'project_admin'); assert.deepEqual(remote.snapshot.contentGroups, [{ id: 'wb_test_ocr', name: 'OCR' }]);
+    await assert.rejects(remote.connect({ host: '127.0.0.1', port: f.port, username: 'worker', fingerprint: '', root: '/srv/teamspace' }, 'login-secret', '', async () => true));
+    assert.equal(remote.snapshot.verified, false); assert.equal(remote.snapshot.role, undefined);
     await assert.rejects(remote.operation({ op: 'user_create', username: 'bad', name: 'bad', password: 'new-secret' }), /只有总管理员/);
     await assert.rejects(remote.storageUsage({ path: '', offset: 0, limit: 100 }), /只有总管理员/);
-    assert.equal(f.commands.length, 0);
+    assert(f.commands.includes('id -u'));
   } finally { remote.disconnect(); await f.close(); }
 });
 test('writable role manifest cannot grant a project admin entry', async () => {
@@ -191,13 +191,13 @@ test('#7 remote operation failure automatically refreshes partial state for reco
 });
 
 
-test('admin app preserves literal server accounts and accepts mapped project members', async () => {
+test('admin app preserves literal root accounts and rejects mapped project members', async () => {
   for (const [role, alias, login] of [['root', 'OpsAdmin', 'OpsAdmin'], ['project', '张三', systemUsername('张三')]] as const) {
     const f = await fixture(role, false, alias, login), remote = new AdminConnection(path.resolve('server/admin.py'), () => {});
     try {
-      await remote.connect({ host: '127.0.0.1', port: f.port, username: alias, fingerprint: '', root: '/srv/teamspace' }, 'login-secret', '', async () => true);
-      assert.equal(remote.snapshot.role, role === 'root' ? 'administrator' : 'project_admin');
-      assert.equal(remote.snapshot.profile!.username, alias);
+      const connect = remote.connect({ host: '127.0.0.1', port: f.port, username: alias, fingerprint: '', root: '/srv/teamspace' }, 'login-secret', '', async () => true);
+      if (role === 'root') { await connect; assert.equal(remote.snapshot.role, 'administrator'); assert.equal(remote.snapshot.profile!.username, alias); }
+      else { await assert.rejects(connect); assert.equal(remote.snapshot.verified, false); }
     } finally { remote.disconnect(); await f.close(); }
   }
 });

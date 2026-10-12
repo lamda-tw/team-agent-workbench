@@ -28,9 +28,9 @@ export function ProjectBriefSettings({ project, admin, cancel, saved, saveLabel 
   const invalid = briefFields.filter(field => field.required).some(field => !brief[field.key].trim());
   return <><div className="modal-body project-settings-form">
     {localSettings}
-    <div className="callout"><span className="project-file-icon" aria-hidden="true">MD</span><div><b>{project.name}</b><small>{admin ? '下列字段与共享项目根目录中的“项目说明.md”一一对应；保存后会生成新版本并立即刷新该文件。' : '这是本组当前的项目说明，对应共享目录中的“项目说明.md”，由组管理员维护。'}</small></div></div>
+    <div className="callout"><span className="project-file-icon" aria-hidden="true">MD</span><div><b>{project.name}</b><small>{admin ? '下列字段与共享项目根目录中的“项目说明.md”一一对应；保存后会生成新版本并立即刷新该文件。' : '这是本组当前的项目说明，对应共享目录中的“项目说明.md”，由创建者或管理者维护。'}</small></div></div>
     {error && <div className="inline-error" role="alert">{error}</div>}
-    {!admin && <p className="muted small">只读，仅本组组管理员可修改。</p>}
+    {!admin && <p className="muted small">只读，仅本组创建者或管理者可修改。</p>}
     <BriefFields brief={brief} setBrief={setBrief} busy={busy} readOnly={!admin}/>
   </div><footer>{cancel && <button className="secondary" disabled={busy} onClick={cancel}>取消</button>}{admin && <button className="primary" disabled={busy || invalid} onClick={async () => {
     setBusy(true); setError('');

@@ -1,0 +1,12 @@
+.group-overview { display:flex; flex-wrap:wrap; align-items:center; gap:16px; color:#60776a; margin-bottom:18px; font-size:12px; }
+.group-members-table { width:100%; border-collapse:collapse; font-size:12px; }
+.group-members-table th,.group-members-table td { padding:12px 8px; text-align:left; border-bottom:1px solid #e6ece8; }
+.group-members-table small { display:block; color:#819187; margin-top:4px; }
+.group-member-add { display:flex; align-items:flex-end; gap:12px; margin-top:20px; }
+.group-member-add .field { flex:1; margin:0; }
+.group-member-add select { width:100%; }
+.group-operation-confirm { border:1px solid #e8d4c8; background:#fffaf7; border-radius:8px; padding:16px; margin-top:18px; font-size:12px; line-height:1.8; }
+.group-operation-confirm p { margin:8px 0 14px; }
+.group-projects,.group-view-tabs { margin:18px 0; }
+.group-projects p { margin:8px 0; font-size:12px; }
+.admin-group-overview { padding:24px; background:white; border:1px solid #e0e8e2; border-radius:10px; }

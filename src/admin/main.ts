@@ -86,6 +86,7 @@ if (ownDataDirectory(() => window)) app.whenReady().then(async () => {
           try { value = await probe.probe(); } finally { await probe.stop(); }
         }
       }
+      else if (action === 'group.control') { const result = await remote.operation({op:'group_control', command: payload as any}); value = remote instanceof AdminConnection ? result.value : result; }
       else if (action === 'connect') {
         if (remote.snapshot.busy || reverse.busy) throw new Error('请等待当前管理操作完成后更换连接');
         storageAbort?.abort(); storageAbort = undefined;

@@ -285,6 +285,23 @@ class AdminRecoveryTests(unittest.TestCase):
         self.assertEqual(admin.load(self.root)['users']['alice']['contentAdminGroups'], [])
         self.assertIn('alice', self.groups['wb_test_nlp'].gr_mem)
 
+    def test_editing_active_membership_preserves_recycled_group_roles(self):
+        for label in ['ocr', 'nlp']: self.execute('group_create', label=label)
+        self.execute('user_create',username='alice',name='Alice',password='test-password',groups=['wb_test_ocr','wb_test_nlp'],contentAdminGroups=['wb_test_ocr'])
+        state=admin.load(self.root);state['groups']['wb_test_ocr']['deletedAt']='2026-10-12T00:00:00Z';admin.save(self.root,state)
+        self.execute('user_groups',username='alice',groups=['wb_test_nlp'],contentAdminGroups=[])
+        user=admin.load(self.root)['users']['alice']
+        self.assertEqual(set(user['groups']),{'wb_test_ocr','wb_test_nlp'});self.assertEqual(user['contentAdminGroups'],['wb_test_ocr'])
+        self.assertIn('alice',self.groups['wb_test_ocr'].gr_mem);self.assertIn('alice',self.groups['wb_test_ocr_admin'].gr_mem)
+        with self.assertRaisesRegex(ValueError,'项目组不存在'):self.execute('group_member',username='alice',group='wb_test_ocr',role='admin')
+
+    def test_disabling_account_persists_denial_before_disconnect_failure(self):
+        self.execute('user_create',username='alice',name='Alice',password='test-password')
+        self.fail=lambda args:args[0]=='pkill'
+        with self.assertRaises(RuntimeError):self.execute('user_enabled',username='alice',enabled=False)
+        self.assertFalse(admin.load(self.root)['users']['alice']['enabled'])
+        self.assertIn('账号登录状态已设置',admin.load(self.root)['operations']['user_enabled:alice']['completed'])
+
     def test_group_member_recovery_preserves_newer_assignment_and_rejects_bad_roles(self):
         for label in ['ocr', 'nlp']: self.execute('group_create', label=label)
         self.execute('user_create', username='alice', name='Alice', password='test-password')

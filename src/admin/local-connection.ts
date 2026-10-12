@@ -1,3 +1,4 @@
+import { groupCommand, assertCreatorChange } from '../core/group-files';
 import { continuitySuccessors } from './continuity';
 import fs from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
@@ -56,11 +57,15 @@ export class LocalAdminConnection {
         }
         if ((!created && data.state.teamId !== this.teamId) || generation !== this.generation) throw new Error('本地共享区已改变，请重新连接');
         const state = data.state;
+        if (request.op === 'group_control') { const result = await groupCommand(this.root,data,undefined,request.command,true); this.snapshot.state = state; return result; }
+        if (request.op === 'group_member' && request.role !== 'admin') assertCreatorChange(state, request.username, request.role === 'remove' ? state.users[request.username]?.groups?.filter(g=>g!==request.group) : undefined, state.users[request.username]?.contentAdminGroups?.filter(g=>g!==request.group));
+        if (request.op === 'user_groups') assertCreatorChange(state, request.username, request.groups, request.contentAdminGroups);
+        if (request.op === 'group_member' && (state.groups[request.group]?.deletedAt || state.groups[request.group]?.purgedAt)) throw new Error('项目组已删除，请先在项目组管理中恢复');
         const user = 'username' in request && Object.hasOwn(state.users, request.username) ? state.users[request.username] : undefined;
         if (['user_password', 'user_enabled', 'user_groups', 'group_member'].includes(request.op) && !user) throw new Error('成员不存在');
         if (request.op === 'user_create' || request.op === 'user_groups') {
           const groups = request.groups || [], admins = request.contentAdminGroups || [];
-          if (groups.some(g => !state.groups[g]?.workspace) || admins.some(g => !groups.includes(g))) throw new Error('项目组不存在或组管理员未加入该组');
+          if (groups.some(g => !state.groups[g]?.workspace || state.groups[g]?.purgedAt || state.groups[g]?.deletedAt && !user?.groups?.includes(g)) || admins.some(g => !groups.includes(g))) throw new Error('项目组不存在或管理者未加入该组');
         }
         for (const { group, user: successor } of continuitySuccessors(state, request)) successor.contentAdminGroups = [...new Set([...(successor.contentAdminGroups || []), group])];
         switch (request.op) {
@@ -82,11 +87,15 @@ export class LocalAdminConnection {
           case 'workspace_prepare': if (!state.groups[request.group]?.workspace) throw new Error('项目组不存在'); break;
           case 'user_create':
             if ([data.administrator, ...Object.keys(state.users)].some(name => name.toLowerCase() === request.username.toLowerCase())) throw new Error('账号已存在（不允许创建仅大小写不同的重名账号）');
-            state.users[request.username] = { username: request.username, name: request.name, enabled: true, groups: request.groups || [], contentAdminGroups: request.contentAdminGroups || [] };
+            state.users[request.username] = { username: request.username, name: request.name, enabled: true, accountId: randomUUID(), groups: request.groups || [], contentAdminGroups: request.contentAdminGroups || [] };
             data.credentials[request.username] = passwordHash(request.password); break;
           case 'user_password': data.credentials[request.username] = passwordHash(request.password); break;
           case 'user_enabled': user!.enabled = request.enabled; break;
-          case 'user_groups': user!.groups = request.groups; user!.contentAdminGroups = request.contentAdminGroups; break;
+          case 'user_groups': {
+            const archived=(user!.groups||[]).filter(g=>state.groups[g]?.deletedAt&&!state.groups[g]?.purgedAt);
+            const admins=(user!.contentAdminGroups||[]).filter(g=>archived.includes(g));
+            user!.groups=[...new Set([...request.groups,...archived])];user!.contentAdminGroups=[...new Set([...(request.contentAdminGroups||[]).filter(g=>!archived.includes(g)),...admins])];break;
+          }
           case 'group_member': {
             const group = state.groups[request.group];
             if (!group?.workspace || group.provisioning) throw new Error('项目组不存在或工作目录尚未准备好');

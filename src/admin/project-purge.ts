@@ -10,7 +10,7 @@ const protectedNames = new Set(['.workbench-project.json', '项目说明.md', '.
 export async function catalogProjects(root: string, state: AdminState): Promise<ProjectCatalogItem[]> {
   const projects: ProjectCatalogItem[] = [];
   for (const [groupId, group] of Object.entries(state.groups || {})) {
-    if (!group.workspace || group.provisioning) continue;
+    if (!group.workspace || group.provisioning || group.deletedAt || group.purgedAt) continue;
     let entries;
     try { entries = await fs.readdir(await diskPath(root, group.workspace), { withFileTypes: true }); }
     catch { continue; }

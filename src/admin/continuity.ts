@@ -3,6 +3,7 @@ export function continuityImpact(state: AdminState | undefined, operation: Parti
   if (!state || !('username' in operation) || !operation.username) return [];
   const user = state.users[operation.username]; if (!user?.enabled) return [];
   return (user.contentAdminGroups || []).filter(group => {
+    if (state.groups[group]?.deletedAt || state.groups[group]?.purgedAt) return false;
     const losing = operation.op === 'user_enabled' ? operation.enabled === false : operation.op === 'group_member' ? operation.group === group && operation.role !== 'admin' : operation.op === 'user_groups' ? !operation.groups?.includes(group) || !operation.contentAdminGroups?.includes(group) : false;
     return losing && !Object.values(state.users).some(u => u.username !== user.username && u.enabled && !u.missing && !u.provisioning && u.groups?.includes(group) && u.contentAdminGroups?.includes(group));
   });

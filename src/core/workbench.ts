@@ -1,3 +1,4 @@
+import { groupCommandSchema, type GroupCommand } from '../shared/team-groups';
 import { conclusionUploadState, uploadBlocked } from '../shared/conclusion-upload';
 import { buildPreparationContext, cachedPreparationBrief, personalContextResults, preparationContextLimit, type PreparationContext } from './preparation-context';
 import { submissionRecord } from '../shared/submission';
@@ -937,6 +938,12 @@ export class Workbench {
     const workspace = this.remote.workspaces.find(w => w.groupName === groupName);
     if (!workspace?.canCreateProject || workspace.accessError) throw new Error('当前账号不是此工作组的项目组管理员，或目录无法访问');
     return this.createProject(name, groupName, projectBriefSchema.parse(brief));
+  }
+  async groupCommand(raw: GroupCommand) {
+    this.assertAccountReady(); if (!this.remote.connected) throw new Error('请先登录团队账号');
+    const result = await this.remote.groupCommand(groupCommandSchema.parse(raw));
+    if (!['list','details','directory'].includes(raw.action)) await this.refreshGroups();
+    this.broadcast(); return result;
   }
   async createProject(name: string, groupName?: string, brief?: ProjectBrief) {
     this.assertWorkspace(); const project = await this.remote.createProject(name, groupName, brief);

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { groupCommandSchema } from '../shared/team-groups';
 import { accountNameSchema, accountPasswordSchema } from '../shared/accounts';
 import { groupLabelMessage, groupLabelPattern } from '../shared/groups';
 import type { AdminEgressSnapshot } from '../shared/egress';
@@ -17,11 +18,11 @@ export const adminConnectSchema = z.object({
   profile: adminProfileSchema, password: z.string().max(4096).default(''), sudoPassword: z.string().max(4096).default(''),
 }).refine(input => input.profile.mode === 'local' || !!input.password, { path: ['password'], message: '请输入服务器登录密码' });
 export type AdminProfile = z.infer<typeof adminProfileSchema>;
-export type ManagedUser = { username: string; systemUsername?: string; name: string; enabled: boolean; uid?: number; groups?: string[]; contentAdminGroups?: string[]; missing?: boolean; provisioning?: boolean };
+export type ManagedUser = { username: string; systemUsername?: string; name: string; enabled: boolean; accountId?: string; identity?: string; marker?: string; uid?: number; groups?: string[]; contentAdminGroups?: string[]; missing?: boolean; provisioning?: boolean };
 export type ManagedGroup = AdminState['groups'][string];
 export type AdminJob = { id: string; op: string; request: Record<string, any>; status: 'running' | 'failed' | 'done'; completed: string[]; error?: string };
-export type AdminState = { initialized: boolean; egressJumpTargets?: { host: string; port: number }[]; bootstrapPending?: boolean; operations?: Record<string, AdminJob>; storageVersion?: number; teamId?: string; loginGroup?: string; sftpConfigured?: boolean; users: Record<string, ManagedUser>; groups: Record<string, { name: string; label: string; adminGroup: string; workspace?: string; provisioning?: boolean }> };
-export type AdminSnapshot = { profile?: AdminProfile; connectionError?: string; connected: boolean; verified: boolean; busy: boolean; actor?: string; role?: 'administrator' | 'project_admin'; contentGroups?: { id: string; name: string }[]; state?: AdminState; missingCommands?: string[]; setupIssues?: string[]; setupNotes?: string[]; aclBackend?: 'setfacl' | 'libacl' | null; serviceManager?: 'systemd' | 'supervisor' | null; egress?: AdminEgressSnapshot };
+export type AdminState = { initialized: boolean; egressJumpTargets?: { host: string; port: number }[]; bootstrapPending?: boolean; operations?: Record<string, AdminJob>; storageVersion?: number; teamId?: string; loginGroup?: string; sftpConfigured?: boolean; users: Record<string, ManagedUser>; groups: Record<string, { name: string; label: string; adminGroup: string; workspace?: string; provisioning?: boolean; creator?: { username: string; identity: string }; createdBy?: string; createdAt?: string; deletedAt?: string; deletedBy?: string; recyclePath?: string; purgeStartedAt?: string; purgedAt?: string }> };
+export type AdminSnapshot = { profile?: AdminProfile; connectionError?: string; connected: boolean; verified: boolean; busy: boolean; actor?: string; role?: 'administrator'; state?: AdminState; missingCommands?: string[]; setupIssues?: string[]; setupNotes?: string[]; aclBackend?: 'setfacl' | 'libacl' | null; serviceManager?: 'systemd' | 'supervisor' | null; egress?: AdminEgressSnapshot };
 export type StorageMetrics = { bytes: number; files: number; directories: number; directBytes: number; modifiedAt?: string };
 export type StorageCategoryKey = 'submissions' | 'trajectories' | 'curated' | 'project' | 'system' | 'unassigned';
 export type StorageCategoryUsage = StorageMetrics & { key: StorageCategoryKey; label: string };
@@ -51,6 +52,7 @@ export const adminOperationSchema = z.discriminatedUnion('op', [
   z.object({ op: z.literal('egress_jump'), ...egressTargetFields, enabled: z.boolean() }),
   z.object({ op: z.literal('egress_jump_probe'), ...egressTargetFields }),
   z.object({ op: z.literal('environment_prepare'), source: z.enum(['online', 'offline']), packageDirectory: z.string().max(2048).optional() }).refine(value => value.source !== 'offline' || !!value.packageDirectory?.startsWith('/'), '请填写服务器上的离线软件包绝对目录'),
+  z.object({ op: z.literal('group_control'), command: groupCommandSchema }),
   z.object({ op: z.literal('status') }), z.object({ op: z.literal('initialize') }), z.object({ op: z.literal('storage_upgrade') }),
   z.object({ op: z.literal('user_create'), username: accountNameSchema, name: z.string().max(120), password, groups: z.array(nameSchema).optional(), contentAdminGroups: z.array(nameSchema).optional() }),
   z.object({ op: z.literal('recover'), operationId: z.string().min(1).max(160), password: password.optional() }),

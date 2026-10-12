@@ -87,7 +87,7 @@ test('ordinary members can edit their local directory even when shared project s
   const initial = renderToStaticMarkup(createElement(ProjectDirectoryDialog, props));
   assert.match(initial, /暂不设置/); assert.match(initial, /保存并进入项目/);
   const settings = renderToStaticMarkup(createElement(ProjectBriefSettings, { project, admin: false, saved: async () => {}, localSettings: createElement(ProjectDirectoryForm, { ...props, directory: 'D:/project/code', embedded: true }) }));
-  assert.match(settings, /只读（仅本组组管理员可修改）/);
+  assert.match(settings, /只读，仅本组创建者或管理者可修改/);
   assert.match(settings, /<input aria-label="代码目录（选填）"[^>]*value="D:\/project\/code"/);
   assert.doesNotMatch(settings, /<input aria-label="代码目录（选填）"[^>]*disabled/);
   assert.match(settings, /<button class="primary">保存代码目录<\/button>/);

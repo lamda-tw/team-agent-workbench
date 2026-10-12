@@ -47,7 +47,7 @@ test('admin IPC authorizes reverse access, tests TLS, copies the pinned route an
     snapshot: AdminSnapshot = { connected: false, verified: false, busy: false };
     constructor() { current = this; }
     async connect(profile: AdminProfile) {
-      this.snapshot = { profile, connected: true, verified: true, busy: false, role: profile.username === 'root' ? 'administrator' : 'project_admin', state: { initialized: true, users: {}, groups: {}, egressJumpTargets: [{ host: 'other-admin.internal', port: 18443 }] } };
+      this.snapshot = { profile, connected: true, verified: profile.username === 'root', busy: false, role: profile.username === 'root' ? 'administrator' : undefined, state: { initialized: true, users: {}, groups: {}, egressJumpTargets: [{ host: 'other-admin.internal', port: 18443 }] } };
       return profile;
     }
     disconnect() { this.snapshot.connected = false; }

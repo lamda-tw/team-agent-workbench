@@ -16,6 +16,9 @@ import subprocess
 import sys
 import time
 import uuid
+if "tg_handle" not in globals():
+    exec(compile(pathlib.Path(__file__).with_name("group_ops.py").read_text(encoding="utf-8"), "group_ops.py", "exec"))
+
 
 if "acl_apply" not in globals():
     exec(compile(pathlib.Path(__file__).with_name("acl_support.py").read_text(encoding="utf-8"), "acl_support.py", "exec"))
@@ -224,7 +227,7 @@ def member(state, username):
 def locate(root, state, user, project_id):
     for group_name in user.get('groups', []):
         group = state['groups'].get(group_name)
-        if not group or not group.get('workspace') or group.get('provisioning'):
+        if not group or not group.get('workspace') or group.get('provisioning') or group.get('deletedAt') or group.get('purgedAt'):
             continue
         base = safe(root, group['workspace'])
         for directory in base.iterdir():
@@ -630,6 +633,8 @@ def save_directions(root, username, raw):
 def handle(root, state, username, request, incoming=None):
     user = member(state, username)
     op = request.get('op')
+    if op == 'team_group':
+        return tg_handle(root, state, username, request.get('command'))
     if op in ('account_read', 'account_write', 'account_file_upload', 'account_file_download'):
         identity = hashlib.sha256(json.dumps([username, user.get('uid'), user.get('marker')]).encode()).hexdigest()
         file = safe(root, '.workbench/admin/accounts/' + identity + '.json')
@@ -682,8 +687,8 @@ def handle(root, state, username, request, incoming=None):
     if op == 'create_project':
         group_name = request.get('groupName')
         group = state['groups'].get(group_name)
-        if group_name not in user.get('groups', []) or group_name not in user.get('contentAdminGroups', []) or not group or not group.get('workspace'):
-            raise PermissionError('只有本组组管理员可以创建项目')
+        if group_name not in user.get('groups', []) or group_name not in user.get('contentAdminGroups', []) or not group or not group.get('workspace') or group.get('deletedAt') or group.get('purgedAt'):
+            raise PermissionError('只有本组管理者可以创建项目')
         name = text(request.get('name'), 180).strip()
         if not name or name.startswith('.') or name.endswith('.') or '/' in name or '\\' in name or len(name.encode()) > 180:
             raise ValueError('项目名不合法')
@@ -705,7 +710,7 @@ def handle(root, state, username, request, incoming=None):
             raise
         return {'projectId': project['id']}
     directory, project, group_name, group = locate(root, state, user, request.get('projectId'))
-    admin = group_name in user.get('contentAdminGroups', [])
+    admin = tg_role(state, group, username) in ('creator','manager')
     gid = group['gid']
     if op == 'publish_attachment':
         sha = request.get('sha256')

@@ -26,7 +26,7 @@ for (const edition of ['user', 'admin']) {
   }
   const assets = await publishRuntimeAssets(out, files);
   const main = await build({ entryPoints: [edition === 'user' ? 'src/main/index.ts' : 'src/admin/main.ts'], outfile: out + '/main.cjs', write: false, bundle: true, platform: 'node', format: 'cjs', target: 'node22', external: ['electron', 'ssh2'], sourcemap: false, define: { __WORKBENCH_ASSETS__: JSON.stringify(assets) } });
-  if (edition === 'admin') { await copyFile('server/acl_support.py', out + '/acl_support.py'); await copyFile('server/admin.py', out + '/admin.py'); await copyFile('server/content.py', out + '/content.py'); }
+  if (edition === 'admin') { await copyFile('server/acl_support.py', out + '/acl_support.py'); await copyFile('server/group_ops.py', out + '/group_ops.py'); await copyFile('server/admin.py', out + '/admin.py'); await copyFile('server/content.py', out + '/content.py'); }
   await copyDependency('ssh2', out);
   await writeFile(out + '/package.json', JSON.stringify({ name: 'team-agent-' + edition, version, description: 'Team Agent ' + edition, author: 'Team Agent Workbench', main: 'main.cjs', dependencies: { ssh2: '^1.17.0' } }, null, 2));
   // Keep conventional paths for release verification; running processes use assets/<hash>.

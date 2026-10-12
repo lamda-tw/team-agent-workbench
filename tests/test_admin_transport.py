@@ -30,13 +30,14 @@ class AdminTransportTests(unittest.TestCase):
 
     def bundle(self, echo=False):
         acl = (ROOT / 'server/acl_support.py').read_text(encoding='utf-8')
+        groups = (ROOT / 'server/group_ops.py').read_text(encoding='utf-8')
         program = (ROOT / 'server/admin.py').read_text(encoding='utf-8')
         if echo:
             # Replace only the privileged business operation, not the bootstrap
             # or JSON/stream handling that caused the real startup failure.
             self.assertEqual(program.count('result = main(request)'), 1)
             program = program.replace('result = main(request)', 'result = {"request": request}')
-        return base64.b64encode(zlib.compress((acl + '\n' + program).encode('utf-8'))) + b'\n'
+        return base64.b64encode(zlib.compress((acl + '\n' + groups + '\n' + program).encode('utf-8'))) + b'\n'
 
     def test_bundled_entry_reaches_request_validation_after_reading_code(self):
         # Invalid operation is rejected before any Linux/root/filesystem access.

@@ -32,7 +32,7 @@ export async function scanLocalStorage(root: string, state: AdminState, raw: Sto
   const users = new Map<string, StorageUserUsage>();
   const projects = new Map<string, Set<string>>();
   for (const [id, group] of Object.entries(state.groups || {})) {
-    if (!group.workspace || group.provisioning) continue;
+    if (!group.workspace || group.provisioning || group.deletedAt || group.purgedAt) continue;
     groups.set(id, { id, label: group.label, path: group.workspace.replace(/^\//, ''), projects: 0, members: Object.values(state.users || {}).filter(user => user.groups?.includes(id)).length, submissionsBytes: 0, trajectoriesBytes: 0, curatedBytes: 0, projectBytes: 0, unassignedBytes: 0, ...emptyMetrics() });
     projects.set(id, new Set());
   }

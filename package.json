@@ -29,6 +29,7 @@
     "start:admin": "npm run build && electron dist/admin",
     "test:local-ui": "node scripts/local-smoke.mjs",
     "test:workgroups-ui": "node scripts/workgroups-smoke.mjs",
+    "test:team-groups-ui": "tsx scripts/team-groups-smoke.ts",
     "test:sidebar-ui": "tsx scripts/sidebar-layout-smoke.ts",
     "test:connection-ui": "node scripts/connection-setup-smoke.mjs",
     "test:admin-ui": "node scripts/admin-management-smoke.mjs",

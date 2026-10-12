@@ -1,3 +1,5 @@
+import { groupCommand, groupRole } from './group-files';
+import type { GroupCommand } from '../shared/team-groups';
 import { atomicJson } from './store';
 import { ContentFiles } from './content-files';
 import { AssignmentFiles } from './assignment-files';
@@ -105,8 +107,8 @@ export class LocalFileConnection {
     const data = await readRegistry(this.root);
     if (connection !== this.channel() || proof !== this.proof || profile !== this.profile) throw new Error('连接已改变');
     const user = authorizeUser(data, profile.username, proof);
-    const group = Object.values(data.state.groups).find(g => g.workspace && withinRemote(g.workspace, target));
-    if (!group || !user.groups?.includes(group.name)) throw new Error('模拟权限拒绝：不属于此项目组');
+    const group = Object.values(data.state.groups).find(g => !g.deletedAt && !g.purgedAt && g.workspace && withinRemote(g.workspace, target));
+    if (!group || group.deletedAt || group.purgedAt || !user.groups?.includes(group.name)) throw new Error('模拟权限拒绝：不属于此项目组');
     if (create && !user.contentAdminGroups?.includes(group.name)) throw new Error('当前账号不是此工作路径的项目组管理员');
     return { user, group };
   }
@@ -144,13 +146,14 @@ export class LocalFileConnection {
     catch (e) { if (this.profile === profile && this.proof === proof) { this.workspaces = []; this.workspace = undefined; profile.projects = []; this.changed(); } throw e; }
     const workspaces: WorkspaceAccess[] = [], projects: Project[] = [];
     for (const name of user.groups || []) {
-      const group = data.state.groups[name]; if (!group) continue;
+      const group = data.state.groups[name]; if (!group || group.deletedAt || group.purgedAt) continue;
       const workspace: WorkspaceAccess = { path: group.workspace || '', canonicalPath: group.workspace || '', groupName: group.name, groupLabel: group.label, canCreateProject: false };
       workspaces.push(workspace);
       try {
         if (!group.workspace || group.provisioning) throw new Error('管理员尚未完成工作组目录配置');
         await this.verifyDirectory(group.workspace);
-        workspace.canCreateProject = !!user.contentAdminGroups?.includes(group.name);
+        workspace.role = groupRole(data.state, group, user.username); workspace.creator = group.creator?.username;
+        workspace.canCreateProject = ['creator','manager'].includes(workspace.role || '');
         const entries = await fs.readdir(await diskPath(this.root, group.workspace), { withFileTypes: true });
         workspace.isEmpty = false;
         if (entries.length > 500) throw new Error('工作组目录超过 500 项，请联系管理员整理');
@@ -165,6 +168,17 @@ export class LocalFileConnection {
     this.changed(); return projects;
   }
   loadManifest() { return this.discoverProjects(); }
+  async groupCommand(command: GroupCommand) {
+    const profile = this.channel().profile!, proof = this.proof;
+    const result = await registryLock(this.root, async () => {
+      const data = await readRegistry(this.root); authorizeUser(data, profile.username, proof);
+      if (this.profile !== profile || this.proof !== proof) throw new Error('账号已改变');
+      return groupCommand(this.root, data, profile.username, command);
+    });
+    if (!['list','details','directory'].includes(command.action)) await this.loadManifest();
+    this.changed(); return result;
+  }
+
   async createProject(name: string, groupName?: string, rawBrief?: ProjectBrief) {
     const brief = rawBrief === undefined ? undefined : projectBriefSchema.parse(rawBrief);
     await this.loadManifest();

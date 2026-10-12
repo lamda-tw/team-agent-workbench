@@ -14,7 +14,7 @@ test('jump settings expose the existing SSH port and limit changes to connected 
   const enabled = render(base);
   assert.match(enabled, /2202/); assert.match(enabled, /admin.internal:443/); assert.match(enabled, /测试服务器到出口/);
   assert.doesNotMatch(enabled, /disabled=""/);
-  for (const remote of [{ ...base, connected: false }, { ...base, role: 'project_admin' as const }, { ...base, profile: { ...base.profile!, mode: 'local' as const } }]) {
+  for (const remote of [{ ...base, connected: false }, { ...base, role: undefined, verified: false }, { ...base, profile: { ...base.profile!, mode: 'local' as const } }]) {
     assert.equal((render(remote).match(/disabled=""/g) || []).length, 3);
   }
   const allowed = render({ ...base, state: { ...base.state!, egressJumpTargets: [{ host: config.publicHost, port: config.listenPort }] } });

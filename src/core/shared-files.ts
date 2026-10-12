@@ -1,3 +1,4 @@
+import type { GroupCommand } from '../shared/team-groups';
 import type { ContentEdit, ContentMerge, ContentMetadata } from '../shared/content';
 import type { SharedServerRoute } from '../shared/egress';
 import type { AccountSnapshot } from '../shared/account-data';
@@ -39,6 +40,7 @@ export class SharedFiles {
   binding(id: string) { return this.backend.binding(id); }
   verifyWorkspace(target: string) { return this.backend.verifyWorkspace(target); }
   loadManifest() { return this.backend.loadManifest(); }
+  groupCommand(command: GroupCommand) { return this.backend.groupCommand(command); }
   createProject(name: string, groupName?: string, brief?: ProjectBrief) { return this.backend.createProject(name, groupName, brief); }
   contentList(binding: RemoteBinding) { return this.backend.contentList(binding); }
   contentHistory(binding: RemoteBinding, id?: string, revision?: number, summary = false) { return this.backend.contentHistory(binding, id, revision, summary); }

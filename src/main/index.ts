@@ -67,7 +67,7 @@ async function dispatch(action: string, raw: unknown, owner: BrowserWindow): Pro
   const context = contexts.get(owner); if (!context) throw new Error('当前窗口的独立工作台尚未就绪');
   const { workbench, egress, broadcast, notice } = context;
   if (!['snapshot', 'remote.connect', 'window.new'].includes(action)) workbench.assertAccountReady();
-  const setupActions = new Set(['snapshot', 'window.new', 'content.updates', 'content.updates.read', 'content.updates.clear', 'content.updates.dismiss', 'settings.save', 'layout.sidebar', 'providers.detect', 'provider.auth', 'provider.login.cancel', 'choose.directory', 'choose.executable', 'server.identity.forget', 'remote.connect', 'remote.disconnect', 'provider.login', 'open.data', 'open.link', 'copy', 'session.stop', 'session.completion.read', 'remote.manifest', 'session.history', 'handoff.read', 'egress.configure', 'egress.test']);
+  const setupActions = new Set(['snapshot', 'window.new', 'group.control', 'content.updates', 'content.updates.read', 'content.updates.clear', 'content.updates.dismiss', 'settings.save', 'layout.sidebar', 'providers.detect', 'provider.auth', 'provider.login.cancel', 'choose.directory', 'choose.executable', 'server.identity.forget', 'remote.connect', 'remote.disconnect', 'provider.login', 'open.data', 'open.link', 'copy', 'session.stop', 'session.completion.read', 'remote.manifest', 'session.history', 'handoff.read', 'egress.configure', 'egress.test']);
   if (!setupActions.has(action)) workbench.assertWorkspace();
   switch (action) {
     case 'snapshot': {
@@ -161,6 +161,7 @@ async function dispatch(action: string, raw: unknown, owner: BrowserWindow): Pro
     case 'project.create': { const p = z.object({ name: z.string().min(1).max(180), groupName: z.string().optional(), brief: projectBriefSchema.optional() }).parse(raw); return workbench.createProject(p.name, p.groupName, p.brief); }
     case 'project.initialize': { const p = z.object({ name: z.string().min(1).max(180), groupName: z.string().min(1).max(80), contextKey: z.string().max(4096), brief: projectBriefSchema }).parse(raw); return workbench.initializeProject(p.name, p.groupName, p.brief, p.contextKey); }
     case 'remote.disconnect': workbench.remote.disconnect(); return true;
+    case 'group.control': return workbench.groupCommand(raw as any);
     case 'remote.manifest': return workbench.refreshGroups();
     case 'remote.list': { const p = z.object({ projectId: z.string(), path: text }).parse(raw); return workbench.remote.list(workbench.remote.binding(p.projectId), p.path); }
     case 'remote.preview': { const p = z.object({ projectId: z.string(), path: text }).parse(raw); return workbench.remote.preview(workbench.remote.binding(p.projectId), p.path); }
