@@ -35,6 +35,8 @@ import { prepareCodexStorage } from './codex-storage';
 import type { McpMutation } from '../shared/mcp';
 import { CursorMcp } from './cursor-mcp';
 import type { SessionMode } from '../shared/session-mode';
+import { listNativeSessions as listProviderSessions, nativeRecordAllowed, resolveNativeSession } from './native-sessions';
+import { applyNativeTranscript, readCodexTranscript, readCursorTranscript } from './native-transcript';
 import { sessionContext } from './session-context';
 import { isProtectedSessionSource, isRemovableSessionReference, sessionWithAvailableReferences } from '../shared/session-result-references';
 import { reconcileTeamResultReferences } from './session-result-references';
@@ -1228,6 +1230,7 @@ export class Workbench {
     // Completion may arrive during a same-account reconnect. Preserve the result
     // internally without using the user-facing accessor, which is locked at login.
     const s = this.store.sessions.find(session => session.id === id); if (!s) return;
+    if (s.nativeLive && s.purpose === 'work') { try { await this.readNativeTranscriptInto(s); } catch (error: any) { this.sessionNotice(s, '原会话记录尚未刷新：' + error.message); } }
     if (s.purpose === 'prepare') {
       const draft = this.store.drafts.find(d => d.prepareSessionId === id);
       if (draft && draft.generation === 'running') {
@@ -1276,6 +1279,40 @@ export class Workbench {
     const s = this.session(id); if (s.purpose !== 'work') throw new Error('此任务不是工作会话');
     if (this.sending.has(id) || this.stoppingSessions.has(id)) throw new Error('正在停止此会话，请稍后重新打开');
     s.closedAt = undefined; await this.store.save(); this.broadcast(); return s;
+  }
+  async listNativeSessions(provider: 'codex' | 'cursor') {
+    this.assertWorkspace();
+    const linked = new Map<string, string>();
+    for (const session of this.store.sessions) if (session.provider === provider && session.nativeId && this.ownsLocal(session.binding)) linked.set(session.nativeId, session.id);
+    return listProviderSessions(provider, linked);
+  }
+  private async readNativeTranscriptInto(session: AgentSession) {
+    if (!session.nativeLive || !session.nativePath || ['starting', 'running', 'approval'].includes(session.status)) return session;
+    if (session.provider !== 'codex' && session.provider !== 'cursor') return session;
+    if (!nativeRecordAllowed(session.provider, session.nativePath)) throw new Error(session.provider === 'codex' ? 'Codex 关联只能读取 Codex 自己的会话记录' : 'Cursor 关联只能读取 Cursor 自己的会话记录');
+    const parsed = session.provider === 'codex' ? await readCodexTranscript(session.nativePath) : readCursorTranscript(session.nativePath);
+    session.messages = applyNativeTranscript(session.messages, parsed);
+    await this.store.save(); this.broadcast(); return session;
+  }
+  async refreshNativeTranscript(id: string) { return this.readNativeTranscriptInto(this.session(id)); }
+  async linkNativeSession(provider: 'codex' | 'cursor', nativeId: string, projectId: string) {
+    this.assertWorkspace();
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(nativeId)) throw new Error('原会话标识无效');
+    const existing = this.store.sessions.find(session => session.provider === provider && session.nativeId === nativeId && this.ownsLocal(session.binding));
+    if (existing) {
+      if (existing.closedAt) await this.reopenSession(existing.id);
+      if (existing.nativeLive) await this.readNativeTranscriptInto(existing);
+      return existing;
+    }
+    const source = await resolveNativeSession(provider, nativeId);
+    if (!source || !nativeRecordAllowed(provider, source.nativePath)) throw new Error(provider === 'codex' ? '找不到这条 Codex 会话，请刷新列表后再选' : '找不到这条 Cursor 会话，请刷新列表后再选');
+    if (!source.cwd) throw new Error('这条会话没有工作目录，无法在工作台打开');
+    if (!(await fs.stat(source.cwd).catch(() => undefined))?.isDirectory()) throw new Error('这条会话的工作目录已经不在：' + source.cwd);
+    const session = await this.createSession(provider, source.cwd, projectId, 'work', undefined, source.model, 'inherit', false);
+    session.title = source.name; session.nativeId = nativeId; session.nativeLive = true; session.nativePath = source.nativePath;
+    try { await this.readNativeTranscriptInto(session); }
+    catch (error: any) { session.error = error.message; await this.store.save(); this.broadcast(); }
+    return session;
   }
   answer(id: string, requestId: string, option: string, answers?: Record<string, string | string[]>) { this.session(id); const runtime = this.runtimes.get(id); if (!runtime) throw new Error('CLI 连接已关闭'); return runtime.answer(requestId, option, answers); }
   async attachLocal(id: string, files: string[]) {

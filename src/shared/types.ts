@@ -35,7 +35,7 @@ export interface SubsessionReportPreview { childId: string; parentId: string; ti
 export type SessionNetworkRoute = 'direct' | 'management';
 export interface AgentSession {
   mode?: import('./session-mode').SessionMode; proposedPlan?: import('./session-mode').ProposedPlan;
-  id: string; title: string; provider: Provider; model?: string; closedAt?: string; nativeId?: string; nativePath?: string; codexStorage?: 'workbench'; codexNeedsRegistration?: boolean;
+  id: string; title: string; provider: Provider; model?: string; closedAt?: string; nativeId?: string; nativePath?: string; nativeLive?: boolean; codexStorage?: 'workbench'; codexNeedsRegistration?: boolean;
   cwd: string; purpose: 'work' | 'prepare'; networkRoute?: SessionNetworkRoute; parentId?: string; fork?: SubsessionFork; reports?: SubsessionReport[]; createdAt: string;
   status: 'idle' | 'starting' | 'running' | 'approval' | 'error'; error?: string; stoppedAt?: string;
   messages: Message[]; approvals: Approval[]; sources: SourceFile[]; binding?: RemoteBinding;

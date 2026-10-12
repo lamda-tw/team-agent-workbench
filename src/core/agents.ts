@@ -7,6 +7,7 @@ import { codexPermissionParams, codexPermissions, cursorPermissionArgs, cursorPe
 import { refreshCodexConfiguration, validateCodexStorage, type CodexStorage } from './codex-storage';
 import { CodexMcp } from './codex-mcp';
 import type { McpMutation } from '../shared/mcp';
+import { sameNativePath } from './native-transcript';
 import { CodexAuthBridge } from './codex-auth-bridge';
 import { permissionLabels } from '../shared/permission-presentation';
 import { codexCapabilities, cursorCommandCapabilities, cursorPluginCapabilities, emptyCapabilityCatalog } from './provider-capabilities';
@@ -90,10 +91,21 @@ export class AgentRuntime {
       await this.connectCodex();
       if (this.closing) return;
       const params = { cwd: s.cwd, ...(s.model ? { model: s.model } : {}), ...codexPermissionParams(s) };
-      const result = s.nativeId ? await this.rpc.request('thread/resume', { ...params, threadId: s.nativeId, ...(this.storage?.resumePath ? { path: this.storage.resumePath } : {}) }) : await this.rpc.request('thread/start', params);
-      s.nativeId = result.thread.id; s.nativePath = result.thread.path || this.storage?.resumePath || s.nativePath;
+      const expectedId = s.nativeId;
+      if (s.nativeLive && !expectedId) { const message = '这条会话还没有原会话标识'; this.finish(message); throw new Error(message); }
+      const result = expectedId ? await this.rpc.request('thread/resume', { ...params, threadId: expectedId, ...(this.storage?.resumePath ? { path: this.storage.resumePath } : {}) }) : await this.rpc.request('thread/start', params);
+      if (s.nativeLive) {
+        const returnedId = String(result.thread?.id || ''), returnedPath = String(result.thread?.path || '');
+        if (returnedId !== expectedId || !this.storage?.resumePath || !sameNativePath(returnedPath, this.storage.resumePath)) {
+          const message = 'Codex 没有继续写原来的会话文件，已停止，避免变成两份。';
+          this.closing = true; this.finish(message); await this.rpc.close().catch(() => {}); throw new Error(message);
+        }
+        s.nativeId = returnedId; s.nativePath = this.storage.resumePath;
+      } else {
+        s.nativeId = result.thread.id; s.nativePath = result.thread.path || this.storage?.resumePath || s.nativePath;
+        if (this.storage) { s.codexStorage = 'workbench'; delete s.codexNeedsRegistration; }
+      }
       this.nativeModel = result.model; this.nativeEffort = result.reasoningEffort;
-      if (this.storage) { s.codexStorage = 'workbench'; delete s.codexNeedsRegistration; }
       s.permissions = codexPermissions(result, 'runtime');
       await probeCodexCommand(this.rpc, s.permissions, s.cwd, result.sandbox);
       if (s.permissions.execution === 'blocked') s.permissionIssue = permissionIssue(s.permissions.executionDetail) || { kind: 'sandbox', message: s.permissions.executionDetail || 'CLI 命令自检未通过', at: now() };
@@ -108,8 +120,15 @@ export class AgentRuntime {
       if (s.purpose === 'work' && s.permissionMode === 'review' && (s.permissions.approval !== 'allowlist' || s.permissions.cursorConfig?.allow.length)) throw new Error('Cursor 权限策略仍包含自动审批或允许规则。请打开执行权限，点击“配置 Cursor Allowlist”后重试。');
       await this.rpc.request('initialize', { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false }, clientInfo: { name: 'team-agent-workbench', version: '0.4.0' } });
       await this.rpc.request('authenticate', { methodId: 'cursor_login' }, 120000);
+      if (s.provider !== 'cursor') throw new Error('当前会话不能接入 Cursor 的原会话');
+      if (s.nativeLive && !s.nativeId) { const message = '这条会话还没有原会话标识'; this.finish(message); throw new Error(message); }
       const result = s.nativeId ? await this.rpc.request('session/load', { sessionId: s.nativeId, cwd: s.cwd, mcpServers: [] }) : await this.rpc.request('session/new', { cwd: s.cwd, mcpServers: [] });
-      s.nativeId = result.sessionId || s.nativeId;
+      const returned = String(result.sessionId || '');
+      if (s.nativeLive && returned !== s.nativeId) {
+        const message = 'Cursor 打开了另一条会话，已停止。';
+        this.closing = true; this.finish(message); await this.rpc.close().catch(() => {}); throw new Error(message);
+      }
+      s.nativeId = returned || s.nativeId;
       this.cursorModes = (result.modes?.availableModes || []).map((mode: any) => mode.id);
       if (s.model) await this.rpc.request('session/set_model', { sessionId: s.nativeId, modelId: s.model });
       if (s.mode || s.permissionMode && s.permissionMode !== 'inherit') {

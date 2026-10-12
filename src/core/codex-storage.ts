@@ -62,6 +62,11 @@ async function locateRollout(root: string, id: string): Promise<string | undefin
   }
 }
 
+export async function findCodexRollout(home: string, id: string) {
+  if (!/^[a-f0-9-]{36}$/i.test(id)) return;
+  return await locateRollout(path.join(home, 'sessions'), id) || await locateRollout(path.join(home, 'archived_sessions'), id);
+}
+
 export async function refreshCodexConfiguration({ home, sourceHome }: Pick<CodexStorage, 'home' | 'sourceHome'>) {
   const previous = jobs.get(home) || Promise.resolve();
   const job = previous.catch(() => {}).then(() => initialize(home, sourceHome)); jobs.set(home, job);
@@ -72,15 +77,21 @@ export async function prepareCodexStorage(root: string, session: AgentSession, s
   const home = path.resolve(root, 'codex-home');
   await refreshCodexConfiguration({ home, sourceHome });
   let resumePath: string | undefined;
+  // A session the user explicitly linked keeps the personal rollout as its only record.
+  if (session.nativeLive) {
+    if (!session.nativeId || !/^[a-f0-9-]{36}$/i.test(session.nativeId)) throw new Error('原会话标识无效，无法恢复上下文');
+    resumePath = await findCodexRollout(sourceHome, session.nativeId);
+    if (!resumePath) throw new Error('找不到原会话记录，无法恢复上下文；请恢复原 Codex 会话文件后重试');
+  }
   // Account migration copies each owned rollout, not another account's SQLite index.
   // Resume by its explicit file so the CLI can register it in the new private index.
-  if (session.nativeId && session.codexNeedsRegistration) {
+  if (!session.nativeLive && session.nativeId && session.codexNeedsRegistration) {
     resumePath = await locateRollout(path.join(home, 'sessions'), session.nativeId) || await locateRollout(path.join(home, 'archived_sessions'), session.nativeId);
     if (!resumePath) throw new Error('迁移后的原会话记录未找到；请从保留的旧窗口目录恢复对应 Codex 历史后重试');
   }
   // Existing workbench sessions keep the full native history; only copy their own rollout.
   // Leave the original intact: removing entries from the desktop is a separate user action.
-  if (session.nativeId && session.codexStorage !== 'workbench') {
+  if (!session.nativeLive && session.nativeId && session.codexStorage !== 'workbench') {
     if (!/^[a-f0-9-]{36}$/i.test(session.nativeId)) throw new Error('原会话标识无效，无法恢复上下文');
     const source = await locateRollout(path.join(sourceHome, 'sessions'), session.nativeId) || await locateRollout(path.join(sourceHome, 'archived_sessions'), session.nativeId);
     if (!source) throw new Error('找不到原会话记录，无法恢复上下文；请恢复原 Codex 会话文件后重试');
