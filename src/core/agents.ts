@@ -15,6 +15,13 @@ import { CliConnectionTracker } from './cli-connection';
 import type { CliConnection } from '../shared/cli-connection';
 export interface AgentHooks { changed: () => void; event: (value: unknown) => void; done: () => void; authFailed?: (error: unknown) => void; needsApproval?: (kind: 'question' | 'approval') => void; connectionChanged?: (value: CliConnection) => void; }
 const now = () => new Date().toISOString();
+export const nativeRolloutForkError = 'Codex 没有继续写原来的会话文件，已停止，避免变成两份。';
+export function clearStoppedNativeFork(session: AgentSession) {
+  if (!session.nativeLive || session.error !== nativeRolloutForkError || ['starting', 'running', 'approval'].includes(session.status)) return false;
+  session.error = undefined;
+  if (session.status === 'error') session.status = 'idle';
+  return true;
+}
 const pretty = (x: unknown) => typeof x === 'string' ? x : JSON.stringify(x, null, 2);
 export class AgentRuntime {
   rpc: JsonRpc;
@@ -97,7 +104,7 @@ export class AgentRuntime {
       if (s.nativeLive) {
         const returnedId = String(result.thread?.id || ''), returnedPath = String(result.thread?.path || '');
         if (returnedId !== expectedId || !this.storage?.resumePath || !sameNativePath(returnedPath, this.storage.resumePath)) {
-          const message = 'Codex 没有继续写原来的会话文件，已停止，避免变成两份。';
+          const message = nativeRolloutForkError;
           this.closing = true; this.finish(message); await this.rpc.close().catch(() => {}); throw new Error(message);
         }
         s.nativeId = returnedId; s.nativePath = this.storage.resumePath;

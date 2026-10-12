@@ -11,7 +11,7 @@ import { AgentRuntime } from '../src/core/agents';
 import { Workbench } from '../src/core/workbench';
 import { prepareCodexStorage } from '../src/core/codex-storage';
 import { listNativeSessions, nativeRecordAllowed } from '../src/core/native-sessions';
-import { applyNativeTranscript, readCodexTranscript, sameNativePath } from '../src/core/native-transcript';
+import { applyNativeTranscript, nativeTranscriptChanged, readCodexTranscript, sameNativePath } from '../src/core/native-transcript';
 import { firstSelectableNativeSession, NativeSessionBrowser, NativeSessionPicker, nativeSessionsInGroup, nextNativeGroupSelection, nextNativeSelection } from '../src/renderer/native-sessions';
 import type { AgentSession, Message } from '../src/shared/types';
 import { grantTestWorkspace, offlineProjectId } from './fixtures/offline-workspace';
@@ -152,6 +152,8 @@ test('Codex transcript keeps dialogue and operations and leaves the personal fil
     assert.equal(merged[0].userText, '给人看的');
     assert.equal(merged[0].context?.accepted, true);
     assert.equal(applyNativeTranscript(messages, messages.slice(0, 1)).length, 3);
+    assert.equal(nativeTranscriptChanged(messages, messages), false);
+    assert.equal(nativeTranscriptChanged(messages, messages.slice(0, 2)), true);
     assert.equal(sameNativePath('file:///C:/work/a.jsonl', 'C:\\work\\a.jsonl'), process.platform === 'win32');
     const session = { id: 's', title: '关联', provider: 'codex' as const, cwd: root, purpose: 'work' as const, createdAt: '', status: 'idle' as const, messages: [], approvals: [], sources: [], autoUpload: false, handoffPath: path.join(root, 'handoff.md'), nativeId: codexId, nativeLive: true };
     const storage = await prepareCodexStorage(path.join(root, 'data'), session, personal);
@@ -211,6 +213,54 @@ test('linking a Codex session keeps its project name and reads the original reco
     assert.equal(imported.nativeLive, true);
     assert.equal(imported.nativePath, otherFile);
     assert.equal(wb.store.sessions.filter(session => session.nativeId === codexId || session.nativeId === looseId).length, 2);
+  } finally {
+    if (previous === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = previous;
+    await wb.close();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('a linked Codex session follows later writes to the original rollout', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'wb-native-follow-'));
+  const previous = process.env.CODEX_HOME;
+  let broadcasts = 0;
+  const wb = new Workbench(path.join(root, 'data'), () => { broadcasts += 1; }, () => {});
+  const waitFor = async (check: () => boolean, timeoutMs = 3000) => {
+    const started = Date.now();
+    while (!check()) {
+      if (Date.now() - started > timeoutMs) return false;
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+    return true;
+  };
+  try {
+    const codex = path.join(root, 'codex'), workspace = path.join(root, 'workspace');
+    process.env.CODEX_HOME = codex;
+    await fs.mkdir(path.join(codex, 'sessions', '2026', '10', '12'), { recursive: true });
+    await fs.mkdir(workspace, { recursive: true });
+    const file = path.join(codex, 'sessions', '2026', '10', '12', 'rollout-2026-10-12T00-00-00-' + codexId + '.jsonl');
+    const line = (id: string, text: string, at: number) => JSON.stringify({ type: 'event_msg', payload: { type: 'item_completed', completed_at_ms: at, item: { type: id.startsWith('u') ? 'UserMessage' : 'AgentMessage', id, content: [{ type: 'text', text }] } } }) + '\n';
+    await fs.writeFile(file, line('u1', '原来的问题', 1700000000000));
+    const db = new DatabaseSync(path.join(codex, 'state_5.sqlite'));
+    db.exec('CREATE TABLE projects (id TEXT, name TEXT, position INTEGER); CREATE TABLE thread_sections (id TEXT, name TEXT); CREATE TABLE threads (id TEXT, name TEXT, title TEXT, first_user_message TEXT, cwd TEXT, project_id TEXT, thread_section_id TEXT, archived INTEGER, recency_at_ms INTEGER, model TEXT);');
+    db.prepare('INSERT INTO threads (id, name, title, first_user_message, cwd, project_id, thread_section_id, archived, recency_at_ms, model) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(codexId, '继续修复用户端问题', '', '', workspace, null, null, 0, 10, null);
+    db.close();
+    await wb.store.init(); grantTestWorkspace(wb, workspace);
+    const linked = await wb.linkNativeSession('codex', codexId, offlineProjectId);
+    assert.equal(linked.messages.length, 1);
+    await new Promise(resolve => setTimeout(resolve, 400));
+    linked.status = 'running';
+    await fs.appendFile(file, line('a1', '还在运行时写入', 1700000001000));
+    await new Promise(resolve => setTimeout(resolve, 500));
+    assert.equal(linked.messages.length, 1);
+    linked.status = 'idle';
+    assert.equal(await waitFor(() => linked.messages.some(message => message.text === '还在运行时写入')), true);
+    await fs.appendFile(file, line('a2', '桌面端新回复', 1700000002000));
+    assert.equal(await waitFor(() => linked.messages.some(message => message.text === '桌面端新回复')), true);
+    const settled = broadcasts;
+    await new Promise(resolve => setTimeout(resolve, 500));
+    assert.equal(broadcasts, settled);
+    assert.equal(linked.messages.at(-1)?.text, '桌面端新回复');
   } finally {
     if (previous === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = previous;
     await wb.close();

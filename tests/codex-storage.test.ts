@@ -4,7 +4,9 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { DatabaseSync } from 'node:sqlite';
 import { prepareCodexStorage, validateCodexStorage } from '../src/core/codex-storage';
+import { clearStoppedNativeFork, nativeRolloutForkError } from '../src/core/agents';
 import type { JsonRpc } from '../src/core/rpc';
 import { pathToFileURL } from 'node:url';
 import type { AgentSession } from '../src/shared/types';
@@ -52,5 +54,44 @@ test('legacy Codex migration copies only the owned full rollout, retains the ori
     s.codexStorage = 'workbench'; const resumed = await prepareCodexStorage(path.join(root, 'data'), s, personal); assert.equal(resumed.resumePath, undefined);
     await assert.rejects(prepareCodexStorage(path.join(root, 'other'), { ...session(root), nativeId: randomUUID() }, personal), /找不到原会话记录/);
     await assert.rejects(prepareCodexStorage(personal, session(root), personal), /分开/);
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
+
+test('a linked Codex session drops the isolated copy and the stopped fork warning', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'wb-native-copy-')), personal = path.join(root, 'personal'), nativeId = randomUUID(), otherId = randomUUID();
+  try {
+    const personalFile = path.join(personal, 'sessions', '2026', '10', '12', 'rollout-2026-10-12T10-08-44-' + nativeId + '.jsonl');
+    await fs.mkdir(path.dirname(personalFile), { recursive: true });
+    await fs.writeFile(personalFile, 'original\n');
+    const data = path.join(root, 'data'), home = path.join(data, 'codex-home');
+    const copy = path.join(home, 'sessions', '2026', '10', '12', 'rollout-2026-10-12T10-09-07-' + nativeId + '.jsonl');
+    const other = path.join(path.dirname(copy), 'rollout-2026-10-12T10-09-07-' + otherId + '.jsonl');
+    await fs.mkdir(path.dirname(copy), { recursive: true });
+    await fs.writeFile(copy, 'stale copy\n');
+    await fs.writeFile(other, 'other thread\n');
+    await fs.mkdir(path.join(home, 'sqlite'), { recursive: true });
+    const db = new DatabaseSync(path.join(home, 'sqlite', 'state_5.sqlite'));
+    db.exec('CREATE TABLE threads (id TEXT, rollout_path TEXT)');
+    const insert = db.prepare('INSERT INTO threads (id, rollout_path) VALUES (?, ?)');
+    insert.run(nativeId, copy); insert.run(otherId, other); db.close();
+    const storage = await prepareCodexStorage(data, { ...session(root), nativeId, nativeLive: true, nativePath: personalFile }, personal);
+    assert.equal(storage.resumePath, personalFile);
+    await assert.rejects(fs.access(copy));
+    assert.equal(await fs.readFile(other, 'utf8'), 'other thread\n');
+    assert.equal(await fs.readFile(personalFile, 'utf8'), 'original\n');
+    const check = new DatabaseSync(path.join(home, 'sqlite', 'state_5.sqlite'), { readOnly: true });
+    const rows = check.prepare('SELECT id, rollout_path FROM threads').all() as { id: string; rollout_path: string }[];
+    check.close();
+    assert.equal(rows.find(row => row.id === nativeId)?.rollout_path, personalFile);
+    assert.equal(rows.find(row => row.id === otherId)?.rollout_path, other);
+    const stopped = { ...session(root), nativeLive: true, status: 'error' as const, error: nativeRolloutForkError };
+    assert.equal(clearStoppedNativeFork(stopped), true);
+    assert.equal(stopped.error, undefined); assert.equal(stopped.status, 'idle');
+    const running = { ...session(root), nativeLive: true, status: 'running' as const, error: nativeRolloutForkError };
+    assert.equal(clearStoppedNativeFork(running), false);
+    assert.equal(running.error, nativeRolloutForkError);
+    const otherError = { ...session(root), nativeLive: true, status: 'error' as const, error: '登录失败' };
+    assert.equal(clearStoppedNativeFork(otherError), false);
+    assert.equal(otherError.error, '登录失败');
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
