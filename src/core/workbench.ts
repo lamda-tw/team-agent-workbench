@@ -36,6 +36,7 @@ import type { McpMutation } from '../shared/mcp';
 import { CursorMcp } from './cursor-mcp';
 import type { SessionMode } from '../shared/session-mode';
 import { listNativeSessions as listProviderSessions, nativeRecordAllowed, resolveNativeSession } from './native-sessions';
+import { publishToNativeList } from './native-publish';
 import { applyNativeTranscript, readCodexTranscript, readCursorTranscript } from './native-transcript';
 import { sessionContext } from './session-context';
 import { isProtectedSessionSource, isRemovableSessionReference, sessionWithAvailableReferences } from '../shared/session-result-references';
@@ -1313,6 +1314,36 @@ export class Workbench {
     try { await this.readNativeTranscriptInto(session); }
     catch (error: any) { session.error = error.message; await this.store.save(); this.broadcast(); }
     return session;
+  }
+  async linkNativeSessions(provider: 'codex' | 'cursor', nativeIds: string[], projectId: string) {
+    this.assertWorkspace();
+    const ids = [...new Set(nativeIds)];
+    if (!ids.length) throw new Error('请选择要导入的会话');
+    if (ids.length > 50) throw new Error('一次最多导入 50 条会话');
+    for (const nativeId of ids) {
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(nativeId)) throw new Error('原会话标识无效');
+      if (this.store.sessions.some(session => session.provider === provider && session.nativeId === nativeId && this.ownsLocal(session.binding))) continue;
+      const source = await resolveNativeSession(provider, nativeId);
+      if (!source || !nativeRecordAllowed(provider, source.nativePath)) throw new Error(provider === 'codex' ? '找不到这条 Codex 会话，请刷新列表后再选' : '找不到这条 Cursor 会话，请刷新列表后再选');
+      if (!source.cwd) throw new Error('「' + source.name + '」没有工作目录，无法在工作台打开');
+      if (!(await fs.stat(source.cwd).catch(() => undefined))?.isDirectory()) throw new Error('「' + source.name + '」的工作目录已经不在');
+    }
+    const sessions = [];
+    for (const nativeId of ids) sessions.push(await this.linkNativeSession(provider, nativeId, projectId));
+    return sessions;
+  }
+  async publishToDesktop(id: string) {
+    const session = this.session(id);
+    if (session.purpose !== 'work') throw new Error('请在工作会话中登记到桌面端');
+    if (session.provider !== 'codex' && session.provider !== 'cursor') throw new Error('只有 Codex 和 Cursor 会话可以登记到桌面端');
+    if (['starting', 'running', 'approval'].includes(session.status)) throw new Error('请等这条会话结束再登记到桌面端');
+    if (session.nativeLive && session.nativePath && nativeRecordAllowed(session.provider, session.nativePath)) throw new Error(session.provider === 'codex' ? '这条会话已经在桌面 Codex 的列表里' : '这条会话已经在 Cursor 的会话列表里');
+    const published = await publishToNativeList(session, path.join(this.store.root, 'codex-home'));
+    session.nativeId = published.nativeId; session.nativePath = published.nativePath; session.nativeLive = true;
+    delete session.codexStorage; delete session.codexNeedsRegistration;
+    if (published.replaceTranscript) try { await this.readNativeTranscriptInto(session); }
+    catch (error: any) { session.error = error.message; }
+    await this.store.save(); this.broadcast(); return session;
   }
   answer(id: string, requestId: string, option: string, answers?: Record<string, string | string[]>) { this.session(id); const runtime = this.runtimes.get(id); if (!runtime) throw new Error('CLI 连接已关闭'); return runtime.answer(requestId, option, answers); }
   async attachLocal(id: string, files: string[]) {

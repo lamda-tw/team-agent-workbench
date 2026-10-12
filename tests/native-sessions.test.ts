@@ -11,7 +11,7 @@ import { Workbench } from '../src/core/workbench';
 import { prepareCodexStorage } from '../src/core/codex-storage';
 import { listNativeSessions, nativeRecordAllowed } from '../src/core/native-sessions';
 import { applyNativeTranscript, readCodexTranscript, sameNativePath } from '../src/core/native-transcript';
-import { firstSelectableNativeSession, NativeSessionBrowser, NativeSessionPicker } from '../src/renderer/native-sessions';
+import { firstSelectableNativeSession, NativeSessionBrowser, NativeSessionPicker, nextNativeGroupSelection, nextNativeSelection } from '../src/renderer/native-sessions';
 import type { AgentSession, Message } from '../src/shared/types';
 import { grantTestWorkspace, offlineProjectId } from './fixtures/offline-workspace';
 
@@ -111,11 +111,18 @@ test('linking a Codex session keeps its project name and reads the original reco
     await fs.mkdir(path.join(codex, 'sessions', '2026', '10', '12'), { recursive: true });
     await fs.mkdir(workspace, { recursive: true });
     const file = path.join(codex, 'sessions', '2026', '10', '12', 'rollout-2026-10-12T00-00-00-' + codexId + '.jsonl');
+    const otherFile = path.join(codex, 'sessions', '2026', '10', '12', 'rollout-2026-10-12T00-00-00-' + looseId + '.jsonl');
+    const missingFile = path.join(codex, 'sessions', '2026', '10', '12', 'rollout-2026-10-12T00-00-00-' + pinnedId + '.jsonl');
     await fs.writeFile(file, JSON.stringify({ type: 'event_msg', payload: { type: 'item_completed', completed_at_ms: 1700000000000, item: { type: 'UserMessage', id: 'u1', content: [{ type: 'text', text: '继续修复用户端' }] } } }) + '\n');
+    await fs.writeFile(otherFile, '{}\n');
+    await fs.writeFile(missingFile, '{}\n');
     const db = new DatabaseSync(path.join(codex, 'state_5.sqlite'));
     db.exec('CREATE TABLE projects (id TEXT, name TEXT, position INTEGER); CREATE TABLE thread_sections (id TEXT, name TEXT); CREATE TABLE threads (id TEXT, name TEXT, title TEXT, first_user_message TEXT, cwd TEXT, project_id TEXT, thread_section_id TEXT, archived INTEGER, recency_at_ms INTEGER, model TEXT);');
     db.prepare('INSERT INTO projects (id, name, position) VALUES (?, ?, ?)').run('project-1', '检索项目', 1);
-    db.prepare('INSERT INTO threads (id, name, title, first_user_message, cwd, project_id, thread_section_id, archived, recency_at_ms, model) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(codexId, '继续修复用户端问题', '很长的第一句', '很长的第一句', workspace, 'project-1', null, 0, 10, null);
+    const insert = db.prepare('INSERT INTO threads (id, name, title, first_user_message, cwd, project_id, thread_section_id, archived, recency_at_ms, model) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    insert.run(codexId, '继续修复用户端问题', '很长的第一句', '很长的第一句', workspace, 'project-1', null, 0, 10, null);
+    insert.run(looseId, '安装 jev', '', '', workspace, 'project-1', null, 0, 5, null);
+    insert.run(pinnedId, '目录丢了', '', '', path.join(root, 'missing'), 'project-1', null, 0, 1, null);
     db.close();
     await wb.store.init(); grantTestWorkspace(wb, workspace);
     const catalog = await wb.listNativeSessions('codex');
@@ -130,6 +137,14 @@ test('linking a Codex session keeps its project name and reads the original reco
     const again = await wb.linkNativeSession('codex', codexId, offlineProjectId);
     assert.equal(again.id, linked.id);
     assert.equal(wb.store.sessions.filter(session => session.nativeId === codexId).length, 1);
+    await assert.rejects(() => wb.linkNativeSessions('codex', [looseId, pinnedId], offlineProjectId), /目录丢了/);
+    assert.equal(wb.store.sessions.filter(session => session.nativeId === looseId).length, 0);
+    const imported = await wb.linkNativeSessions('codex', [codexId, looseId, codexId], offlineProjectId);
+    assert.deepEqual(imported.map(session => session.nativeId), [codexId, looseId]);
+    assert.equal(imported[0].id, linked.id);
+    assert.equal(imported[1].nativeLive, true);
+    assert.equal(imported[1].nativePath, otherFile);
+    assert.equal(wb.store.sessions.filter(session => session.nativeId === codexId || session.nativeId === looseId).length, 2);
   } finally {
     if (previous === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = previous;
     await wb.close();
@@ -237,20 +252,98 @@ test('a linked Cursor session keeps its original id', async () => {
   }
 });
 
+test('publishing a workbench session registers it in the desktop Codex and Cursor lists', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'wb-native-publish-'));
+  const previousCodex = process.env.CODEX_HOME, previousCursor = process.env.WORKBENCH_CURSOR_CHATS;
+  const wb = new Workbench(path.join(root, 'data'), () => {}, () => {});
+  try {
+    const codex = path.join(root, 'codex'), cursor = path.join(root, 'cursor-chats'), workspace = path.join(root, 'workspace');
+    process.env.CODEX_HOME = codex; process.env.WORKBENCH_CURSOR_CHATS = cursor;
+    await fs.mkdir(path.join(codex), { recursive: true });
+    await fs.mkdir(workspace, { recursive: true });
+    const db = new DatabaseSync(path.join(codex, 'state_5.sqlite'));
+    db.exec(`CREATE TABLE projects (id TEXT, name TEXT, position INTEGER);
+    CREATE TABLE thread_sections (id TEXT, name TEXT);
+    CREATE TABLE threads (
+      id TEXT, rollout_path TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, source TEXT NOT NULL,
+      model_provider TEXT NOT NULL, cwd TEXT NOT NULL, title TEXT NOT NULL, sandbox_policy TEXT NOT NULL, approval_mode TEXT NOT NULL,
+      tokens_used INTEGER NOT NULL DEFAULT 0, has_user_event INTEGER NOT NULL DEFAULT 0, archived INTEGER NOT NULL DEFAULT 0,
+      cli_version TEXT NOT NULL DEFAULT '', first_user_message TEXT NOT NULL DEFAULT '', memory_mode TEXT NOT NULL DEFAULT 'enabled',
+      preview TEXT NOT NULL DEFAULT '', recency_at INTEGER NOT NULL DEFAULT 0, recency_at_ms INTEGER NOT NULL DEFAULT 0,
+      history_mode TEXT NOT NULL DEFAULT 'legacy', name TEXT, is_pinned INTEGER NOT NULL DEFAULT 0, thread_source TEXT, originator TEXT, model TEXT,
+      project_id TEXT, thread_section_id TEXT
+    );`);
+    const taken = '01a0bc6c-6276-7110-bb10-8ab94a8fe0a0';
+    const takenFile = path.join(codex, 'sessions', '2026', '01', '02', `rollout-2026-01-02T00-00-00-${taken}.jsonl`);
+    await fs.mkdir(path.dirname(takenFile), { recursive: true });
+    await fs.writeFile(takenFile, '{"keep":true}\n');
+    db.prepare(`INSERT INTO threads (id, rollout_path, created_at, updated_at, source, model_provider, cwd, title, sandbox_policy, approval_mode, name) VALUES (?, ?, 1, 1, 'cli', 'openai', ?, '已有', '{"type":"workspace-write"}', 'on-request', '已有')`).run(taken, takenFile, workspace);
+    db.close();
+    await wb.store.init(); grantTestWorkspace(wb, workspace);
+    const blocked = await wb.createSession('codex', workspace, offlineProjectId, 'work', undefined, undefined, 'inherit', false);
+    blocked.nativeId = taken;
+    await wb.store.save();
+    await assert.rejects(() => wb.publishToDesktop(blocked.id), /没有覆盖/);
+    assert.notEqual(blocked.nativeLive, true);
+    assert.equal(await fs.readFile(takenFile, 'utf8'), '{"keep":true}\n');
+    const session = await wb.createSession('codex', workspace, offlineProjectId, 'work', undefined, undefined, 'inherit', false);
+    session.title = '继续修复用户端问题';
+    session.messages.push({ id: 'm1', role: 'user', text: '你好', createdAt: new Date().toISOString() });
+    await wb.store.save();
+    const published = await wb.publishToDesktop(session.id);
+    assert.equal(published.nativeLive, true);
+    assert.equal(published.codexStorage, undefined);
+    assert.equal(published.messages.some(message => message.text === '你好'), true);
+    assert.match(await fs.readFile(published.nativePath!, 'utf8'), /你好/);
+    assert.ok(published.nativeId);
+    assert.match(await fs.readFile(path.join(codex, 'session_index.jsonl'), 'utf8'), new RegExp(published.nativeId));
+    const listed = await wb.listNativeSessions('codex');
+    assert.equal(listed.sessions.find(item => item.nativeId === published.nativeId)?.name, '继续修复用户端问题');
+    await assert.rejects(() => wb.publishToDesktop(session.id), /已经在桌面 Codex/);
+    const cursorSession = await wb.createSession('cursor', workspace, offlineProjectId, 'work', undefined, undefined, 'inherit', false);
+    cursorSession.title = 'Team Agent Workbench';
+    cursorSession.messages.push({ id: 'c1', role: 'user', text: '看看桌面', createdAt: new Date().toISOString() });
+    await wb.store.save();
+    const shown = await wb.publishToDesktop(cursorSession.id);
+    assert.equal(shown.nativeLive, true);
+    assert.equal(shown.messages.some(message => message.text === '看看桌面'), true);
+    assert.equal(JSON.parse(await fs.readFile(path.join(shown.nativePath!, 'meta.json'), 'utf8')).cwd, shown.cwd);
+    const store = new DatabaseSync(path.join(shown.nativePath!, 'store.db'), { readOnly: true });
+    try { assert.match(store.prepare('SELECT data FROM blobs').all().map((row: { data?: Uint8Array }) => Buffer.from(row.data || []).toString('utf8')).join('\n'), /看看桌面/); }
+    finally { store.close(); }
+    const cursorList = await wb.listNativeSessions('cursor');
+    assert.equal(cursorList.sessions.find(item => item.nativeId === shown.nativeId)?.name, 'Team Agent Workbench');
+  } finally {
+    if (previousCodex === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = previousCodex;
+    if (previousCursor === undefined) delete process.env.WORKBENCH_CURSOR_CHATS; else process.env.WORKBENCH_CURSOR_CHATS = previousCursor;
+    await wb.close();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test('session picker shows Codex group and session names without inventing a group', () => {
-  const html = renderToStaticMarkup(React.createElement(NativeSessionBrowser, { selectedId: looseId, onSelect: () => {}, catalog: { provider: 'codex', groups: [{ id: 'section-1', name: 'Pinned', position: -1 }, { id: 'project-1', name: '检索项目', position: 2 }], sessions: [{ nativeId: pinnedId, name: '置顶会话', groupId: 'section-1', cwd: '', updatedAt: 1000 }, { nativeId: codexId, name: '改排序', groupId: 'project-1', cwd: 'D:\\project', updatedAt: 3000, unavailable: '工作目录已经不在，无法在工作台继续' }, { nativeId: looseId, name: '安装 jev', cwd: 'C:\\Users\\me', updatedAt: 2000 }] } }));
+  assert.deepEqual(nextNativeSelection(['a'], 'b', true), ['a', 'b']);
+  assert.deepEqual(nextNativeSelection(['a', 'b'], 'b', true), ['a']);
+  assert.deepEqual(nextNativeSelection(['a'], 'b', false), ['a']);
+  assert.deepEqual(nextNativeGroupSelection(['a'], ['b', 'c']), ['a', 'b', 'c']);
+  assert.deepEqual(nextNativeGroupSelection(['b', 'c', 'a'], ['b', 'c']), ['a']);
+  const html = renderToStaticMarkup(React.createElement(NativeSessionBrowser, { selectedIds: [looseId], onChange: () => {}, catalog: { provider: 'codex', groups: [{ id: 'section-1', name: 'Pinned', position: -1 }, { id: 'project-1', name: '检索项目', position: 2 }], sessions: [{ nativeId: pinnedId, name: '置顶会话', groupId: 'section-1', cwd: '', updatedAt: 1000 }, { nativeId: codexId, name: '改排序', groupId: 'project-1', cwd: 'D:\\project', updatedAt: 3000, unavailable: '工作目录已经不在，无法在工作台继续' }, { nativeId: looseId, name: '安装 jev', cwd: 'C:\\Users\\me', updatedAt: 2000 }] } }));
   assert.ok(html.indexOf('Pinned') < html.indexOf('检索项目'));
   assert.ok(html.indexOf('检索项目') < html.indexOf('改排序'));
   assert.match(html, /安装 jev/);
-  assert.doesNotMatch(html, /未归入项目/);
+  assert.match(html, /全选本组/);
+  assert.doesNotMatch(html, /未归入项目|未分组/);
   const buttons = [...html.matchAll(/<button[\s\S]*?<\/button>/g)].map(match => match[0]);
   assert.match(buttons.find(button => button.includes('改排序')) || '', /disabled=""/);
   assert.match(buttons.find(button => button.includes('改排序')) || '', /工作目录已经不在，无法在工作台继续/);
-  assert.doesNotMatch(buttons.find(button => button.includes('安装 jev')) || '', /disabled/);
+  const kept = buttons.find(button => button.includes('安装 jev')) || '';
+  assert.doesNotMatch(kept, /disabled/);
+  assert.match(kept, /aria-checked="true"/);
   const codexPicker = renderToStaticMarkup(React.createElement(NativeSessionPicker, { provider: 'codex', projectId: 'project-1', close: () => {}, linked: () => {} }));
   const cursorPicker = renderToStaticMarkup(React.createElement(NativeSessionPicker, { provider: 'cursor', projectId: 'project-1', close: () => {}, linked: () => {} }));
   assert.match(codexPicker, /接入 Codex 会话/);
-  assert.match(codexPicker, /Codex 自己的项目组和会话名/);
+  assert.match(codexPicker, /可以勾选多条，一次导入/);
+  assert.match(codexPicker, /导入所选/);
   assert.doesNotMatch(codexPicker, /Cursor/);
   assert.match(cursorPicker, /接入 Cursor 会话/);
   assert.match(cursorPicker, /Cursor 自己的工作目录和会话名/);
