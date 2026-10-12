@@ -136,7 +136,8 @@ test('initial and repeated preparation show the same category choices; empty rev
   const session = { id: 'session', title: '工作会话', messages: [message], binding: draft.binding } as AgentSession;
   for (const again of [false, true]) {
     const html = renderToStaticMarkup(React.createElement(PreparationOptionsModal, { session, again, close: () => {}, started: async () => {} }));
-    for (const caption of ['整理哪些方面', '已有能力', '探索记录', '待办事项', 'type="checkbox"']) assert(html.includes(caption), caption);
+    for (const caption of ['每个项目整理一条', '项目是什么', '使用的技术', '已经达到的成果', '达标标准']) assert(html.includes(caption), caption);
+    assert(!html.includes('整理哪些方面'));
     assert(!html.includes('调整分类组合')); assert(!html.includes('项目目标')); assert(!html.includes('项目资料'));
     if (again) { assert(html.includes('aria-label="整理对话"')); assert(html.includes('只看新增内容')); assert(!html.includes('重新整理整个会话')); }
   }

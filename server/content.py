@@ -557,6 +557,76 @@ def assignment_operation(root, state, username, request, directory, project, gro
     raise ValueError('不支持的任务操作')
 
 
+DIRECTION_LIMIT = 12
+
+def direction_text(value, maximum, label):
+    if value is None:
+        value = ''
+    value = text(value, maximum).strip()
+    if any(ord(char) < 32 for char in value):
+        raise ValueError(label + '不能包含控制字符')
+    return value
+
+def normalize_directions(raw, previous):
+    if not isinstance(raw, list) or len(raw) > DIRECTION_LIMIT:
+        raise ValueError('每人最多登记 %d 条工作方向' % DIRECTION_LIMIT)
+    prior = {item.get('id'): item for item in previous if isinstance(item, dict)}
+    seen_ids, seen_titles, result, stamp = set(), set(), [], now()
+    for item in raw:
+        if not isinstance(item, dict):
+            raise ValueError('工作方向格式无效')
+        identifier = item.get('id')
+        if not isinstance(identifier, str):
+            raise ValueError('工作方向编号无效')
+        try:
+            identifier = str(uuid.UUID(identifier))
+        except ValueError:
+            raise ValueError('工作方向编号无效')
+        if identifier in seen_ids:
+            raise ValueError('工作方向编号重复')
+        seen_ids.add(identifier)
+        title = direction_text(item.get('title'), 40, '方向名称')
+        if not title:
+            raise ValueError('请填写方向名称')
+        folded = title.casefold()
+        if folded in seen_titles:
+            raise ValueError('同一人的方向名称不能重复')
+        seen_titles.add(folded)
+        summary = direction_text(item.get('summary', ''), 160, '方向说明')
+        old = prior.get(identifier)
+        unchanged = isinstance(old, dict) and old.get('title') == title and old.get('summary') == summary and isinstance(old.get('updatedAt'), str)
+        result.append(dict(id=identifier, title=title, summary=summary, updatedAt=old.get('updatedAt') if unchanged else stamp))
+    return result
+
+def direction_record(root, username):
+    return safe(root, '.workbench/directions/' + hashlib.sha256(username.encode()).hexdigest() + '.json')
+
+def publish_direction_file(file, record):
+    atom(file, record)
+    os.chown(file, 0, 0)
+    os.chmod(file, 0o600)
+    os.chown(file.parent, 0, 0)
+    os.chmod(file.parent, 0o700)
+
+def list_directions(root, state):
+    members = []
+    for username, user in sorted(state.get('users', {}).items()):
+        if not user.get('enabled') or user.get('missing') or user.get('provisioning'):
+            continue
+        stored = read_json(direction_record(root, username), {})
+        directions = stored.get('directions') if isinstance(stored, dict) and isinstance(stored.get('directions'), list) else []
+        members.append(dict(username=username, updatedAt=stored.get('updatedAt') if isinstance(stored, dict) and isinstance(stored.get('updatedAt'), str) else '', directions=directions))
+    return dict(version=1, members=members)
+
+def save_directions(root, username, raw):
+    file = direction_record(root, username)
+    previous = read_json(file, {})
+    stored = previous.get('directions') if isinstance(previous, dict) else []
+    directions = normalize_directions(raw, stored if isinstance(stored, list) else [])
+    record = dict(version=1, username=username, updatedAt=now(), directions=directions)
+    publish_direction_file(file, record)
+    return record
+
 def handle(root, state, username, request, incoming=None):
     user = member(state, username)
     op = request.get('op')
@@ -605,6 +675,10 @@ def handle(root, state, username, request, incoming=None):
         os.chmod(file.parent, 0o700)
         atom(file, result)
         return result
+    if op in ('directions_list', 'directions_save'):
+        if op == 'directions_list':
+            return list_directions(root, state)
+        return save_directions(root, username, request.get('directions'))
     if op == 'create_project':
         group_name = request.get('groupName')
         group = state['groups'].get(group_name)

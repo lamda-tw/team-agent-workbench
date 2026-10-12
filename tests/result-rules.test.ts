@@ -71,32 +71,30 @@ test('merge uses the same boundaries, at most one result, and supports an empty 
   applyContentMerge(value, output()); assert.equal(value.body, ''); assert.equal(value.mergeSources[0].revision, 1);
 });
 
-test('automatic preparation emits at most one result for each selected category', () => {
+test('automatic preparation writes one project profile and rejects a second result', () => {
   const value = draft();
   value.resultRules = { contract: 4, categories: ['capability', 'exploration', 'todo'] };
   const prompt = preparationPrompt(value, []);
-  assert.match(prompt, /每个启用类别最多生成一条成果/);
-  assert.match(prompt, /每个勾选类别最多生成一条成果/);
-  assert.doesNotMatch(prompt, /独立待办逐条/);
-  assert.doesNotMatch(prompt, /不同待办逐条/);
-  const evidence = { origin: 'project', evidenceIds: ['message:m1'] };
+  assert.match(prompt, /每个项目只整理一条/);
+  assert.match(prompt, /"sentence":"恰好一句话，说明这是个什么项目。"/);
+  assert.match(prompt, /"technologies":"使用了哪些技术，各自用在项目的哪一部分。"/);
+  assert.match(prompt, /"achievements":"已经达到的成果。"/);
+  assert.match(prompt, /"criteria":"用什么标准判断这些成果算达到。"/);
+  assert.doesNotMatch(prompt, /\{"artifacts":/);
   const review = { status: 'complete', inputCount: 0 };
-  applyPreparation(value, JSON.stringify({ sourceReview: review, artifacts: [
-    { category: 'capability', topic: '检索', title: '已能按条件检索', body: '当前实现支持按标签检索，未覆盖模糊匹配。', ...evidence },
-    { category: 'exploration', topic: '缓存', title: '缓存方案仍在验证', body: '尝试过本地缓存，命中率未在生产负载下验证。', ...evidence },
-    { category: 'todo', topic: '后续', title: '补齐检索与缓存验证', body: '需要补模糊匹配，并在生产负载下复核缓存命中。', ...evidence },
-  ] }));
-  assert.deepEqual(value.artifacts?.map(item => item.category), ['capability', 'exploration', 'todo']);
-  assert.throws(() => applyPreparation(value, JSON.stringify({ sourceReview: review, artifacts: [
-    { category: 'todo', topic: '测试', title: '补齐失败分支测试', body: '补齐单元测试覆盖失败分支。', ...evidence },
-    { category: 'todo', topic: '文档', title: '补齐接口说明', body: '补齐接口说明和使用限制。', ...evidence },
-  ] })), /每个勾选类别只能生成一条/);
-  assert.throws(() => applyPreparation(value, JSON.stringify({ sourceReview: review, artifacts: [
-    { category: 'capability', topic: '检索', title: '已能检索', body: '支持按标签检索。', ...evidence },
-    { category: 'exploration', topic: '缓存', title: '缓存待验证', body: '本地缓存尚未在生产负载下验证。', ...evidence },
-    { category: 'todo', topic: '测试', title: '补测试', body: '补齐失败分支测试。', ...evidence },
-    { category: 'todo', topic: '文档', title: '补文档', body: '补齐接口说明。', ...evidence },
-  ] })), /每个勾选类别最多生成一条/);
+  applyPreparation(value, JSON.stringify({
+    sourceReview: review,
+    sentence: '这是一个按标签检索文档的项目。',
+    technologies: '检索服务使用倒排索引，导出使用表格组件。',
+    achievements: '已经能按标签检索并导出当前结果。',
+    criteria: '抽查 20 条标签查询都返回预期文档，才算达到。',
+  }));
+  assert.equal(value.artifacts?.length, 1);
+  assert.equal(value.artifacts?.[0].fields.sentence, '这是一个按标签检索文档的项目。');
+  assert.match(value.body, /使用的技术/);
+  assert.match(value.body, /达标标准/);
+  assert.throws(() => applyPreparation(value, JSON.stringify({ sourceReview: review, artifacts: [{ category: 'capability', topic: '检索', title: '已能检索', body: '支持按标签检索。', origin: 'project', evidenceIds: ['message:m1'] }] })), /每个项目只整理一条/);
+  assert.throws(() => applyPreparation(value, JSON.stringify({ sourceReview: review, sentence: '这是检索项目。它还负责导出。', technologies: '倒排索引。', achievements: '能检索。', criteria: '抽查通过。' })), /恰好是一句话/);
 });
 
 test('session attachments are associated with each organized result', () => {

@@ -23,6 +23,7 @@ export const resultCategoryBoundaries: Record<MaterialCategory, { question: stri
   baseline_change_proposal: { question: '已有做法值得怎样改进？', include: '针对现有做法、带依据但尚未采纳的改进建议，写清预期作用和待验证项。', exclude: '已确认的规则归项目标准；明确的实现安排归设计方案；没有项目依据的通用建议不保留。' }
 };
 
+export const preparationCategoryResultLimit = 3;
 export const preparationCategories = ['capability', 'exploration', 'todo'] as const;
 export type PreparationCategory = typeof preparationCategories[number];
 export const preparationCategorySchema = z.enum(preparationCategories, { error: '整理方面仅支持已有能力、探索记录、待办事项，请重新选择' });
@@ -42,12 +43,12 @@ export function resultRulesPrompt(categories: readonly ContributionCategory[]) {
   if (categories.every(category => materialCategories.includes(category as any))) {
     const definitions = categories.map(category => {
       const boundary = { ...(resultCategoryBoundaries[category as MaterialCategory] || { question: '', include: contributionCategoryInfo[category].description, exclude: '' }) };
-      if (category === 'todo') boundary.exclude = '多个待办写进同一条成果，不逐条拆开。';
+      if (category === 'todo') boundary.exclude = `独立事项分别保留，但这一类最多 ${preparationCategoryResultLimit} 条；不要把全部待办压成一条摘要，也不要超过上限。`;
       return { category, name: contributionCategoryInfo[category].label, ...boundary };
     });
     return `先识别内容的用途，再按启用类别分别提炼。类别边界：${JSON.stringify(definitions)}。
-每个启用类别最多生成一条成果，因此这次最多 ${categories.length} 条。同一类别里的多个对象、证据和后续动作收成这一条，在正文里分点写清。不同类别仍各自一条，可以围绕同一主题分别回答不同问题，不能复制相同正文。
-没有新内容的类别直接省略。允许 0 条，不凑齐分类。
+每个启用类别可以生成多条成果，但每一类最多 ${preparationCategoryResultLimit} 条，因此这次最多 ${categories.length * preparationCategoryResultLimit} 条。同一类别里，不同对象和独立事项分别成条；同一对象的重复描述收进已有的那一条。不同类别可以围绕同一主题分别回答不同问题，不能复制相同正文。
+没有新内容的类别直接省略。允许 0 条，不凑齐分类，也不为凑满 ${preparationCategoryResultLimit} 条而拆分。
 已有能力写清已经实现的部分和仍然受限的部分，不把测试通过扩大为整体可用；探索记录保留失败和相互矛盾的证据；待办默认待处理，不能由模型宣称已完成。显式处理项目目标时保持待确认，不能据 AI 建议自动确认；项目资料保持参考性质，不能写成目标。
 过滤与项目无关的操作流水、凭据和本机临时故障。项目自身的缺陷、交付环境限制和网络适配任务可以保留。不要因正文出现权限或网络就过滤整个项目任务。只从启用类别选择，不为迁就分类夸大事实。`;
   }

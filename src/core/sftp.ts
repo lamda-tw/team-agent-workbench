@@ -15,6 +15,7 @@ import type { ConnectionProfile, FilePreview, Project, RemoteBinding, RemoteEntr
 import { assertRemote, childRemote, remotePath, withinRemote } from './paths';
 import { systemUsername } from './account-login';
 import type { AccountSnapshot } from '../shared/account-data';
+import { directionDirectorySchema, prepareDirectionSave, type DirectionDirectory } from '../shared/directions';
 import { newProjectLayout, projectName } from './project-layout';
 import { PROJECT_BRIEF_FILE, projectBriefSchema, projectBriefMarkdown, type ProjectBrief } from '../shared/project-brief';
 import { groupWorkspacePattern } from '../shared/groups';
@@ -333,6 +334,15 @@ export class SftpConnection {
     } catch (e) { await fsp.rm(temp, { force: true }); throw friendlySftp(e); }
   }
   accountData(write?: AccountSnapshot): Promise<AccountSnapshot & { conflict?: boolean }> { return this.request({ op: write ? 'account_write' : 'account_read', ...(write || {}) }); }
+  async memberDirections(directions?: unknown): Promise<DirectionDirectory> {
+    try {
+      if (directions) await this.request({ op: 'directions_save', directions: prepareDirectionSave(directions) });
+      return directionDirectorySchema.parse(await this.request({ op: 'directions_list' }));
+    } catch (error: any) {
+      if (typeof error?.message === 'string' && error.message.includes('项目不存在或当前账号不属于此组')) throw new Error('服务器还没有工作方向功能。请管理员在管理端打开用户管理，更新服务端功能后再试。');
+      throw error;
+    }
+  }
   async accountFile(hash: string, local: string, upload: boolean) {
     if (!/^[a-f0-9]{64}$/.test(hash)) throw new Error('附件身份无效');
     const s = this.channel(), profile = this.profile!;

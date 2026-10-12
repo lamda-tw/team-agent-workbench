@@ -24,6 +24,7 @@ import { historyMarkdown, packageDraft, freezeFile } from '../core/artifacts';
 import { safeFilename } from '../core/paths';
 import type { WorkbenchEvent } from '../shared/types';
 import { projectBriefSchema } from '../shared/project-brief';
+import { projectOrganizationSchema } from '../shared/project-organization';
 import { assignmentAllFiles, assignmentCreateSchema, assignmentStatusSchema } from '../shared/assignments';
 import { checkedSessionFile, listSessionFiles, previewSessionFile } from '../core/session-files';
 import { ServerIdentityStore } from '../core/server-identities';
@@ -102,6 +103,8 @@ async function dispatch(action: string, raw: unknown, owner: BrowserWindow): Pro
     case 'providers.detect': return workbench.detect();
     case 'account.sync': await workbench.accountSync.sync(); return workbench.accountSync.state;
     case 'account.sync.resolve': { const p = z.object({ key: z.string(), choice: z.enum(['local', 'remote']) }).parse(raw); await workbench.accountSync.resolve(p.key, p.choice); return workbench.accountSync.state; }
+    case 'directions.list': return workbench.listDirections();
+    case 'directions.save': return workbench.saveDirections(z.object({ directions: z.unknown() }).parse(raw).directions);
     case 'workspace.research': return workbench.researchWorkspace();
     case 'project.directory.save': { const p = z.object({ projectId: z.string().min(1), directory: z.string().max(32768), contextKey: z.string().max(4096) }).parse(raw); return workbench.saveProjectDirectory(p.projectId, p.directory, p.contextKey); }
     case 'provider.auth': {
@@ -264,7 +267,7 @@ async function dispatch(action: string, raw: unknown, owner: BrowserWindow): Pro
     case 'draft.delete': return workbench.deleteDraft(sessionInput.parse(raw).id);
     case 'draft.deleteMany': return workbench.deleteDrafts(z.object({ ids: draftDeleteIdsSchema }).parse(raw).ids);
     case 'draft.supplement': { const p = z.object({ id, supplement: text, repoUrlOverride: z.string().max(2048) }).parse(raw); return workbench.saveDraftSupplement(p.id, p.supplement, p.repoUrlOverride); }
-    case 'draft.artifact.edit': { const p = z.object({ id, artifactId: z.string(), title: z.string().trim().min(1).max(120), body: text.min(1), updateTarget: resultReferenceSchema.nullable().optional() }).parse(raw); return workbench.editDraftArtifact(p.id, p.artifactId, p.title, p.body, p.updateTarget); }
+    case 'draft.artifact.edit': { const p = z.object({ id, artifactId: z.string(), title: z.string().trim().min(1).max(120).optional(), body: text.min(1).optional(), updateTarget: resultReferenceSchema.nullable().optional(), organization: projectOrganizationSchema.optional() }).refine(value => !!value.organization || !!value.title && !!value.body, '请填写有效标题和正文').parse(raw); return workbench.editDraftArtifact(p.id, p.artifactId, p.title, p.body, p.updateTarget, p.organization); }
     case 'draft.category': { const p = z.object({ id, category: contributionCategorySchema, artifactId: z.string().optional() }).parse(raw); return workbench.changeDraftCategory(p.id, p.category, p.artifactId); }
     case 'draft.artifactSelection': { const p = z.object({ id, artifactId: z.string(), selected: z.boolean() }).parse(raw); return workbench.selectDraftArtifact(p.id, p.artifactId, p.selected); }
     case 'draft.renameResult': { const p = z.object({ id, artifactId: z.string().optional(), title: z.string().trim().min(1).max(120) }).parse(raw); return workbench.renameDraftResult(p.id, p.title, p.artifactId); }

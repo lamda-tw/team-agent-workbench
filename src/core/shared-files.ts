@@ -33,6 +33,7 @@ export class SharedFiles {
     return this.backend.openEgressTunnel(host, port, signal);
   }
   accountData(write?: AccountSnapshot) { return this.backend.accountData(write); }
+  memberDirections(directions?: unknown) { return this.backend.memberDirections(directions); }
   accountFile(hash: string, local: string, upload: boolean) { return this.backend.accountFile(hash, local, upload); }
   channel(binding?: RemoteBinding) { return this.backend.channel(binding); }
   binding(id: string) { return this.backend.binding(id); }

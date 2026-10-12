@@ -7,6 +7,8 @@ import { assertRemote, withinRemote } from './paths';
 import { githubRepository } from './artifacts';
 import { preparedArtifact, reviewPreparedResults } from './preparation-policy';
 import { assertReadableResultText, humanReadableWritingGuide } from '../shared/result-reading';
+import { isProjectOrganizationDraft, parseProjectOrganizationAnswer, projectOrganizationBody } from '../shared/project-organization';
+import { resultDefaultStatus } from '../shared/result-model';
 
 // Model output selects an enumerated directory; it cannot invent a filesystem path.
 export function contributionDirectory(binding: RemoteBinding, target: string) {
@@ -93,6 +95,19 @@ export function applyPreparation(draft: Draft, answer: string) {
   catch { throw new Error('AI 返回的整理结果格式不完整，请重试整理。你的补充说明已保留。'); }
   if (draft.resultRules) {
     if (!draft.binding) throw new Error('当前会话没有绑定项目');
+    if (isProjectOrganizationDraft(draft)) {
+      const profile = parseProjectOrganizationAnswer(draft, raw);
+      const body = projectOrganizationBody(profile);
+      const artifact = {
+        id: `${draft.id}-1`, category: 'finding' as const, resultStatus: resultDefaultStatus('finding'),
+        title: contributionTitle('finding', draft.binding.project.name || profile.sentence), body, fields: { ...profile },
+        target: contributionCategoryDirectory(draft.binding, 'finding'), selected: true, topic: profile.sentence,
+        attachments: associatedAttachments(draft),
+      };
+      draft.emptyResult = undefined;
+      Object.assign(draft, { artifacts: [artifact], title: artifact.title, body, generatedBody: body, target: artifact.target });
+      return;
+    }
     const review = reviewPreparedResults(draft, raw);
     const artifacts = review.artifacts.map((item, index) => {
       const artifact = preparedArtifact(item, `${draft.id}-${index + 1}`, contributionCategoryDirectory(draft.binding!, item.category));

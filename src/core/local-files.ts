@@ -5,13 +5,14 @@ import type { AssignmentCreate, AssignmentStatusChange, AssignmentUpload } from 
 import type { ContentEdit, ContentMerge, ContentMetadata } from '../shared/content';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { ConnectionProfile, FilePreview, Project, RemoteBinding, RemoteEntry, WorkspaceAccess } from '../shared/types';
 import { authorizeUser, diskPath, localRoot, passwordMatches, readRegistry, registryLock } from './local-space';
 import { assertRemote, childRemote, remotePath, withinRemote } from './paths';
 import { newProjectLayout, projectName } from './project-layout';
 import { sameEndpoint } from './sftp';
 import { accountRecordsSchema, type AccountSnapshot } from '../shared/account-data';
+import { directionDirectorySchema, mergeDirectionUpdates, prepareDirectionSave, savedDirectionsSchema, type DirectionDirectory, type DirectionRecord } from '../shared/directions';
 import { hashFile } from './artifacts';
 import { PROJECT_BRIEF_FILE, projectBriefSchema, projectBriefMarkdown, type ProjectBrief } from '../shared/project-brief';
 
@@ -53,6 +54,33 @@ export class LocalFileConnection {
       const records = accountRecordsSchema.parse(write.records);
       if (write.revision !== current.revision) return { ...current, conflict: true };
       const next = { revision: current.revision + 1, records }; await atomicJson(file, next); return next;
+    });
+  }
+  private directionFile(username: string) { return `/.workbench-local/directions/${createHash('sha256').update(username).digest('hex')}.json`; }
+  async memberDirections(directions?: unknown): Promise<DirectionDirectory> {
+    const profile = this.channel().profile!, proof = this.proof;
+    return registryLock(this.root, async () => {
+      const registry = await readRegistry(this.root); authorizeUser(registry, profile.username, proof);
+      if (this.profile !== profile || this.proof !== proof) throw new Error('账号已改变');
+      const readOne = async (username: string) => {
+        const file = await diskPath(this.root, this.directionFile(username), true);
+        try { return savedDirectionsSchema.parse(JSON.parse(await fs.readFile(file, 'utf8'))); }
+        catch (error: any) { if (error.code === 'ENOENT') return undefined; throw error; }
+      };
+      if (directions) {
+        const current = await readOne(profile.username);
+        const next = { version: 1 as const, username: profile.username, updatedAt: new Date().toISOString(), directions: mergeDirectionUpdates(current?.directions || [], prepareDirectionSave(directions), new Date().toISOString()) };
+        const file = await diskPath(this.root, this.directionFile(profile.username), true);
+        await fs.mkdir(path.dirname(file), { recursive: true });
+        await atomicJson(file, next);
+      }
+      const members = [];
+      for (const [username, user] of Object.entries(registry.state.users).sort(([a], [b]) => a.localeCompare(b, 'zh'))) {
+        if (!user.enabled || user.missing || user.provisioning) continue;
+        const stored = await readOne(username);
+        members.push({ username, updatedAt: stored?.username === username ? stored.updatedAt : '', directions: stored?.username === username ? stored.directions : [] as DirectionRecord[] });
+      }
+      return directionDirectorySchema.parse({ version: 1, members });
     });
   }
   async accountFile(hash: string, local: string, upload: boolean) {

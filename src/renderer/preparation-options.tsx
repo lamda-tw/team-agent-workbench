@@ -4,7 +4,8 @@ import type { AgentSession, PreparationCheckpoint, PreparationScope } from '../s
 import { preparationDelta } from '../shared/preparation-progress';
 import { contributionCategoryInfo, type ContributionCategory } from '../shared/content';
 import { preparationCategories, resultCategoryBoundaries, type PreparationCategory } from '../shared/result-rules';
-import { defaultPreparationDirections, preparationDirectionLimit, selectedPreparationDirections, type PreparationDirections } from '../shared/preparation-directions';
+import { projectOrganizationFields } from '../shared/project-organization';
+import { defaultPreparationDirections, preparationDirectionLimit, type PreparationDirections } from '../shared/preparation-directions';
 
 export function PreparationCategoryChoices({ categories, selected, directions, disabled, select, changeDirection }: {
   categories: readonly PreparationCategory[]; selected: PreparationCategory[]; directions: PreparationDirections; disabled: boolean;
@@ -30,8 +31,6 @@ export function PreparationOptionsModal({ session, baseline, initialDirections, 
 }) {
   const delta = preparationDelta(session, baseline?.snapshot), canIncremental = !!baseline && delta.count > 0;
   const [scope, setScope] = useState<PreparationScope>(canIncremental ? 'incremental' : 'full');
-  const [selected, setSelected] = useState<PreparationCategory[]>([...preparationCategories]);
-  const [directions, setDirections] = useState<PreparationDirections>(() => ({ ...initialDirections }));
   const [busy, setBusy] = useState(false), [error, setError] = useState('');
   const disabled = busy;
   return <div className="modal-backdrop"><section className="modal preparation-dialog" role="dialog" aria-modal="true" aria-labelledby="preparation-options-title">
@@ -42,17 +41,16 @@ export function PreparationOptionsModal({ session, baseline, initialDirections, 
           <label className="preparation-option"><input type="radio" name="preparation-scope" aria-label="增量整理" checked={scope === 'incremental'} disabled={disabled || !canIncremental} onChange={() => setScope('incremental')}/><span><b>只看新增内容</b><small>{canIncremental ? `增量整理 ${delta.count} 条新增或续写消息；不会重新读取完整会话。` : delta.reason}</small></span></label>
           <label className="preparation-option"><input type="radio" name="preparation-scope" aria-label="整理对话" checked={scope === 'full'} disabled={disabled} onChange={() => setScope('full')}/><span><b>整理对话</b><small>读取全部 {session.messages.length} 条消息；已有成果会作为去重参考，并说明没有新成果的原因。</small></span></label>
         </div></fieldset>}
-        <section className="preparation-classification" aria-label="整理方面">
-          <h3>整理哪些方面</h3>
-          <PreparationCategoryChoices categories={preparationCategories} selected={selected} directions={directions} disabled={disabled} select={(category, checked) => setSelected(values => checked ? [...values, category] : values.filter(value => value !== category))} changeDirection={(category, value) => setDirections(values => ({ ...values, [category]: value }))}/>
-          {!selected.length && <p className="inline-error" role="alert">请至少选择一个整理方面。</p>}
+        <section className="preparation-classification" aria-label="整理内容">
+          <h3>每个项目整理一条</h3>
+          <ul className="project-organization-fields">{projectOrganizationFields.map(field => <li key={field.key}><b>{field.label}</b><span>{field.hint}</span></li>)}</ul>
         </section>
-        <p className="muted small">按实际内容整理，不凑齐分类。每个勾选的类别最多生成一条。没有新成果时会说明原因，由你确认；读取失败会提示重试。</p>
+        <p className="muted small">读完材料后只生成这一条。你第一次改过内容之后，这个项目不能再自动整理。没有读完会提示重试，不会猜一条结果。</p>
         {error && <div className="inline-error" role="alert">{error}</div>}
       </div>
-      <footer><button className="secondary" disabled={busy} onClick={close}>取消</button><button className="primary" disabled={disabled || !selected.length || scope === 'incremental' && !canIncremental} onClick={async () => {
+      <footer><button className="secondary" disabled={busy} onClick={close}>取消</button><button className="primary" disabled={disabled || scope === 'incremental' && !canIncremental} onClick={async () => {
         setBusy(true); setError('');
-        try { await started(scope, selected, selectedPreparationDirections(selected, directions)); close(); } catch (reason: any) { setError(reason.message); } finally { setBusy(false); }
+        try { await started(scope, [...preparationCategories], {}); close(); } catch (reason: any) { setError(reason.message); } finally { setBusy(false); }
       }}>{busy ? '正在创建…' : scope === 'incremental' ? '开始增量整理' : '开始整理对话'}</button></footer>
   </section></div>;
 }

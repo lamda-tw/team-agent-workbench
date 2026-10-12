@@ -24,6 +24,7 @@ import { preparationPrompt } from './preparation-prompt';
 import { emptyPreparationResult, isEmptyPreparation } from '../shared/preparation-review';
 import { preparationCheckpoint, rememberPreparationProgress } from '../shared/preparation-progress';
 import { preparationCategories, preparationRuleSnapshot, type ResultRuleSnapshot } from '../shared/result-rules';
+import { isProjectOrganizationDraft, organizationRefusal, projectOrganizationBody, sameProjectOrganization, type ProjectOrganization } from '../shared/project-organization';
 import { selectedPreparationDirections, type PreparationDirections } from '../shared/preparation-directions';
 import { SharedFiles } from './shared-files';
 import { TransferQueue } from './transfers';
@@ -1336,6 +1337,7 @@ export class Workbench {
     this.assertCanWork(parent.binding);
     if (!parent.binding) throw new Error('请先绑定项目');
     const sourceSessionTitle = parent.title, binding = structuredClone(parent.binding);
+    this.assertProjectOrganizationOpen(parent.binding.project.id, source?.id);
     const resultRules = this.preparationRules(parent.binding.project.id, requestedCategories);
     const preparationDirections = selectedPreparationDirections(resultRules.categories, directions);
     const checkpoint = preparationCheckpoint(parent, this.store.drafts);
@@ -1455,8 +1457,13 @@ export class Workbench {
     if (s) { s.closedAt = d.generationFinishedAt; s.approvals = []; const runtime = this.runtimes.get(s.id); this.runtimes.delete(s.id); if (runtime) await runtime.close(); }
     await this.store.save(); this.broadcast(); this.notice('成果整理失败：' + d.generationError);
   }
+  private assertProjectOrganizationOpen(projectId: string, resumeId?: string) {
+    const message = organizationRefusal(this.store.drafts, projectId, resumeId);
+    if (message) throw new Error(message);
+  }
   async retryPreparation(id: string) {
     const d = this.draft(id); if (d.mergeCompletedAt || d.submitted || d.personalSavedIds?.length || this.submittingDrafts.has(id) || d.generation === 'running') throw new Error('此草稿已保存、已提交或正在整理；请从原会话再次整理');
+    if (!d.mergeSources?.length && d.binding) this.assertProjectOrganizationOpen(d.binding.project.id, d.id);
     if (!d.mergeSources?.length) this.preparationRules(d.binding!.project.id, [...new Set((d.resultRules?.categories || d.requestedCategories || preparationCategories).map(category => canonicalCategory(category)!))]);
     // Reserve before the first await. Retry uses the same frozen inputs but a fresh CLI context.
     const refreshInputs = d.generation === 'ready';
@@ -1549,6 +1556,7 @@ export class Workbench {
       if (artifactId && !artifact) throw new Error('候选成果不存在');
       if (draft.artifacts?.length && !artifact) throw new Error('请选择要修改名称的成果');
       const target = artifact || draft;
+      const previousTitle = target.title;
       if (draft.submitted || target.submitted || draft.mergeCompletedAt) {
         // Submitted packages and shared titles are immutable here; only the local display changes.
         target.titleAlias = titleSubject(name);
@@ -1557,6 +1565,7 @@ export class Workbench {
         delete target.titleAlias;
       }
       if (artifact && draft.artifacts?.length === 1) { draft.title = artifact.title; draft.titleAlias = artifact.titleAlias; }
+      if (isProjectOrganizationDraft(draft) && !draft.organizationEdited && titleSubject(previousTitle) !== titleSubject(target.title)) draft.organizationEdited = true;
       await this.store.save(); this.broadcast(); return draft;
     }, false);
   }
@@ -1574,11 +1583,11 @@ export class Workbench {
     const artifact = d.artifacts?.find(item => item.id === artifactId); if (!artifact) throw new Error('候选成果不存在');
     artifact.selected = selected; await this.store.save(); this.broadcast(); return d;
   }
-  editDraftArtifact(id: string, artifactId: string, title: string, body: string, updateTarget?: import('../shared/content').ResultReference | null) {
+  editDraftArtifact(id: string, artifactId: string, title: string | undefined, body: string | undefined, updateTarget?: import('../shared/content').ResultReference | null, organization?: ProjectOrganization) {
     return this.edit('draft:' + id, async () => {
       const draft = this.draft(id), artifact = draft.artifacts?.find(item => item.id === artifactId);
       if (draft.generation !== 'ready' || draft.submitted || this.submittingDrafts.has(id) || !artifact || artifact.submitted) throw new Error('该成果不可编辑，请刷新后重试');
-      if (!title.trim() || title.trim().length > 120 || !body.trim() || body.length > 200000) throw new Error('请填写有效标题和正文');
+      if (!organization && (!title?.trim() || title.trim().length > 120 || !body?.trim() || body.length > 200000)) throw new Error('请填写有效标题和正文');
       if (updateTarget && !draft.personalSavedIds?.includes(artifact.id)) {
         if (updateTarget.scope !== 'personal' || updateTarget.projectId !== draft.binding?.project.id) throw new Error('请选择本项目的个人成果');
         const existing = this.conclusion(updateTarget.id);
@@ -1586,9 +1595,18 @@ export class Workbench {
         sameResultCategory([artifact, existing]);
         if (resultCategory(artifact) !== 'capability') throw new Error('此处只支持更新已有能力，其他分类请单独保存');
       }
-      const previous = structuredClone(artifact);
-      Object.assign(artifact, { title: contributionTitle(artifact.category, title), body, fields: { [contributionCategoryFields[artifact.category][0]]: body }, updateTarget: updateTarget || undefined });
-      try { await this.store.save(); } catch (error) { Object.keys(artifact).forEach(key => delete (artifact as any)[key]); Object.assign(artifact, previous); throw error; }
+      const previous = structuredClone(artifact), wasEdited = draft.organizationEdited;
+      if (organization) {
+        const changed = !sameProjectOrganization(artifact.fields, organization);
+        Object.assign(artifact, { title: contributionTitle(artifact.category, draft.binding?.project.name || organization.sentence), body: projectOrganizationBody(organization), fields: { ...organization }, updateTarget: updateTarget || undefined });
+        if (changed) draft.organizationEdited = true;
+      } else {
+        const changed = titleSubject(artifact.title) !== title!.trim() || artifact.body !== body;
+        Object.assign(artifact, { title: contributionTitle(artifact.category, title!), body, fields: { [contributionCategoryFields[artifact.category][0]]: body }, updateTarget: updateTarget || undefined });
+        if (changed && isProjectOrganizationDraft(draft)) draft.organizationEdited = true;
+      }
+      if (draft.artifacts?.length === 1) { draft.title = artifact.title; draft.body = artifact.body; }
+      try { await this.store.save(); } catch (error) { Object.keys(artifact).forEach(key => delete (artifact as any)[key]); Object.assign(artifact, previous); draft.organizationEdited = wasEdited; if (draft.artifacts?.length === 1) { draft.title = artifact.title; draft.body = artifact.body; } throw error; }
       this.broadcast(); return draft;
     }, false);
   }
@@ -1608,6 +1626,7 @@ export class Workbench {
         artifact.fields = { [contributionCategoryFields[category][0]]: artifact.body };
         artifact.target = contributionCategoryDirectory(draft.binding, category);
         if (draft.artifacts?.length === 1) { draft.title = artifact.title; draft.target = artifact.target; }
+        if (isProjectOrganizationDraft(draft) && previous.artifacts?.find(item => item.id === artifact.id)?.category !== category) draft.organizationEdited = true;
       }
       try { await this.store.save(); }
       catch (error) { Object.keys(draft).forEach(key => delete (draft as any)[key]); Object.assign(draft, previous); throw error; }
@@ -2082,5 +2101,7 @@ export class Workbench {
   }
   saveHandoff(id: string, text: string) { return this.edit('handoff:' + id, async () => { const s = this.session(id); if (!localWithin(s.cwd, s.handoffPath)) throw new Error('交接文件路径越界'); await fs.writeFile(s.handoffPath, text, 'utf8'); }); }
   async flushEdits() { await this.edits.catch(() => {}); for (const [key, fn] of this.unsavedEdits) { await fn(); if (this.unsavedEdits.get(key) === fn) this.unsavedEdits.delete(key); } await this.store.save(); }
+  listDirections() { return this.remote.memberDirections(); }
+  saveDirections(directions: unknown) { return this.remote.memberDirections(directions); }
   async close() { this.closing = true; for (const timer of this.trajectoryTimers.values()) clearTimeout(timer); this.trajectoryTimers.clear(); await Promise.allSettled(this.archiving.values()); clearTimeout(this.timer); this.timer = undefined; try { await this.flushEdits(); } catch (error) { this.closing = false; this.changed(); throw error; } this.closing = true; for (const timer of this.preparationTimers.values()) clearTimeout(timer); this.preparationTimers.clear(); for (const job of this.catalogJobs.values()) job.controller.abort(); await Promise.allSettled([...this.catalogJobs.values()].map(job => job.promise)); await this.accounts.close(); await this.accountSync.close(); const interrupted = this.store.sessions.filter(s => s.purpose === 'work' && !s.closedAt && ['starting', 'running', 'approval'].includes(s.status) && !s.stoppedAt); await Promise.all([...this.runtimes.values()].map(runtime => runtime.close())); this.remote.disconnect(); for (const s of interrupted) { s.status = 'error'; s.error = '应用关闭时任务尚未完成，已中断；可检查已有结果后继续发送。'; } await Promise.all(this.eventWrites.values()); await this.store.save(); }
 }

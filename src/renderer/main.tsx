@@ -24,7 +24,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Folder, FolderOpen, FileText, Plus, Settings as SettingsIcon, ArrowUp, ArrowUpDown, ArrowLeft, RefreshCw, Upload, Download, Link, X, Check, ChevronRight, MessageSquare, Layers, Server, Unplug, Search, Paperclip, Square, ShieldCheck, FileArchive, HardDrive, PanelRightClose, Sparkles, ExternalLink, Copy, Terminal, CircleHelp, BellRing, Pencil, Puzzle, ClipboardList, Ellipsis } from 'lucide-react';
+import { Folder, FolderOpen, FileText, Plus, Settings as SettingsIcon, ArrowUp, ArrowUpDown, ArrowLeft, RefreshCw, Upload, Download, Link, X, Check, ChevronRight, MessageSquare, Layers, Server, Unplug, Search, Paperclip, Square, ShieldCheck, FileArchive, HardDrive, PanelRightClose, Sparkles, ExternalLink, Copy, Terminal, CircleHelp, BellRing, Pencil, Puzzle, ClipboardList, Ellipsis, Compass } from 'lucide-react';
 import type { AgentCapabilitySelection, AgentSession, ConclusionMatch, ConnectionProfile, ContentUpdate, Draft, FilePreview, Project, Provider, ProviderAuth, RemoteEntry, Settings, Snapshot, WorkspaceAccess } from '../shared/types';
 import './styles.css';
 import './result-card.css';
@@ -55,6 +55,7 @@ import { RequestCard, isQuestionRequest } from './request-card';
 import { projectSetupIdentity } from '../shared/project-brief';
 import { serverIdentityKey } from '../shared/server-identity';
 import { snapshotAccountKey } from '../shared/account-scope';
+import { DirectionsBoard } from './directions';
 import { CliConnectionNotice } from './cli-connection-notice';
 import { ForkSubsessionDialog, SubsessionPanel, SubsessionReportDialog } from './subsessions';
 import { BetaFeaturesModal, betaFeatureStates } from './beta-features';
@@ -105,7 +106,7 @@ function App() {
 }
 function AccountWorkspace({ state, refresh }: { state: Snapshot; refresh: () => Promise<void> }) {
   const [notice, setNotice] = useState('');
-  const [view, setView] = useState<'updates' | 'sessions' | 'drafts' | 'transfers' | 'results' | 'assignments'>('sessions'); const activeView = useRef(view); const [sessionId, setSessionId] = useState('');
+  const [view, setView] = useState<'updates' | 'sessions' | 'drafts' | 'transfers' | 'results' | 'assignments' | 'directions'>('sessions'); const activeView = useRef(view); const [sessionId, setSessionId] = useState('');
   const [resultsScope, setResultsScope] = useState<ResultScope>('team');
   const [projectId, setProjectId] = useState(''); const [remoteDir, setRemoteDir] = useState(''); const [entries, setEntries] = useState<RemoteEntry[]>([]); const [fileError, setFileError] = useState(''); const [loadingFiles, setLoadingFiles] = useState(false);
   const [preview, setPreview] = useState<FilePreview>(); const [previewOrigin, setPreviewOrigin] = useState(''); const [search, setSearch] = useState('');
@@ -331,6 +332,7 @@ function AccountWorkspace({ state, refresh }: { state: Snapshot; refresh: () => 
       <div className="brand-mark" data-tooltip="团队工作台"><Layers size={25}/></div>
       <button className={'rail-feature ' + (view === 'assignments' ? 'active' : '')} title={projectAdmin ? '项目任务' : '我的任务'} aria-label={projectAdmin ? '项目任务' : '我的任务'} disabled={!project} onClick={() => { setView('assignments'); void refreshAssignments(); }}><ClipboardList size={22}/><span>任务</span>{myPendingTasks.length > 0 && <b>{Math.min(myPendingTasks.length, 99)}</b>}</button>
       <button className={'rail-feature ' + (view === 'updates' ? 'active' : '')} title="团队动态" data-tooltip="团队动态" aria-label="团队动态" onClick={() => setView('updates')}><BellRing size={22}/><span>动态</span>{unreadContentUpdates.length > 0 && <b aria-label={`${unreadContentUpdates.length} 条待处理团队动态`}>{Math.min(unreadContentUpdates.length, 99)}</b>}</button>
+      <button className={'rail-feature ' + (view === 'directions' ? 'active' : '')} title="工作方向" data-tooltip="工作方向" aria-label="工作方向" onClick={() => setView('directions')}><Compass size={22}/><span>方向</span></button>
       <button className={'rail-feature ' + (view === 'sessions' ? 'active' : '')} title="工作会话" data-tooltip="工作会话" aria-label="工作会话" onClick={() => setView('sessions')}><MessageSquare size={22}/><span>工作会话</span></button>
       <button className={'rail-feature ' + (view === 'results' ? 'active' : '')} title="项目成果库" data-tooltip="项目成果库" aria-label="项目成果库" disabled={!project} onClick={() => openResults(connection?.connected ? resultsScope : 'personal')}><FileText size={22}/><span>项目成果库</span></button>
       <button className={'rail-feature ' + (view === 'drafts' ? 'active' : '')} title="成果整理" data-tooltip="成果整理" aria-label="打开成果整理" onClick={() => { setDraftId(''); setDraftReturnToList(false); setView('drafts'); }}><FileArchive size={22}/><span>成果整理</span>{(preparingCount > 0 || readyCount > 0) && <span className="preparation-nav-badge" aria-label="成果提醒">{preparingCount ? "整理中" : "待确认"}</span>}</button>
@@ -355,6 +357,7 @@ function AccountWorkspace({ state, refresh }: { state: Snapshot; refresh: () => 
     {view === 'updates' && <ContentUpdatesPanel updates={contentUpdates} aliases={state.settings.contentAliases || {}} view={viewActivityResult}
       filters={updateFilters} filtersChanged={setUpdateFilters}
       changed={async () => { setContentUpdates(await api.call<ContentUpdate[]>('content.updates')); await refresh(); }}/>}
+    {view === 'directions' && <DirectionsBoard username={connection?.profile.username || ''} connected={!!connection?.connected} connect={() => setConnectOpen(true)}/>}
     {view === 'results' && project && <ProjectResults projectName={project.name} scope={resultsScope} changeScope={openResults}>
     {resultsScope === 'personal' && <ConclusionLibrary projects={projects} embedded refreshToken={[state.accountSync?.syncedAt || '', ...(state.publishingConclusions || []), ...state.transfers.filter(task => task.binding.project.id === project.id).map(task => `${task.id}:${task.status}`)].join('|')} key={project.id} project={project} sessions={mergeSessions} notice={setNotice}
       mergeStarted={next => { setDraftReturnToList(false); setDraftId(next.id); setView('drafts'); void refresh(); }}

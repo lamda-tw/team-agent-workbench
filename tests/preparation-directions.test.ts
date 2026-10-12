@@ -22,7 +22,7 @@ test('directions trim whitespace without losing paragraphs, ignore unselected ca
 });
 
 test('blank directions leave the default prompt unchanged; custom directions apply only to selected categories and never to merges', () => {
-  const draft = { inputDir: '/frozen', resultRules: { contract: 4, categories: ['exploration', 'capability'] } } as Draft;
+  const draft = { inputDir: '/frozen', resultRules: { contract: 2, categories: ['exploration', 'capability'] } } as Draft;
   const original = preparationPrompt(draft, []), merge = preparationPrompt(draft, [], true);
   draft.preparationDirections = { exploration: ' \t\r\n ', capability: '\u3000', todo: '未勾选的方向' };
   assert.equal(preparationPrompt(draft, []), original);
@@ -33,6 +33,9 @@ test('blank directions leave the default prompt unchanged; custom directions app
   assert(prompt.includes('未提供方向的类别使用默认提示词'));
   assert(prompt.includes('不得为了满足方向编造材料中没有的信息'));
   assert.equal(preparationPrompt(draft, [], true), merge);
+  const profile = preparationPrompt({ ...draft, resultRules: { contract: 4, categories: ['exploration', 'capability'] } }, []);
+  assert(profile.includes('每个项目只整理一条'));
+  assert(!profile.includes('重点解释性能的适用条件'));
 });
 
 test('category controls expose one multiline field per checked category, with defaults and reorganization directions', async () => {
@@ -58,7 +61,8 @@ test('category controls expose one multiline field per checked category, with de
       session: { id: 'session', title: '会话', messages: [] } as unknown as AgentSession, initialDirections: directions, again: true, close: () => {}, started: async () => {},
     }));
     assert(again.includes('再次整理成果'));
-    assert(again.includes('关注精度与性能边界'));
-    assert(again.includes('保留未解决的阻塞项'));
+    assert(again.includes('恰好一句话，说明这是个什么项目。'));
+    assert(again.includes('用什么标准判断这些成果算达到。'));
+    assert(!again.includes('关注精度与性能边界'));
   } finally { (globalThis as any).window = previous; }
 });

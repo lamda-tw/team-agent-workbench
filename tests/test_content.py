@@ -560,6 +560,53 @@ class ContentRules(unittest.TestCase):
         self.assertEqual(linked['references'][0]['kind'], 'file'); self.assertEqual(len(linked['files']), 1)
         self.assertEqual(linked['files'][0]['name'], 'shared-file.csv')
 
+class DirectionRules(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = pathlib.Path(self.temp.name)
+        (self.root / '.workbench').mkdir(parents=True)
+        self.state = {'users': {
+            'alice': {'enabled': True, 'groups': ['relation']},
+            'bob': {'enabled': True, 'groups': ['relation']},
+            'carol': {'enabled': True, 'groups': ['ocr']}},
+            'groups': {'relation': {'workspace': 'projects/relation', 'gid': 100}, 'ocr': {'workspace': 'projects/ocr', 'gid': 100}}}
+        for mock in [patch.object(content.os, 'chown', create=True), patch.object(content.os, 'chmod'), patch.object(content.shutil, 'which', return_value='setfacl'), patch.object(content.subprocess, 'run')]:
+            mock.start(); self.addCleanup(mock.stop)
+
+    def call(self, actor, **request):
+        return content.handle(self.root, self.state, actor, request)
+
+    def test_directions_are_visible_to_every_member_and_only_the_owner_can_change_them(self):
+        first, second = str(uuid.uuid4()), str(uuid.uuid4())
+        saved = self.call('alice', op='directions_save', directions=[
+            dict(id=first, title='检索召回', summary='在做召回实验，可以一起对评测集'),
+            dict(id=second, title='接入码', summary='管理端出口接入，可以请教配置'),
+        ])
+        self.assertEqual(saved['username'], 'alice')
+        self.assertEqual([item['title'] for item in saved['directions']], ['检索召回', '接入码'])
+        listed = self.call('carol', op='directions_list')['members']
+        alice = next(item for item in listed if item['username'] == 'alice')
+        self.assertEqual([item['title'] for item in alice['directions']], ['检索召回', '接入码'])
+        self.assertTrue(any(item['username'] == 'bob' and item['directions'] == [] for item in listed))
+        again = self.call('alice', op='directions_save', directions=saved['directions'])
+        self.assertEqual(again['directions'][0]['updatedAt'], saved['directions'][0]['updatedAt'])
+        with self.assertRaises(ValueError):
+            self.call('alice', op='directions_save', directions=[
+                dict(id=str(uuid.uuid4()), title='检索召回', summary='甲'),
+                dict(id=str(uuid.uuid4()), title='检索召回', summary='乙'),
+            ])
+        alice_after = next(item for item in self.call('carol', op='directions_list')['members'] if item['username'] == 'alice')
+        self.assertEqual([item['title'] for item in alice_after['directions']], ['检索召回', '接入码'])
+        with self.assertRaises(ValueError):
+            self.call('bob', op='directions_save', directions=[dict(id=str(uuid.uuid4()), title='方向' + str(n), summary='') for n in range(13)])
+        self.call('bob', op='directions_save', directions=[dict(id=str(uuid.uuid4()), title='评测集', summary='可以问失败样本')])
+        names = {item['username']: [direction['title'] for direction in item['directions']] for item in self.call('alice', op='directions_list')['members']}
+        self.assertEqual(names['alice'], ['检索召回', '接入码'])
+        self.assertEqual(names['bob'], ['评测集'])
+        self.state['users']['alice']['enabled'] = False
+        self.assertFalse(any(item['username'] == 'alice' for item in self.call('bob', op='directions_list')['members']))
+
 @unittest.skipUnless(sys.platform == 'linux' and getattr(os, 'geteuid', lambda: 1)() == 0 and content.acl_backend(), 'requires Linux root and ACL support; Windows does not verify kernel permissions')
 class LinuxKernelPermissions(unittest.TestCase):
     def test_libacl_keeps_public_files_read_only_and_groups_isolated(self):
