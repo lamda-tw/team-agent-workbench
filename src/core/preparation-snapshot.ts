@@ -86,7 +86,9 @@ export async function preparationSnapshot(session: AgentSession, inputDir: strin
     if (!delta.count) throw new Error(delta.reason);
     messages = allMessages.slice(delta.start);
   }
-  const conversation = messages.map(m => ({ id: m.id, role: m.role, text: m.text, createdAt: m.createdAt }));
+  // Automatically supplied personal project logs are discovery context, not
+  // evidence contributed by this session to team results.
+  const conversation = messages.map(m => ({ id: m.id, role: m.role, text: m.role === 'user' && m.context?.projectJournal ? m.userText ?? m.text : m.text, createdAt: m.createdAt }));
   const conversationHash = createHash('sha256').update(JSON.stringify(conversation)).digest('hex');
   await fs.mkdir(inputDir, { recursive: true });
   // Windows PowerShell 5 defaults to the system code page for BOM-less files.

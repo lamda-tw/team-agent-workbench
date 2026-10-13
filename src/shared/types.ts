@@ -24,7 +24,7 @@ export interface RemoteEntry { name: string; path: string; kind: 'directory' | '
 export interface FilePreview { name: string; path: string; type: 'text' | 'image' | 'binary'; content: string; truncated: boolean; size: number }
 export interface SourceFile { userAttachment?: boolean; resultUnavailable?: boolean; id: string; name: string; localPath: string; sourcePath: string; sha256: string; size: number; fetchedAt: string; contentRef?: { projectId: string; id: string; revision: number } }
 export interface SessionFile { path: string; name: string; size: number; modifiedAt: string }
-export interface MessageContext { nativeId: string; accepted: boolean; workRecord: boolean; sourceHashes: Record<string, string>; capabilities?: AgentCapabilitySelection[] }
+export interface MessageContext { nativeId: string; accepted: boolean; workRecord: boolean; sourceHashes: Record<string, string>; capabilities?: AgentCapabilitySelection[]; projectJournal?: import('./project-journal').JournalReceipt }
 export interface Message { id: string; role: 'user' | 'assistant' | 'tool' | 'system'; text: string; userText?: string; context?: MessageContext; steering?: boolean; createdAt: string; kind?: 'plan' | 'planSteps'; steps?: import('./session-mode').PlanStep[] }
 export interface ApprovalOption { id: string; label: string; kind: 'allow' | 'deny' | 'answer' }
 export interface Approval { id: string; method: string; title: string; summary?: string; details: string; options: ApprovalOption[]; questions?: { id: string; text: string; options: { id: string; label: string }[]; allowMultiple?: boolean }[] }
@@ -36,7 +36,8 @@ export type SessionNetworkRoute = 'direct' | 'management';
 export interface AgentSession {
   mode?: import('./session-mode').SessionMode; proposedPlan?: import('./session-mode').ProposedPlan;
   id: string; title: string; provider: Provider; model?: string; closedAt?: string; nativeId?: string; nativePath?: string; nativeLive?: boolean; codexStorage?: 'workbench'; codexNeedsRegistration?: boolean;
-  cwd: string; purpose: 'work' | 'prepare'; networkRoute?: SessionNetworkRoute; parentId?: string; fork?: SubsessionFork; reports?: SubsessionReport[]; createdAt: string;
+  cwd: string; purpose: 'work' | 'prepare' | 'background'; networkRoute?: SessionNetworkRoute; parentId?: string; fork?: SubsessionFork; reports?: SubsessionReport[]; createdAt: string;
+  handoffState?: import('./activity-assistant').HandoffState;
   status: 'idle' | 'starting' | 'running' | 'approval' | 'error'; error?: string; stoppedAt?: string;
   completion?: { id: string; readAt?: string };
   messages: Message[]; approvals: Approval[]; sources: SourceFile[]; binding?: RemoteBinding;
@@ -70,7 +71,7 @@ export interface ProviderAuth { status: 'unknown' | 'checking' | 'authenticated'
 export interface ModelOption { id: string; name: string; isDefault?: boolean }
 export interface QuotaWindow { name: string; usedPercent: number; windowMinutes?: number; resetsAt?: number }
 export interface ProviderCatalog { models: ModelOption[]; modelError?: string; quota: { windows: QuotaWindow[]; detail: string; url: string }; checkedAt: string }
-export interface Snapshot { publishingConclusions?: string[]; accountChanging?: boolean; activeTurns?: Record<string, string>; accountSync?: import('./account-data').AccountSyncState; settings: Settings; sessions: AgentSession[]; inputs: Record<string, SessionInput>; transfers: Transfer[]; drafts: Draft[]; connection?: { profile: ConnectionProfile; connected: boolean; workspace?: WorkspaceAccess; workspaces: WorkspaceAccess[] }; providers: ProviderInfo[]; auth: Record<Provider, ProviderAuth>; workspaceReady: boolean; egress?: UserEgressStatus }
+export interface Snapshot { activity?: import('./activity-assistant').ActivityAssistantView; publishingConclusions?: string[]; accountChanging?: boolean; activeTurns?: Record<string, string>; accountSync?: import('./account-data').AccountSyncState; settings: Settings; sessions: AgentSession[]; inputs: Record<string, SessionInput>; transfers: Transfer[]; drafts: Draft[]; connection?: { profile: ConnectionProfile; connected: boolean; workspace?: WorkspaceAccess; workspaces: WorkspaceAccess[] }; providers: ProviderInfo[]; auth: Record<Provider, ProviderAuth>; workspaceReady: boolean; egress?: UserEgressStatus }
 export type WorkbenchEvent = { type: 'state' } | { type: 'notice'; message: string };
 export interface WorkbenchAPI {
   call<T = unknown>(action: string, payload?: unknown): Promise<T>;

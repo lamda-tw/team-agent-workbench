@@ -63,6 +63,7 @@ test('external file loss is not deletion, freezes unsent references, and recover
   try {
     const item = await x.publish('外部文件状态'); await x.bob.syncContentUpdates();
     const unsent = await x.bob.createSession('codex', x.root, x.project.id), delivered = await x.bob.createSession('codex', x.root, x.project.id);
+    await x.bob.importContentConclusion(x.project.id, item.id, item.revision);
     const source = await x.bob.attachContent(unsent.id, item.id), accepted = await x.bob.attachContent(delivered.id, item.id);
     delivered.messages.push({ id: 'delivered', role: 'user', text: '已发送', createdAt: '', context: { nativeId: 'fixture', accepted: true, workRecord: false, sourceHashes: { [accepted.id]: accepted.sha256 } } });
     const file = await diskPath(x.shared, item.path), bytes = await fs.readFile(file); await fs.unlink(file);

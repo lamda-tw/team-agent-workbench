@@ -20,6 +20,7 @@ for (const edition of ['user', 'admin']) {
   const renderer = await build({ entryPoints: [edition === 'user' ? 'src/renderer/main.tsx' : 'src/admin/renderer.tsx'], outfile: out + '/renderer.js', write: false, bundle: true, minify: true, platform: 'browser', format: 'esm', target: 'chrome130', loader: { '.css': 'css' } });
   const files = Object.fromEntries([...preload.outputFiles, ...renderer.outputFiles].map(file => [path.basename(file.path), file.contents]));
   files['index.html'] = await readFile('src/renderer/index.html');
+  if (edition === 'user') files['project-journal-worker.cjs'] = await readFile('src/core/project-journal-worker.cjs');
   if (edition === 'admin') {
     const worker = await build({ entryPoints: ['src/admin/egress-worker.ts'], outfile: out + '/egress-worker.cjs', write: false, bundle: true, platform: 'node', format: 'cjs', target: 'node22' });
     files['egress-worker.cjs'] = worker.outputFiles[0].contents;
