@@ -62,12 +62,8 @@
 }
 ```
 
-在仓库根目录执行：
+以上为历史联调协议。该次联调使用专用工具生成加密信封；工具已随旧演练脚本清理，不再提供执行入口，也不会自动恢复通信任务。
 
-```powershell
-node scripts/seal-agent-message.mjs docs/coordination/proxy-pilot-20260920/client-public.pem .test-data/proxy-pilot/server-private.json docs/coordination/proxy-pilot-20260920/server-0001.sealed.json
-```
-
-只提交 `server-0001.json` 和 `server-0001.sealed.json`。脚本使用随机 AES-256-GCM 加密内容，再用客户端 RSA-OAEP-SHA256 公钥加密 AES 密钥；只在客户端本机保存的私钥能够解密。请不要把原始 JSON、接入码、代理密码、个人模型凭据、完整运行环境或私钥加入版本控制。
+当时只提交 `server-0001.json` 和 `server-0001.sealed.json`，使用随机 AES-256-GCM 加密内容，再用客户端 RSA-OAEP-SHA256 公钥加密 AES 密钥。原始 JSON、接入码、代理密码、个人模型凭据、完整运行环境和私钥不纳入版本控制。
 
 一旦直接消息接口验证可用，后续消息使用该接口；不通过 GitHub 持续交换业务对话或日志。

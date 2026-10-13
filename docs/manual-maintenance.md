@@ -15,7 +15,7 @@
 1. 先更新 Markdown 正文和必要的图。保留已发布的显式锚点；新增章节时检查 `scripts/build-handbook.py` 中的主题分组。按钮名称、角色权限和状态须与当前代码一致。表格适合字段、角色、状态等对照；复杂操作用短段落和步骤解释。
 2. 运行 `python scripts/refresh-handbook.py`。它依次处理示意图、HTML、Word、PDF、ZIP，然后核验正文与链接。脚本把输入和输出摘要保存在 `.test-data/manual/build-state.json`；未变化的环节会显示 `SKIP`，无需重复生成。需要全量重建时加 `--force`。删除状态文件也会全量重建。
 3. 运行 `python scripts/qa-manual-layout.py`，用 Poppler 渲染 PDF 的每一页，并在 `.test-data/manual/layout/` 生成分组预览图。检查图片、表格、段落分页、页码和导航。界面或响应式排版有改动时，在独立测试机器或维护时段运行 `node scripts/handbook-smoke.mjs`；不要在有人使用桌面时启动浏览器自动化。
-4. 检查 `scripts/verify-user-manual.py` 与 `scripts/verify-handbook-static.py` 的输出。前者核对 Markdown、Word、PDF 的正文、图片、书签与内部链接；后者核对网页、离线包、导航、内嵌配图和相对路径。校验记录写入 `.test-data/manual/verification-v<版本>.json`。
+4. 检查刷新流程中的 `scripts/verify-user-manual.py`、`scripts/verify-handbook-static.py` 与 `scripts/verify-handbook-labels.py` 输出，分别核对文档正文与书签、离线包与相对路径，以及链接文字与跳转标题。链接文字也可单独执行 `npm run test:handbook-labels`。界面步骤改动后执行 `npm run test:handbook-ui`，检查截图、实际步骤、离线阅读和窄屏布局。校验记录写入 `.test-data/manual/verification-v<版本>.json`。
 5. 提交源稿、配图、网页源文件、生成物和可复用脚本。`.test-data` 是本机缓存和验证记录，不纳入发布包。
 
 刷新脚本需要 Pillow、python-docx、lxml、pypdf，以及用于 PDF 导出的 Microsoft Word。`scripts/export-manual-pdf.ps1` 使用隐藏 Word 实例从同一 DOCX 导出 PDF；无需另写 PDF 正文。所有生成脚本均不调用模型、网络或团队服务器。Windows 环境如使用项目配置的 Python 运行时，直接把上面的 `python` 替换为该运行时路径。

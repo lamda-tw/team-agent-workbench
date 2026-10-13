@@ -11,69 +11,14 @@ const root = path.resolve(import.meta.dirname, '..');
 const exec = promisify(execFile);
 const windows = { skip: process.platform !== 'win32' };
 
-async function codexBetaLauncherFixture(t: { after: (fn: () => Promise<void>) => void }) {
-  const dir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'workbench Beta 启动 & ')));
-  t.after(async () => {
-    assert.equal(path.dirname(dir), await fs.realpath(os.tmpdir()));
-    assert.ok(path.basename(dir).startsWith('workbench Beta 启动 & '));
-    await fs.rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
-  });
-  await fs.mkdir(path.join(dir, 'scripts'));
-  const launcher = path.join(dir, 'scripts/start-codex-desktop-beta.ps1');
-  await fs.copyFile(path.join(root, 'scripts/start-codex-desktop-beta.ps1'), launcher);
-  // Use real Windows PowerShell and Node process boundaries; never start Codex,
-  // Electron, a model request or a server in these startup regression cases.
-  await fs.writeFile(path.join(dir, 'scripts/build-codex-desktop-beta.mjs'), `
-import fs from 'node:fs';
-console.error('(node:123) ExperimentalWarning: SQLite is an experimental feature and might change at any time');
-if (process.env.BETA_FIXTURE_FAILURE === 'build') { console.error('联调入口构建失败'); process.exit(17); }
-fs.mkdirSync('.test-data/codex-desktop-beta', { recursive: true });
-fs.writeFileSync('.test-data/codex-desktop-beta/launcher.cjs', ${JSON.stringify(String.raw`
-const fs = require('node:fs');
-fs.appendFileSync('events.jsonl', JSON.stringify({ mode: process.argv[2], repo: process.argv[3] }) + '\n');
-console.error('(node:456) ExperimentalWarning: SQLite is an experimental feature and might change at any time');
-console.error('(Use \\x60node --trace-warnings ...\\x60 to show where the warning was created)');
-if (process.env.BETA_FIXTURE_FAILURE === 'launch') { console.error('请先退出 Codex 桌面版，再打开此 Beta 入口。'); process.exit(18); }
-console.log('联调检查完成');
-`)});
-`);
-  const powershell = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe');
-  const run = (mode: string, failure = '') => exec(powershell, ['-NoProfile', '-STA', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', launcher, mode, '-NoDialogs'], {
-    cwd: os.tmpdir(), windowsHide: true, timeout: 15000,
-    env: { ...process.env, BETA_FIXTURE_FAILURE: failure },
-  });
-  const events = async () => (await fs.readFile(path.join(dir, 'events.jsonl'), 'utf8').catch(() => '')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
-  const logs = async () => {
-    const logDir = path.join(dir, '.test-data/codex-desktop-beta/logs');
-    return Promise.all((await fs.readdir(logDir)).map(name => fs.readFile(path.join(logDir, name), 'utf8')));
-  };
-  return { dir, launcher, run, events, logs };
-}
-
-test('Codex Beta launcher runs in Windows PowerShell with Chinese paths and nonfatal Node warnings', windows, async t => {
-  const f = await codexBetaLauncherFixture(t);
-  const result = await f.run('check');
-  assert.match(result.stdout, /正在检查桌面版/);
-  assert.match(result.stdout, /联调检查完成/);
-  assert.equal(result.stderr, '');
-  assert.deepEqual(await f.events(), [{ mode: 'check', repo: f.dir }]);
-  assert.match((await f.logs()).join('\n'), /ExperimentalWarning/);
-});
-
-test('Codex Beta launcher records failures, returns nonzero and stops after a failed build', windows, async t => {
-  const f = await codexBetaLauncherFixture(t);
-  await assert.rejects(f.run('launch', 'build'), (error: any) => {
-    assert.equal(error.code, 1); assert.match(error.stderr, /联调入口构建失败/); return true;
-  });
-  assert.deepEqual(await f.events(), []);
-  await assert.rejects(f.run('launch', 'launch'), (error: any) => {
-    assert.equal(error.code, 1); assert.match(error.stderr, /请先退出 Codex/);
-    assert.doesNotMatch(error.stderr, /ExperimentalWarning/); return true;
-  });
-  assert.deepEqual(await f.events(), [{ mode: 'launch', repo: f.dir }]);
-  assert.match((await f.logs()).join('\n'), /联调入口构建失败/);
-  const recovered = await f.run('check');
-  assert.match(recovered.stdout, /联调检查完成/);
+test('only user and admin launchers are exposed and both use the unified hidden startup flow', async () => {
+  const entries = (await fs.readdir(root, { withFileTypes: true })).filter(entry => entry.isFile() && /\.(cmd|bat|ps1)$/i.test(entry.name)).map(entry => entry.name).sort();
+  assert.deepEqual(entries, ['start-admin-dev.cmd', 'start-user-dev.cmd']);
+  for (const edition of ['user', 'admin']) {
+    const script = await fs.readFile(path.join(root, `start-${edition}-dev.cmd`), 'utf8');
+    assert.match(script, new RegExp(`scripts\\\\start-dev-hidden\\.ps1" ${edition}`));
+    assert.match(script, /-WindowStyle Hidden/);
+  }
 });
 
 async function launcherFixture(t: { after: (fn: () => Promise<void>) => void }) {

@@ -311,7 +311,7 @@ def main(capture_ui=True):
  DESTINATION_TITLES.clear();RELATED_FRAGMENT_TARGETS.clear()
  subprocess.run([sys.executable,str(ROOT/'scripts/build-manual-diagrams.py'),'--handbook-roles'],cwd=ROOT,check=True)
  if capture_ui:
-  subprocess.run(['node',str(ROOT/'scripts/render_handbook_ui_screens.mjs')],cwd=ROOT,check=True)
+  subprocess.run(['node',str(ROOT/'scripts/capture-handbook-app-ui.mjs')],cwd=ROOT,check=True)
  source=editorial_notes(document_paths((DOCS/'user-guide.md').read_text(encoding='utf-8')))
  for image_name in ['admin-users','admin-groups','admin-storage']:
   source=source.replace('images/user-manual/'+image_name+'.png','handbook/ui-screens/'+image_name+'.png')

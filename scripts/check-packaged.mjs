@@ -22,7 +22,12 @@ try {
       const state = await page.evaluate(() => window.workbench.call('snapshot'));
       assert.equal(state.workspaceReady, false);
       await assert.rejects(page.evaluate(() => window.workbench.call('session.create', { provider: 'codex', cwd: 'C:\\' })));
-      assert.equal(state.providers.length, 2); assert(state.providers.every(p => p.available && p.path.includes('resources')));
+      assert.deepEqual(state.providers.map(p => p.provider).sort(), ['claude', 'codex', 'cursor']);
+      for (const provider of ['codex', 'cursor']) {
+        const bundled = state.providers.find(p => p.provider === provider);
+        assert(bundled.available && bundled.path.includes('resources'), `${provider} must use its packaged runtime`);
+      }
+      // Claude Code uses the user's installation; its absence must not block the app.
       await assert.rejects(page.evaluate(() => window.workbench.call('operation', { op: 'user_create' })));
     } else {
       assert.equal(await page.evaluate(() => typeof window.workbench), 'undefined');

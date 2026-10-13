@@ -22,7 +22,7 @@
 
 Claude Code 是此版手册完成后新增的 CLI 选项。安装、登录、权限、Skill 和网络出口操作见 [Claude Code 接入说明](claude-code.md)；下文没有列出的 Claude Code 操作以该说明为准。
 
-需要在工作台与桌面程序之间继续同一条对话，可参阅 [Codex 桌面联动 Beta](codex-desktop-sync.md) 或 [Cursor 原生会话同步 Beta](cursor-desktop-sync.md)。Codex 联动在现有 Beta 功能中开启，新建会话时选择，首次发送按需启动后台；需要原生窗口时点“在 Codex 中打开”。Cursor 原生 Beta 使用独立的联调入口。
+需要在工作台与 Codex 桌面版之间继续同一条对话，可参阅 [Codex 桌面联动 Beta](codex-desktop-sync.md)。在用户版的 Beta 功能中开启，新建会话时选择联动，首次发送按需启动后台；需要原生窗口时点“在 Codex 中打开”。
 
 <!-- pagebreak -->
 
@@ -216,7 +216,7 @@ Claude Code 是此版手册完成后新增的 CLI 选项。安装、登录、权
 
 **继续已有的 Codex／Cursor 会话：**选择工作台项目后，点击左侧“本地会话”旁的 **接入 Codex 会话** 或 **接入 Cursor 会话**。Codex 列表按原有项目展示，Cursor 按工作目录展示；点击左侧项目可单独查看，也可跨项目勾选多条。导入后归入当前工作台项目，并继续使用原生会话及其记录。标有“已在工作台”的会话不可再次勾选，包括已关闭会话；请从工作会话列表打开，已关闭的可先重新打开。“全选”跳过已加入和无法继续的会话，刷新会移除已经失效的勾选。
 
-**与 Codex 桌面版同步（Beta 联调）：**普通入口中的会话关联不保证两端实时同步。开发版提供 `start-codex-desktop-beta.cmd`，需先结束运行中的桌面聊天并退出 Codex，再双击该入口。它会打开桌面版及独立的本地打桩工作台，自动准备“Codex 同步 Beta 验证”会话；成员登录框的测试账号为 `sync_beta`，密码 `123`。两端轮流发言，核对新增消息和前文是否完整。测试结束后退出两个窗口，运行 `stop-codex-desktop-beta.cmd`，即可回到原启动方式。此入口尚待真实桌面验收，详见[同步 Beta 使用与联调记录](codex-desktop-sync.md#试用-beta)。
+**与 Codex 桌面版同步（Beta）：**从 `start-user-dev.cmd` 打开用户版，在 **Beta 功能** 中开启 **Codex 桌面联动**，新建 Codex 会话时勾选 **联动 Codex 桌面版**。首次发送自动启动或复用后台，需要原生界面时点击 **在 Codex 中打开**；两端轮流发送，多条会话可共用后台。关闭一条会话或退出工作台不关闭其他会话；关闭 Beta 后，新建会话不再默认联动，已有联动会话保留。当前支持本机网络；首次使用时若 Codex 正以普通方式运行，请保存工作并退出后重试。详见[桌面联动使用与验证记录](codex-desktop-sync.md#在现有工作台中使用)。
 
 <a id="section-4-2"></a>
 

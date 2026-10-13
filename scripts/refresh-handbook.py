@@ -92,6 +92,7 @@ def main() -> None:
           [python, str(SCRIPTS / 'package-handbook.py')])
     run(python, str(SCRIPTS / 'verify-user-manual.py'))
     run(python, str(SCRIPTS / 'verify-handbook-static.py'))
+    run(python, str(SCRIPTS / 'verify-handbook-labels.py'))
     print('Manual refresh complete.', flush=True)
 
 

@@ -105,7 +105,7 @@ def search_text(spec: dict) -> str:
 
 def enhance_html(path: Path = HTML, summary: str | None = None, capture_ui: bool = True) -> None:
     if capture_ui:
-        subprocess.run(["node", str(ROOT / "scripts" / "render_handbook_ui_screens.mjs")], cwd=ROOT, check=True)
+        subprocess.run(["node", str(ROOT / "scripts" / "capture-handbook-app-ui.mjs")], cwd=ROOT, check=True)
     source = path.read_text(encoding="utf-8")
     source, css_count = re.subn(
         r"(<style>).*?(</style>)",
