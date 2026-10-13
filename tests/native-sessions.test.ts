@@ -375,6 +375,7 @@ test('publishing a workbench session registers it in the desktop Codex and Curso
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'wb-native-publish-'));
   const previousCodex = process.env.CODEX_HOME, previousCursor = process.env.WORKBENCH_CURSOR_CHATS;
   const wb = new Workbench(path.join(root, 'data'), () => {}, () => {});
+  wb.desktopAppOpen = async () => false;
   try {
     const codex = path.join(root, 'codex'), cursor = path.join(root, 'cursor-chats'), workspace = path.join(root, 'workspace');
     process.env.CODEX_HOME = codex; process.env.WORKBENCH_CURSOR_CHATS = cursor;
@@ -439,6 +440,43 @@ test('publishing a workbench session registers it in the desktop Codex and Curso
   } finally {
     if (previousCodex === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = previousCodex;
     if (previousCursor === undefined) delete process.env.WORKBENCH_CURSOR_CHATS; else process.env.WORKBENCH_CURSOR_CHATS = previousCursor;
+    await wb.close();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test('an already open desktop app is reminded and its session files stay untouched', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'wb-open-desktop-'));
+  const previousCodex = process.env.CODEX_HOME;
+  const notices: string[] = [];
+  const wb = new Workbench(path.join(root, 'data'), () => {}, message => notices.push(message));
+  wb.desktopAppOpen = async () => true;
+  try {
+    const codex = path.join(root, 'codex'), workspace = path.join(root, 'workspace');
+    process.env.CODEX_HOME = codex;
+    await fs.mkdir(codex, { recursive: true });
+    await fs.mkdir(workspace, { recursive: true });
+    await wb.store.init(); grantTestWorkspace(wb, workspace);
+    const session = await wb.createSession('codex', workspace, offlineProjectId, 'work', undefined, undefined, 'inherit', false);
+    session.nativeLive = true; session.nativeId = codexId;
+    await (wb as any).publishDesktopHistory(session);
+    await (wb as any).publishDesktopHistory(session);
+    assert.equal(notices.length, 1);
+    assert.match(notices[0], /桌面 Codex 正在运行/);
+    assert.deepEqual(await fs.readdir(codex), []);
+    let closed = false;
+    (wb as any).runtimes.set(session.id, { session, close: async () => { closed = true; } });
+    session.nativeLive = false; session.nativeId = undefined;
+    await assert.rejects(() => wb.publishToDesktop(session.id), /不会改写已打开的会话数据/);
+    assert.equal(closed, false);
+    assert.equal((wb as any).runtimes.has(session.id), true);
+    const cursorSession = await wb.createSession('cursor', workspace, offlineProjectId, 'work', undefined, undefined, 'inherit', false);
+    await assert.rejects(() => wb.publishToDesktop(cursorSession.id), /Cursor 正在运行/);
+    wb.desktopAppOpen = async () => { throw new Error('probe failed'); };
+    await assert.rejects(() => wb.publishToDesktop(session.id), /无法确认桌面 Codex/);
+    assert.deepEqual(await fs.readdir(codex), []);
+  } finally {
+    if (previousCodex === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = previousCodex;
     await wb.close();
     await fs.rm(root, { recursive: true, force: true });
   }

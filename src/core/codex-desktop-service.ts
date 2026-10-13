@@ -5,6 +5,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import * as asar from '@electron/asar';
+import { userDesktopAppOpen } from './desktop-app-open';
 import { privateBridgeDirectory, installedCodexDesktopExecutable } from './codex-shared-backend';
 import { sameNativePath } from './native-transcript';
 import { findCodexRollout, type CodexStorage } from './codex-storage';
@@ -25,9 +26,8 @@ export async function codexDesktopTarget(): Promise<CodexDesktopTarget> {
   if (!root) throw new Error('尚未安装 Codex 桌面版，请安装后使用桌面联动；普通会话仍可使用');
   return { app: path.join(root,'app','ChatGPT.exe'), archive: path.join(root,'app','resources','app.asar'), executable: await installedCodexDesktopExecutable(path.join(root,'app','resources','codex.exe')) };
 }
-async function codexDesktopRunning() {
-  const { stdout } = await run('powershell.exe', ['-NoProfile','-NonInteractive','-Command', 'Get-CimInstance Win32_Process -Filter "Name=\'ChatGPT.exe\'" | Where-Object { $_.ExecutablePath -like "*OpenAI.Codex*" -and $_.CommandLine -notlike "*--type=*" } | Select-Object -ExpandProperty ProcessId'], {windowsHide:true,timeout:15000});
-  return !!stdout.trim();
+function codexDesktopRunning() {
+  return userDesktopAppOpen('codex');
 }
 export function validateManagedBridge(value: CodexDesktopBridge, sourceHome: string) {
   let endpoint: URL; try { endpoint = new URL(value.endpoint); } catch { throw new Error('Codex 联动连接记录不可用'); }

@@ -35,6 +35,7 @@ import { AgentRuntime, clearStoppedNativeFork } from './agents';
 import { ClaudeRuntime } from './claude-runtime';
 import { prepareCodexStorage } from './codex-storage';
 import { syncCodexDesktopHistory } from './codex-desktop-history';
+import { userDesktopAppOpen } from './desktop-app-open';
 import type { McpMutation } from '../shared/mcp';
 import { CursorMcp } from './cursor-mcp';
 import type { SessionMode } from '../shared/session-mode';
@@ -138,6 +139,9 @@ export class Workbench {
   }
   private configuringCursorPermissions = false;
   private closing = false;
+  /** Tests replace this so a desktop app open on the machine does not block isolated fixtures. */
+  desktopAppOpen: (provider: 'codex' | 'cursor') => Promise<boolean> = userDesktopAppOpen;
+  private openDesktopReminded = new Set<string>();
   accounts: ProviderAccounts;
   accountSync: AccountSync;
   constructor(root: string, private broadcast: () => void, private notice: (message: string) => void, private preparationTimeoutMs = 10 * 60 * 1000, private providerEnvironment: (route?: SessionNetworkRoute) => NodeJS.ProcessEnv = () => ({}), private connectionReport?: (session: AgentSession, value: import('../shared/cli-connection').CliConnection) => void, readonly codexDesktop: CodexDesktopIntegration = new CodexDesktopService()) {
@@ -1507,9 +1511,29 @@ export class Workbench {
       if (this.nativeSyncPending.size && !this.nativeSyncQueued) this.queueNativeTranscript([...this.nativeSyncPending][0]);
     }
   }
+  private openDesktopMessage(provider: 'codex' | 'cursor', action: 'publish' | 'sync') {
+    const app = provider === 'codex' ? '桌面 Codex' : 'Cursor';
+    if (action === 'publish') return `${app} 正在运行。请先保存并退出，再登记到桌面端；不会改写已打开的会话数据。`;
+    return `${app} 正在运行，没有把新内容写入它的会话索引。请保存并退出后重新打开工作台，或使用「在桌面端显示」。`;
+  }
+  private async blockOpenDesktop(provider: 'codex' | 'cursor', action: 'publish' | 'sync') {
+    let open = true;
+    try { open = await this.desktopAppOpen(provider); }
+    catch {
+      const message = provider === 'codex' ? '无法确认桌面 Codex 是否正在运行，已停止写入它的会话数据。' : '无法确认 Cursor 是否正在运行，已停止写入它的会话数据。';
+      if (action === 'publish') throw new Error(message);
+      const key = provider + ':unknown';
+      if (!this.openDesktopReminded.has(key)) { this.openDesktopReminded.add(key); this.notice(message); }
+      return true;
+    }
+    if (!open) { this.openDesktopReminded.delete(provider); return false; }
+    if (action === 'sync' && !this.openDesktopReminded.has(provider)) { this.openDesktopReminded.add(provider); this.notice(this.openDesktopMessage(provider, 'sync')); }
+    return true;
+  }
   private async publishDesktopHistory(session: AgentSession, allowRetry = true) {
     if (session.provider !== 'codex' || !session.nativeLive || !session.nativeId || session.closedAt) return;
     if (session.codexDesktop || process.env.WORKBENCH_CODEX_DESKTOP_BRIDGE) return; // The shared backend owns its index; never copy stale private rows over it.
+    if (await this.blockOpenDesktop('codex', 'sync')) return;
     try {
       const result = await syncCodexDesktopHistory(session.nativeId, codexHome(), path.join(this.store.root, 'codex-home', 'sqlite'));
       if (result === 'behind' && allowRetry) {
@@ -1581,6 +1605,7 @@ export class Workbench {
     if (['starting', 'running', 'approval'].includes(session.status)) throw new Error('请等这条会话结束再登记到桌面端');
     if (session.nativeLive && session.nativePath && nativeRecordAllowed(session.provider, session.nativePath)) throw new Error(session.provider === 'codex' ? '这条会话已经在桌面 Codex 的列表里' : '这条会话已经在 Cursor 的会话列表里');
     if (this.sending.has(id) || this.steering.has(id) || this.stoppingSessions.has(id)) throw new Error('请等当前会话操作完成后再登记到桌面端');
+    if ((session.provider === 'codex' || session.provider === 'cursor') && await this.blockOpenDesktop(session.provider, 'publish')) throw new Error(this.openDesktopMessage(session.provider, 'publish'));
     // Flush and release the private runtime before copying its record. The next
     // message must resume the published record and use the desktop history DB.
     const runtime = this.runtimes.get(id);
