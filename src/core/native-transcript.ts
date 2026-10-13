@@ -129,10 +129,21 @@ export function applyNativeTranscript(existing: Message[], parsed: Message[]) {
   if (!parsed.length) return existing;
   const nativeCount = existing.filter(message => message.id.startsWith('native:')).length;
   if (parsed.length < nativeCount) return existing;
-  const byId = new Map(existing.filter(message => message.context).map(message => [message.id, message]));
-  const byText = new Map(existing.filter(message => message.role === 'user' && message.context).map(message => [message.userText || message.text, message]));
+  const users = existing.filter(message => message.role === 'user');
+  const nativeId = (id: string) => id.replace(/^native:/, '');
+  const byId = new Map(users.map(message => [nativeId(message.id), message]));
+  // Reserve ID matches before falling back to text, so repeated prompts cannot
+  // steal one another's raw input or context receipts when history is refreshed.
+  const reserved = new Set(parsed.filter(message => message.role === 'user').map(message => byId.get(nativeId(message.id))).filter(Boolean));
+  const used = new Set<Message>();
   return parsed.map(message => {
-    const previous = byId.get(message.id) || (message.role === 'user' ? byText.get(message.text) : undefined);
-    return previous?.context ? { ...message, context: previous.context, userText: previous.userText || message.text } : message;
+    if (message.role !== 'user') return message;
+    const matches = (text: string) => text === message.text || clip(text, textLimit) === message.text;
+    const available = users.filter(previous => !reserved.has(previous) && !used.has(previous));
+    const previous = byId.get(nativeId(message.id))
+      || available.find(previous => matches(previous.text) || previous.userText !== undefined && matches(previous.userText));
+    if (!previous || used.has(previous)) return message;
+    used.add(previous);
+    return { ...message, context: previous.context, userText: previous.userText, steering: previous.steering };
   });
 }

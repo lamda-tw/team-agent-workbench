@@ -36,6 +36,7 @@ test('retracting an unsent team result removes the session reference but retains
     const binding = x.alice.remote.binding(x.project.id), file = path.join(x.root, 'result.md'); await fs.writeFile(file, '团队成果');
     await x.alice.remote.upload(binding, file, binding.project.uploadPath + '/result.md', () => {}, { kind: 'contribution', title: '低清晰度样本', description: '需要补样本' });
     const remote = (await x.alice.remote.contentList(binding))[0]; await x.bob.syncContentUpdates();
+    await x.bob.importContentConclusion(x.project.id, remote.id, remote.revision);
     const session = await x.bob.createSession('codex', x.root, x.project.id), source = await x.bob.attachContent(session.id, remote.id);
     await x.bob.saveInput(session.id, { text: '继续', sourceIds: [source.id], answers: {} });
     assert.equal(x.bob.conclusions(x.project.id).length, 1);
@@ -56,6 +57,7 @@ test('team scans retire orphaned legacy choices only after complete reads, prese
     await x.alice.remote.upload(binding, file, binding.project.uploadPath + '/retire.md', () => {}, { kind: 'contribution', title: '共享结论', description: '已有验证依据' });
     const item = (await x.alice.remote.contentList(binding))[0];
     const ownerSession = await x.alice.createSession('codex', x.root, x.project.id), ownerRef = await x.alice.attachContent(ownerSession.id, item.id);
+    await x.bob.importContentConclusion(x.project.id, item.id, item.revision);
     const s = await x.bob.createSession('codex', x.root, x.project.id), ref = await x.bob.attachContent(s.id, item.id);
     const local = x.bob.conclusions(x.project.id)[0], personalRef = await x.bob.attachConclusion(s.id, local.id);
     const legacy = { ...ref, id: randomUUID(), contentRef: undefined, sourcePath: binding.project.uploadPath + '/old-deleted.zip' }; s.sources.push(legacy);

@@ -73,7 +73,8 @@ for (const provider of ['codex', 'cursor'] as const) test(provider + ': project 
     const file = path.join(root, 'brief-' + revision + '.md'); await fs.writeFile(file, 'OCR 目标 ' + revision);
     const f = await freezeFile(file, path.join(root, 'snapshots')); f.name = '项目说明 · v' + revision; f.sourcePath = '/projects/ocr/P/项目说明.md'; return f;
   };
-  const calls = async () => (await fs.readFile(path.join(root, 'cli/rpc-calls.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line)).filter(m => m.method === (provider === 'codex' ? 'turn/start' : 'session/prompt'));
+  // Background summary RPCs use the same fixture; assertions must target the work conversation.
+  const calls = async (nativeId: string) => (await fs.readFile(path.join(root, 'cli/rpc-calls.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line)).filter(m => m.method === (provider === 'codex' ? 'turn/start' : 'session/prompt') && (m.params.threadId || m.params.sessionId) === nativeId);
   const wireText = (call: any) => (provider === 'codex' ? call.params.input : call.params.prompt)[0].text;
   try {
     await wb.store.init(); grantTestWorkspace(wb, root); wb.store.settings.providerPaths[provider] = fixture.launcher;
@@ -82,7 +83,7 @@ for (const provider of ['codex', 'cursor'] as const) test(provider + ': project 
     const send = async (text: string, ids: string[] = []) => { await wb.send(s.id, text, ids); await until(() => !['starting', 'running', 'approval'].includes(s.status)); return s.messages.filter(m => m.role === 'user').at(-1)!; };
     const first = await send('下一步应该做什么？');
     assert.equal(first.userText, '下一步应该做什么？'); assert(first.text.includes(v1.sha256)); assert(first.context?.accepted);
-    const next = await send('继续', [v1.id]); assert.equal(next.text, '继续'); assert.equal(wireText((await calls()).at(-1)), '继续');
+    const next = await send('继续', [v1.id]); assert.equal(next.text, '继续'); assert.equal(wireText((await calls(s.nativeId!)).at(-1)), '继续');
     const id = s.id, nativeId = s.nativeId; await wb.close();
     wb = new Workbench(store, () => {}, () => {}); await wb.store.init(); grantTestWorkspace(wb, root); s = wb.session(id);
     assert.equal((await send('重启后继续')).text, '重启后继续'); assert.equal(s.nativeId, nativeId);
@@ -98,7 +99,7 @@ for (const provider of ['codex', 'cursor'] as const) test(provider + ': project 
     await fixture.write({ status: 'ready', turn: 'success' });
     assert((await send('重新发送')).text.includes(v3.sha256)); assert.equal((await send('已经收到后继续')).text, '已经收到后继续');
     const extra = await source(4); s.sources.push(extra); const original = await fs.readFile(extra.localPath); await fs.writeFile(extra.localPath, 'tampered');
-    const before = (await calls()).length; await assert.rejects(send('新增资料', [extra.id]), /参考快照已改变/); assert.equal((await calls()).length, before);
+    const before = (await calls(s.nativeId!)).length; await assert.rejects(send('新增资料', [extra.id]), /参考快照已改变/); assert.equal((await calls(s.nativeId!)).length, before);
     await fs.writeFile(extra.localPath, original); assert((await send('新增资料', [extra.id])).text.includes(extra.sha256));
     assert.equal((await send('继续参考', [extra.id])).text, '继续参考');
     assert(s.messages.filter(m => m.role === 'user').every(m => m.userText && !m.userText.includes('SHA256')));

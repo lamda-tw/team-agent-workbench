@@ -41,7 +41,7 @@ import type { SessionMode } from '../shared/session-mode';
 import { codexHome, listNativeSessions as listProviderSessions, nativeRecordAllowed, resolveNativeSession } from './native-sessions';
 import { publishToNativeList } from './native-publish';
 import { applyNativeTranscript, nativeTranscriptChanged, readCodexTranscript, readCursorTranscript, sameNativePath } from './native-transcript';
-import { sessionContext } from './session-context';
+import { migrateSessionContext, sessionContext } from './session-context';
 import { isProtectedSessionSource, isRemovableSessionReference, sessionWithAvailableReferences } from '../shared/session-result-references';
 import { reconcileTeamResultReferences } from './session-result-references';
 import { invalidateContentActivities } from './content-activity-lifecycle';
@@ -68,7 +68,18 @@ import { preparationErrorMessage } from '../shared/preparation-error';
 import { applyContentMerge } from './content-merge';
 import { canDeleteSharedContent, contentDeleteSelectionsSchema, contentAliasKey, contributionCategoryFields, contributionCategories, materialCategories, contributionCategoryInfo, contributionTitle, projectResultTitle, resultTitle, titleSubject, type ContentDeleteSelection, type ContentDeleteResult, type ContentEdit, type ContributionCategory, type SharedContent } from '../shared/content';
 import { rankConclusions } from './conclusion-matcher';
+import { ActivityAssistant, textHash } from './activity-assistant';
+import { backgroundTextTask } from './background-text';
+import { writeHandoffAtomic } from './handoff-writer';
+import { ProjectJournal } from './project-journal';
+import type { JournalEntry } from '../shared/project-journal';
+import type { ActivityChoice, ActivityActionResult } from '../shared/activity-assistant';
 export class Workbench {
+  activity: ActivityAssistant;
+  journal: ProjectJournal;
+  private contentWatch?: NodeJS.Timeout;
+  private contentSyncJob?: Promise<ContentUpdate[]>;
+  private activityActions = new Set<string>();
   store: Store; remote: SharedFiles; queue: TransferQueue; providers: ProviderInfo[] = [];
   private assignmentUploads: AssignmentUploads;
   private runtimes = new Map<string, AgentRuntime | ClaudeRuntime>(); private sending = new Set<string>();
@@ -131,6 +142,11 @@ export class Workbench {
   constructor(root: string, private broadcast: () => void, private notice: (message: string) => void, private preparationTimeoutMs = 10 * 60 * 1000, private providerEnvironment: (route?: SessionNetworkRoute) => NodeJS.ProcessEnv = () => ({}), private connectionReport?: (session: AgentSession, value: import('../shared/cli-connection').CliConnection) => void) {
     this.assignmentUploads = new AssignmentUploads(root);
     this.store = new Store(root); this.remote = new SharedFiles(() => this.broadcast()); this.queue = new TransferQueue(this.store, this.remote, () => this.broadcast());
+    this.journal = new ProjectJournal(this.store);
+    this.activity = new ActivityAssistant({ store: this.store, prepare: () => this.journal.ready(), owns: s => !this.configuring && this.ownsLocal(s.binding), connected: () => !this.closing && !this.configuring && this.remote.connected,
+      content: s => { this.assertCanWork(s.binding); return this.remote.contentList(s.binding!); },
+      commitSummary: (s, hash, count, summary, entry) => this.commitHandoff(s, hash, count, summary, entry), changed: () => this.broadcast(),
+    }, backgroundTextTask(root, s => this.store.settings.providerPaths[s.provider], s => this.providerEnvironment(s.networkRoute)));
     this.accountSync = new AccountSync(this.store, this.remote, this.broadcast, () => {
       for (const draft of this.store.drafts) {
         const explicitlySaved = new Set(draft.personalSavedIds || []);
@@ -141,7 +157,17 @@ export class Workbench {
         for (const result of restored) result.conclusion.automatic = false;
       }
     });
-    this.accounts = new ProviderAccounts(p => this.store.settings.providerPaths[p], broadcast, provider => {
+    const readyAuth = new Map<Provider, string>();
+    this.accounts = new ProviderAccounts(p => this.store.settings.providerPaths[p], () => {
+      for (const provider of ['codex', 'cursor', 'claude'] as const) {
+        const auth = this.accounts.states[provider], key = JSON.stringify([auth.cwd, auth.networkRoute, this.store.settings.providerPaths[provider]]);
+        if (authReady(auth)) {
+          if (readyAuth.get(provider) !== key) this.activity.providerRecovered(provider, auth.networkRoute, auth.cwd);
+          readyAuth.set(provider, key);
+        } else if (auth.status !== 'checking') readyAuth.delete(provider);
+      }
+      broadcast();
+    }, provider => {
       this.clearCatalogCache(provider);
       for (const [id, runtime] of this.runtimes) if (runtime.session.provider === provider && !['running', 'approval', 'starting'].includes(runtime.session.status)) { runtime.close(); this.runtimes.delete(id); }
     }, this.providerEnvironment);
@@ -631,9 +657,21 @@ export class Workbench {
       return result;
     } finally { this.deletingSharedContent.delete(key); }
   }
+  async setActivityProject(windowId: string, projectId: string) {
+    if (projectId) { const profile = this.remote.profile || this.store.settings.workspaceSnapshot?.profile; if (!profile?.projects.some(p => p.id === projectId)) throw new Error('项目不可访问'); }
+    this.activity.setProject(windowId, projectId);
+    if (!this.contentWatch) { this.contentWatch = setInterval(() => { if (!this.configuring && !this.closing) void this.syncContentUpdates().catch(() => {}); }, 15000); this.contentWatch.unref(); }
+    await this.syncContentUpdates();
+  }
   async syncContentUpdates(): Promise<ContentUpdate[]> {
+    if (this.contentSyncJob) return this.contentSyncJob;
+    const job = this.scanContentUpdates(); this.contentSyncJob = job;
+    try { return await job; } finally { if (this.contentSyncJob === job) this.contentSyncJob = undefined; }
+  }
+  private async scanContentUpdates(): Promise<ContentUpdate[]> {
     if (!this.remote.connected || !this.remote.profile) return this.contentUpdates();
     const profile = this.remote.profile;
+    const beforeActivity = JSON.stringify(this.store.activity);
     let changed = false;
     for (const project of profile.projects) {
       const workspace = this.remote.workspaces.find(item => item.groupName === project.groupName);
@@ -650,7 +688,8 @@ export class Workbench {
         // Account restoration replaces these containers while the network request is pending.
         // Always mutate the current inbox; a detached array would silently lose this scan.
         const seen = this.store.settings.contentSeen ||= {}, inbox = this.store.settings.contentUpdates ||= [];
-        const add = (event: ContentUpdate) => { if (!inbox.some(item => item.eventId === event.eventId)) { inbox.unshift(event); changed = true; } };
+        const additions: ContentUpdate[] = [];
+        const add = (event: ContentUpdate) => { if (!inbox.some(item => item.eventId === event.eventId)) { inbox.unshift(event); additions.push(event); changed = true; } };
         const key = [profile.id, profile.username, project.id].join(':'), priorRaw = seen[key];
         const prior = priorRaw && Object.fromEntries(Object.entries(priorRaw).map(([id, value]) => [id, typeof value === 'number' ? { revision: value } : value])) as Record<string, ContentSeenState> | undefined;
         const current = Object.fromEntries(items.map(item => [item.id, this.contentSeenState(item)]));
@@ -705,9 +744,10 @@ export class Workbench {
           }
         }
         if (JSON.stringify(priorRaw || {}) !== JSON.stringify(current)) { seen[key] = current; changed = true; }
+        this.activity.observe(project.id, accountIdentity(profile), additions);
       } catch { /* One inaccessible project must not suppress updates from the others. */ }
     }
-    if (changed) { await this.store.save(); this.broadcast(); }
+    if (changed || beforeActivity !== JSON.stringify(this.store.activity)) { await this.store.save(); this.broadcast(); }
     return this.contentUpdates();
   }
   saveInput(id: string, input: SessionInput) {
@@ -728,7 +768,7 @@ export class Workbench {
     const sessions = this.store.sessions.map(session => sessionWithAvailableReferences(session, this.store.conclusions));
     const allowed = new Map(sessions.map(session => [session.id, new Set(session.sources.map(source => source.id))]));
     const inputs = Object.fromEntries(Object.entries(this.store.inputs).map(([id, input]) => [id, { ...input, sourceIds: input.sourceIds.filter(sourceId => allowed.get(id)?.has(sourceId)) }]));
-    return scopeAccountSnapshot({ publishingConclusions: [...this.publishingConclusions], accountChanging: this.configuring, activeTurns: Object.fromEntries([...this.runtimes].flatMap(([id, runtime]) => runtime.activeTurnId ? [[id, runtime.activeTurnId]] : [])), accountSync: this.accountSync.state, settings: this.store.settings, sessions, inputs, drafts: this.store.drafts, transfers: this.store.transfers, providers: this.providers, auth: this.accounts.states, workspaceReady: this.workspaceReady, connection: !this.configuring && this.remote.connected && this.remote.profile ? { profile: this.remote.profile, connected: true, workspace: this.remote.workspace, workspaces: this.remote.workspaces } : undefined });
+    return scopeAccountSnapshot({ activity: this.activityView(), publishingConclusions: [...this.publishingConclusions], accountChanging: this.configuring, activeTurns: Object.fromEntries([...this.runtimes].flatMap(([id, runtime]) => runtime.activeTurnId ? [[id, runtime.activeTurnId]] : [])), accountSync: this.accountSync.state, settings: this.store.settings, sessions, inputs, drafts: this.store.drafts, transfers: this.store.transfers, providers: this.providers, auth: this.accounts.states, workspaceReady: this.workspaceReady, connection: !this.configuring && this.remote.connected && this.remote.profile ? { profile: this.remote.profile, connected: true, workspace: this.remote.workspace, workspaces: this.remote.workspaces } : undefined });
   }
   private localProfile() { return !this.configuring && this.remote.connected ? this.remote.profile : this.store.settings.workspaceSnapshot?.profile; }
   betaFeatureEnabled(feature: BetaFeature) {
@@ -793,7 +833,12 @@ export class Workbench {
     const storage = s.provider === 'codex' ? await prepareCodexStorage(this.store.root, s) : undefined;
     if (this.closing || s.closedAt || epoch !== this.accountRevision) throw new Error('会话或账号已改变，未启动 CLI');
     const hooks = { changed: this.changed, event: (value: unknown) => this.event(s.id, value), done: () => void this.onDone(s.id).catch(e => this.sessionNotice(s, '运行结果保存失败：' + e.message)), authFailed: (error: unknown) => this.accounts.failed(s.provider, error, s.cwd, s.networkRoute), needsApproval: (kind: 'question' | 'approval') => this.sessionNotice(s, kind === 'question' ? `“${s.title}”有问题需要你回答。` : `待授权：“${s.title}”需要你确认 CLI 操作，请查看待授权提醒。`) };
-    Object.assign(hooks, { connectionChanged: (value: import('../shared/cli-connection').CliConnection) => { if (!this.configuring && this.ownsLocal(s.binding)) this.connectionReport?.(s, value); } });
+    Object.assign(hooks, { connectionChanged: (value: import('../shared/cli-connection').CliConnection) => {
+      if (!this.configuring && this.ownsLocal(s.binding)) {
+        this.connectionReport?.(s, value);
+        if (value.state === 'connected') this.activity.providerRecovered(s.provider, s.networkRoute, s.cwd);
+      }
+    } });
     runtime = s.provider === 'claude' ? new ClaudeRuntime(s, executable, hooks, this.providerEnvironment(s.networkRoute)) : new AgentRuntime(s, executable, hooks, storage, this.providerEnvironment(s.networkRoute));
     this.runtimes.set(s.id, runtime);
     if (runtime instanceof AgentRuntime) runtime.rpc.on('closed', () => { if (this.runtimes.get(s.id) === runtime) this.runtimes.delete(s.id); });
@@ -929,7 +974,7 @@ export class Workbench {
       this.store.settings.workspaceSnapshot = makeWorkspaceSnapshot(result, this.remote.workspaces);
       await this.store.save(); this.workspaceReady = !!this.remote.workspaces.length; this.broadcast(); return result;
     } catch (error) { this.remote.disconnect(); throw error; }
-    finally { this.configuring = false; this.broadcast(); }
+    finally { this.configuring = false; if (this.remote.connected) this.activity.connectionRecovered(); this.broadcast(); }
   }
   async initializeProject(name: string, groupName: string, brief: ProjectBrief, contextKey: string) {
     this.assertWorkspace();
@@ -1172,11 +1217,17 @@ export class Workbench {
     const write = previous.then(() => this.store.event(id, value)).catch(e => this.notice('会话事件保存失败：' + e.message));
     this.eventWrites.set(id, write);
   }
-  private availableSessionContext(session: AgentSession, userText: string, sourceIds: string[]) {
+  private async availableSessionContext(session: AgentSession, userText: string, sourceIds: string[]) {
     if (sourceIds.some(id => !session.sources.some(source => source.id === id))) throw new Error('引用不属于当前会话');
     const available = sessionWithAvailableReferences(session, this.store.conclusions);
     const ids = new Set(available.sources.map(source => source.id));
-    return sessionContext(available, userText, sourceIds.filter(id => ids.has(id)));
+    const journal = await this.journal.context(session);
+    // Keep the existing privacy rule for personal cross-session references.
+    if (journal && Object.keys(journal.receipt.sessions).some(id => id !== session.id) && session.autoUpload) {
+      session.autoUpload = false; clearTimeout(this.trajectoryTimers.get(session.id)); this.trajectoryTimers.delete(session.id);
+      this.sessionNotice(session, '项目日志包含其他个人会话，已关闭此会话的轨迹自动上传；核对后仍可手动上传。');
+    }
+    return sessionContext(available, userText, sourceIds.filter(id => ids.has(id)), journal);
   }
   private assertReferencesAvailable(session: AgentSession, sources: SourceFile[]) {
     const ids = new Set(sessionWithAvailableReferences(session, this.store.conclusions).sources.map(source => source.id));
@@ -1207,7 +1258,7 @@ export class Workbench {
       if (canceled()) return false;
       if (s.closedAt) throw new Error('此会话已关闭');
       s.status = 'starting';
-      const input = this.availableSessionContext(s, userText, sourceIds);
+      const input = await this.availableSessionContext(s, userText, sourceIds);
       for (const source of input.sources) if (await hashFile(source.localPath) !== source.sha256) throw new Error('参考快照已改变，请重新添加文件：' + source.name);
       if (s.closedAt) throw new Error('此会话已关闭');
       const capabilities = await runtime.resolveCapabilities(capabilitySelections);
@@ -1233,7 +1284,7 @@ export class Workbench {
     if (!expectedTurnId || runtime?.activeTurnId !== expectedTurnId) throw new Error('当前轮次已结束或发生变化，引导未发送；请核对后重新发送');
     this.steering.add(id);
     try {
-      const input = this.availableSessionContext(s, userText, sourceIds);
+      const input = await this.availableSessionContext(s, userText, sourceIds);
       for (const source of input.sources) if (await hashFile(source.localPath) !== source.sha256) throw new Error('参考快照已改变，请重新添加文件：' + source.name);
       const capabilities = await runtime.resolveCapabilities(capabilitySelections);
       this.assertCanWork(s.binding);
@@ -1273,6 +1324,7 @@ export class Workbench {
         const runtime = this.runtimes.get(id); if (runtime) { this.runtimes.delete(id); await runtime.close(); }
       }
     }
+    if (s.purpose === 'work' && !s.closedAt) this.activity.completed(s.id);
     if (!this.configuring && this.ownsLocal(s.binding) && s.autoUpload && s.binding && s.purpose === 'work') { try { await this.archive(id, true); } catch (e: any) { this.sessionNotice(s, '会话自动上传未完成：' + e.message); } }
   }
   async readSessionCompletion(id: string, completionId: string) {
@@ -1311,6 +1363,7 @@ export class Workbench {
     const s = this.session(id); if (s.purpose !== 'work') throw new Error('此任务不是工作会话');
     if (this.sending.has(id) || this.stoppingSessions.has(id)) throw new Error('正在停止此会话，请稍后重新打开');
     s.closedAt = undefined; await this.store.save(); this.broadcast();
+    this.activity.resumed(id);
     this.ensureNativeTranscriptSync();
     return s;
   }
@@ -1431,7 +1484,8 @@ export class Workbench {
     if (session.provider !== 'codex' && session.provider !== 'cursor') return false;
     if (!nativeRecordAllowed(session.provider, session.nativePath)) throw new Error(session.provider === 'codex' ? 'Codex 关联只能读取 Codex 自己的会话记录' : 'Cursor 关联只能读取 Cursor 自己的会话记录');
     const parsed = session.provider === 'codex' ? await readCodexTranscript(session.nativePath) : readCursorTranscript(session.nativePath);
-    const next = applyNativeTranscript(session.messages, parsed);
+    const next = applyNativeTranscript(session.messages, parsed).map(message => ({ ...message }));
+    migrateSessionContext({ ...session, messages: next });
     if (!nativeTranscriptChanged(session.messages, next)) return false;
     session.messages = next;
     if (persist) { await this.store.save(); this.broadcast(); }
@@ -1492,6 +1546,29 @@ export class Workbench {
     catch (error: any) { session.error = error.message; }
     await this.store.save(); this.broadcast(); return session;
   }
+  async deleteSession(id: string) {
+    return this.edit('delete-session:' + id, async () => {
+      const s = this.session(id);
+      if (s.purpose !== 'work' || !s.closedAt) throw new Error('请先关闭工作会话，再删除');
+      if (this.sending.has(id) || this.steering.has(id) || this.stoppingSessions.has(id)) throw new Error('会话正在停止，请稍后删除');
+      if (this.store.drafts.some(d => d.sessionId === id && d.generation === 'running')) throw new Error('请等待成果整理结束后删除会话');
+      const sessions = this.store.sessions, input = this.store.inputs[id], jobs = this.store.activity.jobs;
+      this.store.sessions = this.store.sessions.filter(value => value.id !== id);
+      delete this.store.inputs[id];
+      this.store.activity.jobs = this.store.activity.jobs.filter(job => job.sessionId !== id);
+      // Persist removal first: a late worker reply or restart cannot resurrect the session.
+      try { await this.store.save(); }
+      catch (error) { this.store.sessions = sessions; if (input) this.store.inputs[id] = input; this.store.activity.jobs = jobs; throw error; }
+      await this.journal.remove(s);
+      clearTimeout(this.trajectoryTimers.get(id)); this.trajectoryTimers.delete(id);
+      this.broadcast();
+    }, false);
+  }
+  async projectJournal(id: string) {
+    const s = this.session(id);
+    if (s.purpose !== 'work' || !s.binding) throw new Error('请选择项目工作会话');
+    const { text, path: file } = await this.journal.project(s); return { text, path: file };
+  }
   answer(id: string, requestId: string, option: string, answers?: Record<string, string | string[]>) { this.session(id); const runtime = this.runtimes.get(id); if (!runtime) throw new Error('CLI 连接已关闭'); return runtime.answer(requestId, option, answers); }
   async attachLocal(id: string, files: string[]) {
     const s = this.session(id); if (s.closedAt || s.purpose !== 'work') throw new Error('请选择未关闭的工作会话');
@@ -1512,11 +1589,12 @@ export class Workbench {
     if (s.closedAt) throw new Error('请选择未关闭的工作会话');
     s.sources.push(source); await this.store.save(); this.broadcast(); return source;
   }
-  async attachContent(id: string, contentId: string) {
+  async attachContent(id: string, contentId: string, expectedRevision?: number) {
     return this.edit('content-attach:' + id, async () => {
       const session = this.session(id); this.assertCanWork(session.binding); if (!session.binding) throw new Error('请选择项目');
       if (session.closedAt || session.purpose !== 'work') throw new Error('请选择未关闭的工作会话');
       const item = (await this.remote.contentList(session.binding)).find(i => i.id === contentId); if (!item) throw new Error('内容已删除，请刷新');
+      if (expectedRevision !== undefined && item.revision !== expectedRevision) throw new Error('成果版本已变化，请查看新动态后重新选择');
       assertContentReadable(item);
       if (session.closedAt) throw new Error('请选择未关闭的工作会话');
       const existing = session.sources.find(source => source.contentRef
@@ -1530,8 +1608,6 @@ export class Workbench {
       source.contentRef = { projectId: session.binding.project.id, id: item.id, revision: item.revision };
       if (session.closedAt) throw new Error('请选择未关闭的工作会话');
       session.sources.push(source);
-      const result = this.organizeSharedContent(session.binding.project.id, item);
-      this.recordContentAction(session.binding.project.id, item.id, item.revision, { kind: 'saved_conclusion', targetId: result.conclusion.id, targetTitle: conclusionTitle(result.conclusion), sourceTitle: item.title });
       this.recordContentAction(session.binding.project.id, item.id, item.revision, { kind: 'attached_session', targetId: session.id, targetTitle: session.title, sourceTitle: item.title });
       await this.store.save(); this.broadcast(); return source;
     }, false);
@@ -2413,9 +2489,81 @@ export class Workbench {
       await this.store.save(); this.broadcast(); return item;
     }, false);
   }
-  saveHandoff(id: string, text: string) { return this.edit('handoff:' + id, async () => { const s = this.session(id); if (!localWithin(s.cwd, s.handoffPath)) throw new Error('交接文件路径越界'); await fs.writeFile(s.handoffPath, text, 'utf8'); }); }
+  private commitHandoff(s: AgentSession, beforeHash: string, count: number, text: string, entry?: JournalEntry) {
+    return this.edit('handoff:' + s.id, async () => {
+      if (this.configuring || !this.store.sessions.includes(s) || !this.ownsLocal(s.binding) || s.closedAt || ['starting', 'running', 'approval'].includes(s.status)) return false;
+      if (!localWithin(s.cwd, s.handoffPath)) throw new Error('交接文件路径越界');
+      const before = await fs.readFile(s.handoffPath, 'utf8').catch((e: any) => { if (e.code === 'ENOENT') return ''; throw e; });
+      if (textHash(before) !== beforeHash) return false;
+      if (s.binding) { if (!await this.journal.commit(s, beforeHash, count, text, entry)) return false; }
+      else { await writeHandoffAtomic(s.handoffPath, text); s.handoffState = { messageCount: count, hash: textHash(text), version: (s.handoffState?.version || 0) + 1 }; }
+      this.activity.summaryChanged(s.id);
+      await this.store.save(); this.broadcast(); return true;
+    }, false);
+  }
+  saveHandoff(id: string, text: string, expectedText?: string) {
+    return this.edit('handoff:' + id, async () => {
+      const s = this.session(id); if (!localWithin(s.cwd, s.handoffPath)) throw new Error('交接文件路径越界');
+      if (expectedText !== undefined && await this.readHandoff(id) !== expectedText) throw new Error('阶段摘要已更新，请关闭后重新打开再更正');
+      if (['starting', 'running', 'approval'].includes(s.status)) throw new Error('本轮结束后可更正阶段摘要');
+      if (s.binding) {
+        const before = await this.readHandoff(id);
+        if (!await this.journal.commit(s, textHash(before), s.handoffState?.messageCount || 0, text, undefined, true)) throw new Error('阶段摘要已更新，请重新打开后更正');
+      } else { await writeHandoffAtomic(s.handoffPath, text); s.handoffState = { messageCount: s.messages.length, hash: textHash(text), version: (s.handoffState?.version || 0) + 1 }; }
+      this.activity.summaryChanged(s.id);
+      await this.store.save(); this.broadcast();
+    }, false);
+  }
+  activityView() {
+    const view = this.activity.view();
+    view.jobs = view.jobs.map(job => {
+      const session = this.store.sessions.find(s => s.id === job.sessionId)!;
+      const source = session.sources.find(s => s.contentRef?.id === job.event.id && s.contentRef.revision === job.event.revision && !s.resultUnavailable);
+      const conclusion = this.store.conclusions.find(c => !c.deletedAt && c.accountOwner === job.owner && c.projectId === job.event.projectId && c.sources.some(s => s.kind === 'remote' && s.id === job.event.id && (s.revision || 0) >= job.event.revision));
+      return { ...job, attachedSourceId: source?.id, savedConclusionId: job.savedConclusionId && conclusion?.id, availableConclusionId: conclusion?.id };
+    });
+    return view;
+  }
+  async markActivity(id: string, jobIds: string[], ignore = false) {
+    const session = this.session(id); if (session.closedAt || session.purpose !== 'work') throw new Error('会话不可用');
+    const jobs = this.store.activity.jobs.filter(j => j.sessionId === id && j.owner === accountIdentity(session.binding!) && jobIds.includes(j.id));
+    if (jobs.length !== new Set(jobIds).size) throw new Error('动态不属于当前会话');
+    for (const job of jobs) { job.presentedAt = new Date().toISOString(); if (ignore) job.ignoredAt = job.presentedAt; }
+    await this.store.save(); this.broadcast();
+  }
+  async applyActivity(id: string, choices: ActivityChoice[]): Promise<ActivityActionResult[]> {
+    const session = this.session(id); this.assertCanWork(session.binding);
+    if (session.closedAt || session.purpose !== 'work' || ['starting', 'running', 'approval'].includes(session.status)) throw new Error('请在本轮结束后处理动态');
+    if (this.activityActions.has(id)) throw new Error('正在处理所选动态');
+    const jobs = choices.map(choice => {
+      const job = this.store.activity.jobs.find(j => j.id === choice.jobId && j.sessionId === id && j.owner === accountIdentity(session.binding!));
+      if (!job || job.status !== 'matched' || job.ignoredAt) throw new Error('推荐已不可用，请刷新');
+      return { choice, job };
+    });
+    this.activityActions.add(id);
+    const results: ActivityActionResult[] = [];
+    try {
+      for (const { choice, job } of jobs) {
+        const result: ActivityActionResult = { jobId: job.id };
+        // Independent operations preserve successful receipts even if the other action fails.
+        if (choice.attach) try {
+          const source = await this.attachContent(id, job.event.id, job.event.revision);
+          result.sourceId = source.id; job.attachedSourceId = source.id;
+          const input = this.store.inputs[id] ||= { text: '', sourceIds: [], answers: {} };
+          input.sourceIds = [...new Set([...input.sourceIds, source.id])];
+          await this.store.save();
+        } catch (e: any) { result.error = '加入会话失败：' + e.message; }
+        if (choice.save) try {
+          const saved = await this.importContentConclusion(job.event.projectId, job.event.id, job.event.revision);
+          result.conclusionId = saved.conclusion.id; job.savedConclusionId = saved.conclusion.id; await this.store.save();
+        } catch (e: any) { result.error = [result.error, '存入个人成果库失败：' + e.message].filter(Boolean).join('；'); }
+        job.presentedAt = new Date().toISOString(); results.push(result);
+      }
+      await this.store.save(); this.broadcast(); return results;
+    } finally { this.activityActions.delete(id); }
+  }
   async flushEdits() { await this.edits.catch(() => {}); for (const [key, fn] of this.unsavedEdits) { await fn(); if (this.unsavedEdits.get(key) === fn) this.unsavedEdits.delete(key); } await this.store.save(); }
   listDirections() { return this.remote.memberDirections(); }
   saveDirections(directions: unknown) { return this.remote.memberDirections(directions); }
-  async close() { this.closing = true; this.stopNativeTranscriptSync(); for (const timer of this.trajectoryTimers.values()) clearTimeout(timer); this.trajectoryTimers.clear(); await Promise.allSettled(this.archiving.values()); clearTimeout(this.timer); this.timer = undefined; try { await this.flushEdits(); } catch (error) { this.closing = false; this.changed(); throw error; } this.closing = true; for (const timer of this.preparationTimers.values()) clearTimeout(timer); this.preparationTimers.clear(); for (const job of this.catalogJobs.values()) job.controller.abort(); await Promise.allSettled([...this.catalogJobs.values()].map(job => job.promise)); await this.accounts.close(); await this.accountSync.close(); const interrupted = this.store.sessions.filter(s => s.purpose === 'work' && !s.closedAt && ['starting', 'running', 'approval'].includes(s.status) && !s.stoppedAt); await Promise.all([...this.runtimes.values()].map(runtime => runtime.close())); this.remote.disconnect(); for (const s of interrupted) { s.status = 'error'; s.error = '应用关闭时任务尚未完成，已中断；可检查已有结果后继续发送。'; } await Promise.all(this.eventWrites.values()); await this.store.save(); }
+  async close() { this.closing = true; this.stopNativeTranscriptSync(); clearInterval(this.contentWatch); await this.activity.close(); await this.contentSyncJob; for (const timer of this.trajectoryTimers.values()) clearTimeout(timer); this.trajectoryTimers.clear(); await Promise.allSettled(this.archiving.values()); clearTimeout(this.timer); this.timer = undefined; try { await this.flushEdits(); } catch (error) { this.closing = false; this.changed(); throw error; } this.closing = true; for (const timer of this.preparationTimers.values()) clearTimeout(timer); this.preparationTimers.clear(); for (const job of this.catalogJobs.values()) job.controller.abort(); await Promise.allSettled([...this.catalogJobs.values()].map(job => job.promise)); await this.accounts.close(); await this.accountSync.close(); const interrupted = this.store.sessions.filter(s => s.purpose === 'work' && !s.closedAt && ['starting', 'running', 'approval'].includes(s.status) && !s.stoppedAt); await Promise.all([...this.runtimes.values()].map(runtime => runtime.close())); this.remote.disconnect(); for (const s of interrupted) { s.status = 'error'; s.error = '应用关闭时任务尚未完成，已中断；可检查已有结果后继续发送。'; } await Promise.all(this.eventWrites.values()); await this.store.save(); await this.journal.close(); }
 }

@@ -3,6 +3,7 @@ import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import type { AgentSession, Draft, ProjectConclusion, Settings, Transfer, SessionInput } from '../shared/types';
 import { settingsSchema } from './config';
+import { activityStateSchema } from './activity-state';
 import { migrateSessionContext } from './session-context';
 import { repairConclusionImports } from './conclusion-import-repair';
 import { accountIdentity } from '../shared/account-data';
@@ -26,6 +27,7 @@ export async function atomicJson(file: string, data: unknown, ascii = false) {
   } finally { await fs.rm(temp, { force: true }).catch(() => {}); }
 }
 export class Store {
+  activity: import('../shared/activity-assistant').ActivityAssistantState = { baselines: {}, jobs: [] };
   saved?: () => void;
   settings: Settings = { connections: [], providerPaths: { codex: '', cursor: '', claude: '' }, lastWorkspace: '', trustedServerIdentities: {} };
   sessions: AgentSession[] = []; transfers: Transfer[] = []; drafts: Draft[] = []; conclusions: ProjectConclusion[] = [];
@@ -34,6 +36,10 @@ export class Store {
   constructor(public root: string) {}
   async init() {
     await fs.mkdir(this.root, { recursive: true });
+    try {
+      const state = JSON.parse(await fs.readFile(path.join(this.root, 'activity-assistant.json'), 'utf8'));
+      this.activity = activityStateSchema.parse(state);
+    } catch (e: any) { if (e.code !== 'ENOENT') throw new Error('本地 activity-assistant.json 无法读取'); }
     try {
       const raw = JSON.parse(await fs.readFile(path.join(this.root, 'settings.json'), 'utf8'));
       // Older builds stored the verified workspace as a time-limited lease; carry it over without the timestamps.
@@ -97,7 +103,7 @@ export class Store {
     this.writes = next; await next;
   }
   save() {
-    const data = JSON.parse(JSON.stringify({ settings: this.settings, sessions: this.sessions, inputs: this.inputs, transfers: this.transfers, drafts: this.drafts, conclusions: this.conclusions }));
+    const data = JSON.parse(JSON.stringify({ settings: this.settings, sessions: this.sessions, inputs: this.inputs, transfers: this.transfers, drafts: this.drafts, conclusions: this.conclusions, 'activity-assistant': this.activity }));
     const next = this.writes.catch(() => {}).then(async () => { for (const [key, value] of Object.entries(data)) await atomicJson(path.join(this.root, key + '.json'), value); });
     this.writes = next; return next.then(() => { this.saved?.(); });
   }

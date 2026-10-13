@@ -190,6 +190,10 @@ async function dispatch(action: string, raw: unknown, owner: BrowserWindow): Pro
     case 'content.history': { const p = z.object({ projectId: z.string(), id: z.string().uuid().optional(), revision: z.number().int().positive().optional() }).parse(raw); return workbench.remote.contentHistory(workbench.remote.binding(p.projectId), p.id, p.revision); }
     case 'conclusion.publish': { const p = z.object({ id: z.string().uuid(), version: z.number().int().positive().optional(), disclose: z.array(resultReferenceSchema).max(30).default([]) }).parse(raw); return workbench.publishConclusion(p.id, p.disclose, p.version); }
     case 'content.alias.save': { const p = z.object({ projectId: z.string(), contentId: id, alias: z.string().trim().max(200) }).parse(raw); return workbench.saveContentAlias(p.projectId, p.contentId, p.alias); }
+    case 'activity.project': { const p = z.object({ projectId: z.string() }).parse(raw); for (const current of contexts.values()) if (current.workbench !== workbench) current.workbench.activity.removeWindow(String(owner.id)); await workbench.setActivityProject(String(owner.id), p.projectId); return true; }
+    case 'activity.presented':
+    case 'activity.ignore': { const p = z.object({ id, jobIds: z.array(z.string()).max(1000) }).parse(raw); return workbench.markActivity(p.id, p.jobIds, action === 'activity.ignore'); }
+    case 'activity.apply': { const p = z.object({ id, choices: z.array(z.object({ jobId: z.string(), attach: z.boolean(), save: z.boolean() })).max(100) }).parse(raw); return workbench.applyActivity(p.id, p.choices); }
     case 'content.sync': return workbench.syncContentUpdates();
     case 'content.updates': return workbench.contentUpdates();
     case 'content.updates.read': { const p = z.object({ eventIds: z.array(z.string()).max(10000).optional(), processed: z.boolean().optional() }).parse(raw || {}); return workbench.markContentUpdates(p.eventIds, p.processed); }
@@ -272,6 +276,8 @@ async function dispatch(action: string, raw: unknown, owner: BrowserWindow): Pro
     case 'session.input': { const p = z.object({ id, input: z.object({ text, sourceIds: z.array(z.string()), answers: z.record(z.string(), z.string()), capabilities: z.array(capability).max(20).optional() }) }).parse(raw); await workbench.saveInput(p.id, p.input); return true; }
     case 'session.stop': return workbench.stop(sessionInput.parse(raw).id);
     case 'session.close': return workbench.closeSession(sessionInput.parse(raw).id);
+    case 'session.delete': return workbench.deleteSession(sessionInput.parse(raw).id);
+    case 'journal.project': return workbench.projectJournal(sessionInput.parse(raw).id);
     case 'session.reopen': return workbench.reopenSession(sessionInput.parse(raw).id);
     case 'session.answer': { const p = z.object({ id, requestId: z.string(), option: z.string(), answers: z.record(z.string(), z.union([z.string(), z.array(z.string())])).optional() }).parse(raw); return workbench.answer(p.id, p.requestId, p.option, p.answers); }
     case 'session.attachLocal': { const p = sessionInput.parse(raw); return workbench.attachLocal(p.id, await chooseFiles(owner)); }
@@ -282,7 +288,7 @@ async function dispatch(action: string, raw: unknown, owner: BrowserWindow): Pro
     case 'handoff.read': return workbench.readHandoff(sessionInput.parse(raw).id);
     case 'handoff.list': return workbench.listSessionHandoffs(sessionInput.parse(raw).id);
     case 'handoff.attach': { const p = z.object({ id, sourceId: id, sha256: z.string().regex(/^[a-f0-9]{64}$/) }).parse(raw); return workbench.attachSessionHandoff(p.id, p.sourceId, p.sha256); }
-    case 'handoff.save': { const p = z.object({ id, text }).parse(raw); return workbench.saveHandoff(p.id, p.text); }
+    case 'handoff.save': { const p = z.object({ id, text, expectedText: text.optional() }).parse(raw); return workbench.saveHandoff(p.id, p.text, p.expectedText); }
     case 'draft.prepare': { const p = z.object({ id, categories: preparationCategoriesSchema.optional(), scope: z.enum(['incremental', 'full']).optional(), directions: preparationDirectionsSchema.optional() }).parse(raw); return workbench.prepare(p.id, [], p.categories, p.scope, p.directions); }
     case 'draft.reorganize': { const p = z.object({ id, categories: preparationCategoriesSchema.optional(), scope: z.enum(['incremental', 'full']), directions: preparationDirectionsSchema.optional() }).parse(raw); return workbench.reorganizePreparation(p.id, p.scope, p.categories, p.directions); }
     case 'draft.confirmEmpty': return workbench.confirmEmptyPreparation(sessionInput.parse(raw).id);
@@ -538,6 +544,7 @@ async function createWindow(preferredSlot?: number, fresh = false) {
     else void closeWindow(window);
   });
   window.on('closed', () => {
+    for (const current of contexts.values()) current.workbench.activity.removeWindow(String(window.id));
     windows.delete(window); const context = contexts.get(window); contexts.delete(window);
     if (context) { activeSlots.delete(context.slot); if (!quitting && !closingWindows.has(window)) void context.release().catch(error => console.error('账号窗口关闭失败', errorMessage(error))); }
   });
@@ -597,6 +604,7 @@ async function closeWindow(window: BrowserWindow) {
   if (closingWindows.has(window) || window.isDestroyed()) return;
   const context = contexts.get(window); if (!context) { window.destroy(); return; }
   closingWindows.add(window);
+  for (const context of contexts.values()) context.workbench.activity.removeWindow(String(window.id));
   try {
     await routeAccount(async () => { await contexts.get(window)?.release(); contexts.delete(window); activeSlots.delete(context.slot); windows.delete(window); window.destroy(); });
   } catch (e: any) {

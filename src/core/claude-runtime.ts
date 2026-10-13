@@ -74,7 +74,7 @@ export class ClaudeRuntime {
     const context = options ? { ...options.context, capabilities: selected.map(({ id, kind, name }) => ({ id, kind, name })), nativeId: plannedId, accepted: false } : undefined;
     this.currentContext = context;
     const mode = claudeNativeMode(this.session.permissionMode, this.session.purpose);
-    const args = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--permission-prompt-tool', 'stdio', ...(mode ? ['--permission-mode', mode] : []), ...(this.session.nativeId ? ['--resume', this.session.nativeId] : ['--session-id', plannedId]), ...(this.session.model ? ['--model', this.session.model] : [])];
+    const args = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--permission-prompt-tool', 'stdio', ...(this.session.purpose === 'background' ? ['--tools', '', '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}', '--no-session-persistence'] : []), ...(mode ? ['--permission-mode', mode] : []), ...(this.session.nativeId ? ['--resume', this.session.nativeId] : ['--session-id', plannedId]), ...(this.session.model ? ['--model', this.session.model] : [])];
     this.message(randomUUID(), 'user', nativeText, false, options ? { userText: options.userText, context } : {});
     this.hooks.event({ direction: 'user', text: nativeText, ...(options ? { userText: options.userText, capabilities: context?.capabilities } : {}) });
     this.session.status = 'running'; this.session.error = undefined; this.running = true; this.finished = false; this.streamed = false; this.stderr = ''; this.replyId = randomUUID(); this.hooks.changed();
@@ -159,6 +159,7 @@ export class ClaudeRuntime {
     }
   }
   private onPermission(event: any) {
+    if (this.session.purpose === 'background') { this.send({ type: 'control_response', response: { subtype: 'success', request_id: event.request_id, response: { behavior: 'deny', message: '后台文本任务不允许工具操作' } } }); return; }
     const req = event.request, name = typeof req.tool_name === 'string' ? req.tool_name : '工具';
     const input = req.input && typeof req.input === 'object' ? req.input : {};
     const id = randomUUID(), questions = name === 'AskUserQuestion' && Array.isArray(input.questions) ? input.questions : [];

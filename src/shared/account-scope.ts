@@ -24,7 +24,7 @@ export function scopeAccountSnapshot(snapshot: Snapshot): Snapshot {
     projectDirectories: Object.fromEntries(Object.entries(snapshot.settings.projectDirectories || {}).filter(([key]) => !snapshot.accountChanging && directoryKeys.has(key))),
     ...(snapshot.accountChanging ? { contentAliases: {}, contentSeen: {}, contentUpdates: [], dismissedContentUpdateIds: [] } : {}),
   };
-  return { ...snapshot, settings, sessions,
+  return { ...snapshot, settings, sessions, activity: { jobs: (snapshot.activity?.jobs || []).filter(j => ids.has(j.sessionId) && j.owner === owner), busy: !snapshot.accountChanging && !!snapshot.activity?.busy, error: snapshot.accountChanging ? undefined : snapshot.activity?.error },
     inputs: Object.fromEntries(Object.entries(snapshot.inputs).filter(([id]) => ids.has(id))),
     activeTurns: Object.fromEntries(Object.entries(snapshot.activeTurns || {}).filter(([id]) => ids.has(id))),
     drafts: snapshot.drafts.filter(draft => draft.binding ? owns(draft.binding) : ids.has(draft.sessionId)),

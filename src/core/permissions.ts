@@ -15,12 +15,14 @@ export function permissionIssue(value: unknown): PermissionIssue | undefined {
   if (/permission denied|access (?:is )?denied|EACCES|EPERM|read.only file system|拒绝访问|只读文件系统/i.test(message)) return { kind: 'filesystem', message: message.slice(0, 1500), at: stamp() };
 }
 export function codexPermissionParams(s: Pick<AgentSession, 'purpose' | 'permissionMode'>) {
+  if (s.purpose === 'background') return { approvalPolicy: 'never', approvalsReviewer: 'user', sandbox: 'read-only' };
   if (s.purpose === 'prepare' || s.permissionMode === 'full') return { approvalPolicy: 'never', approvalsReviewer: 'user', sandbox: 'danger-full-access' };
   if (s.permissionMode === 'review') return { approvalPolicy: 'on-request', approvalsReviewer: 'user', sandbox: 'workspace-write' };
   if (s.permissionMode === 'auto') return { approvalPolicy: 'on-request', approvalsReviewer: 'auto_review', sandbox: 'workspace-write' };
   return {};
 }
 export function cursorPermissionArgs(s: Pick<AgentSession, 'purpose' | 'permissionMode'>) {
+  if (s.purpose === 'background') return ['acp'];
   if (s.purpose === 'work' && s.permissionMode === 'auto') throw new Error('当前 Cursor 接入方式暂不支持切换 Auto-review，请选择其他模式');
   return s.purpose === 'prepare' || s.permissionMode === 'full' ? ['--force', '--sandbox', 'disabled', 'acp'] : ['acp'];
 }

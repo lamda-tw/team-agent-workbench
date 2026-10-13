@@ -1,0 +1,17 @@
+.activity-recommendations{border:1px solid #b9d7ca;border-radius:10px;background:#f6faf8;margin:8px 0;padding:10px 14px;font-size:13px;flex-shrink:0}
+.activity-recommendations-heading,.activity-bulk,.activity-recommendation-actions,.activity-recommendations-footer{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.activity-recommendations-heading{justify-content:space-between;font-weight:600}
+.activity-bulk{border-bottom:1px solid #dce5df;padding:9px 0;color:#52645b}
+.activity-recommendations label{display:inline-flex;align-items:center;gap:5px;cursor:pointer}
+.activity-recommendation-list{max-height:360px;overflow:auto;overscroll-behavior:contain}
+.activity-recommendation{border-bottom:1px solid #dce5df;padding:12px 0}
+.activity-recommendation strong{display:block;overflow-wrap:anywhere}
+.activity-recommendation small{display:block;color:#66756d;margin:4px 0}
+.activity-recommendation p{margin:8px 0;line-height:1.6}
+.activity-recommendation blockquote{margin:6px 0 10px;padding:6px 10px;border-left:3px solid #b9cfc3;background:white;color:#4c5e54;white-space:pre-wrap;overflow-wrap:anywhere}
+.activity-recommendations-footer{padding-top:10px;position:sticky;bottom:0;background:#f6faf8}
+.activity-recommendations-footer>span{margin-right:auto}
+.activity-background-error{font-size:12px;color:#795c25}
+.summary-update-status{font-size:12px;color:#795c25;line-height:1.6;margin:8px 0}
+.summary-update-status p{margin:6px 0;white-space:pre-wrap;overflow-wrap:anywhere}
+.summary-update-status summary{cursor:pointer}
