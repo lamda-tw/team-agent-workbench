@@ -101,7 +101,7 @@ async function dispatch(action: string, raw: unknown, owner: BrowserWindow): Pro
       await atomicJson(windowStateFile(context.slot), { profile: workbench.store.settings.workspaceSnapshot?.profile, sidebarProjectHeight: context.sidebarProjectHeight, sidebarPanes: context.sidebarPanes });
       return true;
     }
-    case 'beta.set': { const p = z.object({ feature: z.enum(['sessionHandoff', 'subsessions', 'codexDesktopSync']), enabled: z.boolean() }).parse(raw); return workbench.setBetaFeature(p.feature, p.enabled); }
+    case 'beta.set': { const p = z.object({ feature: z.enum(['sessionHandoff', 'subsessions', 'codexDesktopSync', 'cursorDesktopSync']), enabled: z.boolean() }).parse(raw); return workbench.setBetaFeature(p.feature, p.enabled); }
     case 'providers.detect': return workbench.detect();
     case 'account.sync': await workbench.accountSync.sync(); return workbench.accountSync.state;
     case 'account.sync.resolve': { const p = z.object({ key: z.string(), choice: z.enum(['local', 'remote']) }).parse(raw); await workbench.accountSync.resolve(p.key, p.choice); return workbench.accountSync.state; }
@@ -178,6 +178,8 @@ async function dispatch(action: string, raw: unknown, owner: BrowserWindow): Pro
     case 'session.native.linkMany': { const p = z.object({ provider: z.enum(['codex', 'cursor']), nativeIds: z.array(z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)).min(1).max(50), projectId: z.string().min(1) }).parse(raw); return workbench.linkNativeSessions(p.provider, p.nativeIds, p.projectId); }
     case 'session.native.refresh': return workbench.refreshNativeTranscript(sessionInput.parse(raw).id);
     case 'session.codexDesktop.open': return workbench.openCodexDesktop(sessionInput.parse(raw).id);
+    case 'session.cursorDesktop.list': { const p=z.object({cwd:z.string().default(''),launch:z.boolean().default(false)}).parse(raw); return workbench.listCursorDesktopSessions(p.cwd,p.launch); }
+    case 'session.cursorDesktop.linkMany': { const p=z.object({nativeIds:z.array(z.string().uuid()).min(1).max(50),projectId:z.string().min(1)}).parse(raw); return workbench.linkCursorDesktopSessions(p.nativeIds,p.projectId); }
     case 'session.cursorNative.focus': return workbench.focusCursorNative(sessionInput.parse(raw).id);
     case 'session.native.publish': return workbench.publishToDesktop(sessionInput.parse(raw).id);
     case 'subsession.create': { const p = z.object({ parentId: id, focus: z.string().trim().min(1).max(120) }).parse(raw); return workbench.forkSubsession(p.parentId, p.focus); }

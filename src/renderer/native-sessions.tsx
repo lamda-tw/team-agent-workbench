@@ -56,17 +56,18 @@ export function NativeSessionBrowser({ catalog, selectedIds, onChange, groupId =
   return <div className="native-session-list" aria-label={providerLabel(catalog.provider) + ' 会话'}>{groups.map(group => { const items = sortSessions(grouped.get(group.id) || []); return <section key={group.id} className="native-session-group">{heading(group.name, items)}{items.map(row)}</section>; })}{ungrouped.map(row)}</div>;
 }
 
-export function NativeSessionPicker({ provider, projectId, close, linked }: { provider: 'codex' | 'cursor'; projectId: string; close: () => void; linked: (sessions: AgentSession[]) => void }) {
+export function NativeSessionPicker({ provider, projectId, cursorDesktopBeta = false, directory = '', close, linked }: { cursorDesktopBeta?: boolean; directory?: string; provider: 'codex' | 'cursor'; projectId: string; close: () => void; linked: (sessions: AgentSession[]) => void }) {
+  const [desktop, setDesktop] = useState(provider === 'cursor' && cursorDesktopBeta);
   const [catalog, setCatalog] = useState<NativeSessionCatalog>();
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [groupId, setGroupId] = useState('');
-  const load = async () => {
+  const load = async (launch = false) => {
     setLoading(true); setError('');
     try {
-      const value = await window.workbench.call<NativeSessionCatalog>('session.native.list', { provider });
+      const value = await window.workbench.call<NativeSessionCatalog>(desktop ? 'session.cursorDesktop.list' : 'session.native.list', desktop ? {cwd:directory,launch} : { provider });
       if (value.provider !== provider) throw new Error(provider === 'codex' ? '读到的不是 Codex 会话' : '读到的不是 Cursor 会话');
       setCatalog(value);
       setSelectedIds(current => current.filter(id => value.sessions.some(session => session.nativeId === id && canImportNativeSession(session))));
@@ -74,16 +75,16 @@ export function NativeSessionPicker({ provider, projectId, close, linked }: { pr
     } catch (loadError: any) { setCatalog(undefined); setError(loadError.message); }
     finally { setLoading(false); }
   };
-  useEffect(() => { void load(); }, [provider]);
+  useEffect(() => { void load(); }, [provider, desktop]);
   const selectable = catalog ? nativeSessionsInGroup(catalog, groupId).filter(canImportNativeSession) : [];
   const chosen = (catalog?.sessions || []).filter(session => canImportNativeSession(session) && selectedIds.includes(session.nativeId)).sort((left, right) => right.updatedAt - left.updatedAt || left.name.localeCompare(right.name, 'zh-CN'));
   const allSelected = selectable.length > 0 && selectable.every(session => selectedIds.includes(session.nativeId));
   const title = provider === 'codex' ? '接入 Codex 会话' : '接入 Cursor 会话';
-  const explanation = provider === 'codex' ? '按 Codex 项目查看，可以勾选多条，一次导入。已在工作台的会话不能重复导入。' : '按 Cursor 自己的工作目录和会话名查看，可以勾选多条，一次导入。已在工作台的会话不能重复导入。';
+  const explanation = desktop ? '按 Cursor Agents 的项目查看本地会话，可勾选多条关联到当前项目。保留每条会话的原工作目录。同步前需在 Agents 中打开对应面板；历史消息按面板当前已加载的内容同步。' : provider === 'codex' ? '按 Codex 项目查看，可以勾选多条，一次导入。已在工作台的会话不能重复导入。' : '按 Cursor 自己的工作目录和会话名查看，可以勾选多条，一次导入。已在工作台的会话不能重复导入。';
   const groups = catalog ? orderedNativeSessions(catalog).groups : [];
   const groupButton = (id: string, name: string, count: number) => <button type="button" key={id} aria-pressed={groupId === id} className={groupId === id ? 'selected' : ''} disabled={busy} onClick={() => setGroupId(id)}><span title={name}>{name}</span><small>{count}</small></button>;
   return <div className="modal-backdrop"><section className="modal wide native-session-modal" role="dialog" aria-modal="true" aria-labelledby="native-session-title"><header><h2 id="native-session-title">{title}</h2><button className="icon" aria-label="关闭窗口" disabled={busy} onClick={close}>×</button></header>
-    <div className="modal-body"><p className="agent-notes-explanation">{explanation}</p>{error && <div className="inline-error" role="alert">{error}</div>}
+    <div className="modal-body">{provider === 'cursor' && cursorDesktopBeta && <div className="row"><button className={desktop ? 'primary' : 'secondary'} disabled={busy || loading} onClick={() => {setSelectedIds([]);setCatalog(undefined);setDesktop(true);}}>Agents 会话</button><button className={!desktop ? 'primary' : 'secondary'} disabled={busy || loading} onClick={() => {setSelectedIds([]);setCatalog(undefined);setDesktop(false);}}>CLI 会话</button></div>}<p className="agent-notes-explanation">{explanation}</p>{desktop && <button className="secondary" disabled={busy || loading || !directory} title={!directory ? '请先设置项目本地工作目录' : undefined} onClick={() => void load(true)}>打开 Cursor Agents</button>}{error && <div className="inline-error" role="alert">{error}</div>}
       {loading ? <p className="muted">正在读取会话…</p> : catalog && !catalog.sessions.length ? <p className="muted">没有读到{providerLabel(provider)}会话。</p> : catalog && <div className="native-session-layout">
         <nav className="native-project-nav" aria-label={provider === 'codex' ? 'Codex 项目' : 'Cursor 工作目录'}>
           {groupButton('', '全部会话', catalog.sessions.length)}
@@ -95,7 +96,7 @@ export function NativeSessionPicker({ provider, projectId, close, linked }: { pr
       </div>}
     </div><footer><button className="secondary" disabled={busy} onClick={close}>取消</button><button className="secondary" disabled={loading || busy} onClick={() => void load()}>刷新</button><button className="primary" disabled={!chosen.length || busy || loading} onClick={() => void (async () => {
       if (!chosen.length) return; setBusy(true); setError('');
-      try { linked(await window.workbench.call<AgentSession[]>('session.native.linkMany', { provider, nativeIds: chosen.map(session => session.nativeId), projectId })); }
+      try { linked(await window.workbench.call<AgentSession[]>(desktop ? 'session.cursorDesktop.linkMany' : 'session.native.linkMany', { provider, nativeIds: chosen.map(session => session.nativeId), projectId })); }
       catch (linkError: any) { await load(); setError(linkError.message); }
       finally { setBusy(false); }
     })()}>{busy ? '正在导入…' : chosen.length ? `导入 ${chosen.length} 条` : '导入所选'}</button></footer>

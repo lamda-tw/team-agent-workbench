@@ -11,8 +11,8 @@ export interface ConnectionProfile { mode?: 'sftp' | 'local'; localRoot?: string
 export interface WorkspaceSnapshot { profile: ConnectionProfile; workspaces: WorkspaceAccess[] }
 export interface ProjectBriefState { brief?: ProjectBrief; revision: number; updatedAt?: string }
 export interface ContentSeenState { files?: import('./content-files-state').ContentFilesState; missingFiles?: string[]; submission?: SubmissionRecord; revision: number; title?: string; path?: string; author?: string; updatedBy?: string; updatedAt?: string; kind?: 'contribution' | 'file' | 'trajectory'; category?: ContributionCategory; sourceSessionTitle?: string; sources?: string[] }
-export type BetaFeature = 'sessionHandoff' | 'subsessions' | 'codexDesktopSync';
-export interface BetaFeatureSettings { sessionHandoff?: boolean; subsessions?: boolean; codexDesktopSync?: boolean }
+export type BetaFeature = 'sessionHandoff' | 'subsessions' | 'codexDesktopSync' | 'cursorDesktopSync';
+export interface BetaFeatureSettings { sessionHandoff?: boolean; subsessions?: boolean; codexDesktopSync?: boolean; cursorDesktopSync?: boolean }
 export interface Settings { betaFeatures?: Record<string, BetaFeatureSettings>; egress?: UserEgressSettings; workspaceSnapshot?: WorkspaceSnapshot; projectDirectories?: Record<string, string>; autoUploadMinutes?: number; sidebarProjectHeight?: number; sidebarPanes?: { workgroups?: number; files?: number; sessions?: number }; defaultServer?: { host: string; port: number }; trustedServerIdentities?: Record<string, string>; contentSeen?: Record<string, Record<string, number | ContentSeenState>>; contentUpdates?: ContentUpdate[]; dismissedContentUpdateIds?: string[]; contentAliases?: Record<string, string>; connections: ConnectionProfile[]; providerPaths: Record<Provider, string>; lastWorkspace: string; localWorkspace?: string; verifiedLocalWorkspace?: string }
 export type AgentCapabilityKind = 'skill' | 'plugin';
 export interface AgentCapabilitySelection { id: string; kind: AgentCapabilityKind; name: string }
@@ -35,7 +35,7 @@ export interface SubsessionReportPreview { childId: string; parentId: string; ti
 export type SessionNetworkRoute = 'direct' | 'management';
 export interface AgentSession {
   codexDesktop?: boolean;
-  cursorNative?: { descriptorFile: string };
+  cursorNative?: { descriptorFile: string; managed?: boolean; creationUnconfirmed?: boolean };
   mode?: import('./session-mode').SessionMode; proposedPlan?: import('./session-mode').ProposedPlan;
   id: string; title: string; provider: Provider; model?: string; closedAt?: string; nativeId?: string; nativePath?: string; nativeLive?: boolean; codexStorage?: 'workbench'; codexNeedsRegistration?: boolean;
   cwd: string; purpose: 'work' | 'prepare' | 'background'; networkRoute?: SessionNetworkRoute; parentId?: string; fork?: SubsessionFork; reports?: SubsessionReport[]; createdAt: string;

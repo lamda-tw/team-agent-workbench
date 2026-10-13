@@ -7,6 +7,7 @@ export function betaFeatureStates(features: BetaFeatureSettings = {}) {
     sessionHandoff: !!features.sessionHandoff,
     subsessions: !!(features.subsessions ?? features.sessionHandoff),
     codexDesktopSync: !!features.codexDesktopSync,
+    cursorDesktopSync: !!features.cursorDesktopSync,
   };
 }
 
@@ -14,7 +15,7 @@ export function BetaFeaturesModal({ features, close, changed }: { features: Beta
   const [desired, setDesired] = useState(() => betaFeatureStates(features));
   const [busy, setBusy] = useState<BetaFeature>();
   const [error, setError] = useState('');
-  useEffect(() => setDesired(betaFeatureStates(features)), [features.sessionHandoff, features.subsessions, features.codexDesktopSync]);
+  useEffect(() => setDesired(betaFeatureStates(features)), [features.sessionHandoff, features.subsessions, features.codexDesktopSync, features.cursorDesktopSync]);
 
   const toggle = async (feature: BetaFeature, enabled: boolean) => {
     setDesired(current => ({ ...current, [feature]: enabled }));
@@ -45,6 +46,7 @@ export function BetaFeaturesModal({ features, close, changed }: { features: Beta
         <p>新建 Codex 会话时可选择联动。首次发送自动启动或复用后台；需要原生界面时再打开，多条会话保留各自上下文。</p>
         <p className="muted small">当前支持本机网络。关闭后不再新建联动会话，已创建的会话继续保留。</p>
       </div><label className="beta-feature-toggle"><input type="checkbox" role="switch" aria-label="开启 Codex 桌面联动" checked={desired.codexDesktopSync} disabled={!!busy} onChange={event => void toggle('codexDesktopSync',event.target.checked)}/><span>{desired.codexDesktopSync?'已开启':'未开启'}</span></label></div>
+      <div className="beta-feature"><div><strong>Cursor Agents 联动</strong><span className="badge">Beta</span><p>新建或接入 Cursor Agents Window 的本地会话，按项目与原生会话关联。使用 Cursor 桌面账号，模型与授权在 Agents 中处理。</p><p className="muted small">支持多个 Agent 面板；同步期间需保持对应面板打开。首次连接前请保存并退出现有 Cursor。暂不支持自动摘要和 Subsession。</p></div><label className="beta-feature-toggle"><input type="checkbox" role="switch" aria-label="开启 Cursor Agents 联动" checked={desired.cursorDesktopSync} disabled={!!busy} onChange={event => void toggle('cursorDesktopSync',event.target.checked)}/><span>{desired.cursorDesktopSync?'已开启':'未开启'}</span></label></div>
       {error && <div className="inline-error" role="alert">{error}</div>}
     </div><footer><button className="primary" disabled={!!busy} onClick={close}>完成</button></footer>
   </section></div>;

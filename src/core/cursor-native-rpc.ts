@@ -11,11 +11,11 @@ export async function cursorNativeDescriptor(session: AgentSession): Promise<Cur
   if (session.provider !== 'cursor' || session.purpose !== 'work' || session.networkRoute === 'management' || !session.cursorNative || !session.nativeId) throw new Error('此会话不能接入 Cursor 原生窗口');
   let descriptor: CursorNativeDescriptor;
   try { descriptor = JSON.parse(await fs.readFile(session.cursorNative.descriptorFile, 'utf8')); }
-  catch { throw new Error('Cursor 原生联调连接已失效，请重新打开 Beta 入口'); }
+  catch { throw new Error('Cursor 原生连接已失效，请点击“在 Cursor Agents 中打开”恢复关联'); }
   try {
     const endpoint = new URL(descriptor.endpoint);
     if (descriptor.version !== 1 || endpoint.protocol !== 'http:' || endpoint.hostname !== '127.0.0.1' || !endpoint.port || endpoint.username || endpoint.password || endpoint.search || endpoint.hash || !/^\/native\/[a-f0-9]{64}$/.test(endpoint.pathname) || descriptor.sessionId !== session.nativeId || !sameNativePath(descriptor.workspace, session.cwd) || !Number.isFinite(Date.parse(descriptor.expiresAt)) || Date.parse(descriptor.expiresAt) <= Date.now()) throw new Error();
-  } catch { throw new Error('Cursor 原生联调连接与当前会话不匹配或已过期'); }
+  } catch { throw new Error('Cursor 原生连接与当前会话不匹配或已过期'); }
   return descriptor;
 }
 
@@ -44,11 +44,13 @@ export class CursorNativeRpc extends EventEmitter implements AgentRpc {
   constructor(private session: AgentSession) { super(); }
   private async invoke(operation: string, body?: unknown, timeout = 10000) {
     if (this.closed) throw new Error('Cursor 原生连接已关闭');
-    this.descriptor ||= await cursorNativeDescriptor(this.session);
-    if (Date.parse(this.descriptor.expiresAt) <= Date.now()) throw new Error('Cursor 原生联调连接已过期，请重新打开 Beta 入口');
+    // Managed descriptors can be renewed while this runtime stays alive. Reading is safe;
+    // a send with a lost acknowledgement is still never repeated.
+    if (this.session.cursorNative?.managed || !this.descriptor) this.descriptor = await cursorNativeDescriptor(this.session);
+    if (Date.parse(this.descriptor.expiresAt) <= Date.now()) throw new Error('Cursor 原生连接已过期，请点击“在 Cursor Agents 中打开”');
     let response: Response;
     try { response = await fetch(this.descriptor.endpoint + '/' + operation, { method: body === undefined ? 'GET' : 'POST', ...(body === undefined ? {} : { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }), signal: AbortSignal.timeout(timeout), redirect: 'error' }); }
-    catch { throw new Error(operation === 'send' ? 'Cursor 送达状态未确认，请核对原生窗口，避免重复发送' : 'Cursor 原生连接不可用，请打开关联窗口或重新启动 Beta'); }
+    catch { throw new Error(operation === 'send' ? 'Cursor 送达状态未确认，请核对原生窗口，避免重复发送' : 'Cursor 原生连接不可用，请点击“在 Cursor Agents 中打开”恢复关联'); }
     let value: any; try { value = await response.json(); } catch { throw new Error('Cursor 原生窗口未返回可用结果'); }
     if (!response.ok) throw new Error(value.message || 'Cursor 原生窗口暂时不可用');
     return value;

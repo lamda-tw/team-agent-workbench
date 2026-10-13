@@ -132,6 +132,8 @@ npm.cmd run start:admin
 
 Codex 桌面联动从用户版的 **Beta 功能** 开启，新建会话时选择联动，首次发送自动准备共享后台；需要原生窗口时点击 **在 Codex 中打开**。无需额外的启动或停止脚本，详见[桌面联动说明](docs/codex-desktop-sync.md)。
 
+Cursor **Agents Window** 联动从 **Beta 功能 → Cursor Agents 联动** 开启，可在新建会话时选择，或通过左侧 **接入 Cursor 会话 → Agents 会话** 按项目关联本地 Agent。支持多个面板，使用 Cursor 桌面账号，同步时对应面板需保持打开；当前限制及步骤见 [Cursor Agents 联动说明](docs/cursor-desktop-sync.md)。
+
 `scripts/` 中的文件用于内部构建、开发验证和手册维护，不是额外的应用启动入口。用途和执行方式见[开发脚本说明](scripts/README.md)。
 
 双击入口会核对实际依赖和 npm 安装记录，手动安装或离线准备好的依赖符合当前锁文件时可以直接复用，并自动建立或升级 `.test-data/launcher/dependencies.txt`。只修改项目描述、版本号、测试命令、根目录的 Node 版本要求或文件格式，不会触发重装；实际依赖或安装脚本变化、已记录的 Node 主版本变化、依赖缺失或上次安装中断时才重新准备。进度和启动日志会写明原因。新源码目录没有依赖时仍需安装；npm/Electron 可能复用缓存，但不能保证离线成功。
@@ -216,7 +218,7 @@ where.exe npm
 
 - 团队正式使用需要管理员提供 SSH 地址、端口、个人成员账号和密码，并已完成账号开通、工作组分配与共享目录准备。仅安装客户端不会获得团队或项目权限。
 - 使用 Codex 时，源码依赖安装会提供配套 CLI；也可以在设置中指定已有 CLI。使用者仍需自己的可用模型账号或 CLI 已支持的服务认证配置、相应服务权限及额度。
-- 使用 Cursor 时，需要 **Cursor Agent CLI**，仅安装 Cursor 编辑器或提供编辑器的 `cursor` 命令不够。可在应用内指定已有 Agent CLI，或在仓库执行以下命令准备配套运行文件（先安装 npm 依赖，下载脚本需要 Windows 的 `curl.exe` 可用）：
+- 使用普通 Cursor CLI 会话时，需要 **Cursor Agent CLI**，仅安装 Cursor 编辑器或提供编辑器的 `cursor` 命令不够。原生桌面联动使用已安装的 Cursor 桌面版和桌面账号。可在应用内指定已有 Agent CLI，或在仓库执行以下命令准备配套运行文件（先安装 npm 依赖，下载脚本需要 Windows 的 `curl.exe` 可用）：
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\prepare-runtimes.ps1
