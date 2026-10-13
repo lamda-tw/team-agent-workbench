@@ -34,7 +34,6 @@ import { TransferQueue } from './transfers';
 import { AgentRuntime, clearStoppedNativeFork } from './agents';
 import { ClaudeRuntime } from './claude-runtime';
 import { prepareCodexStorage } from './codex-storage';
-import { syncCodexDesktopHistory } from './codex-desktop-history';
 import { userDesktopAppOpen } from './desktop-app-open';
 import type { McpMutation } from '../shared/mcp';
 import { CursorMcp } from './cursor-mcp';
@@ -142,7 +141,6 @@ export class Workbench {
   private closing = false;
   /** Tests replace this so a desktop app open on the machine does not block isolated fixtures. */
   desktopAppOpen: (provider: 'codex' | 'cursor') => Promise<boolean> = userDesktopAppOpen;
-  private openDesktopReminded = new Set<string>();
   accounts: ProviderAccounts;
   accountSync: AccountSync;
   constructor(root: string, private broadcast: () => void, private notice: (message: string) => void, private preparationTimeoutMs = 10 * 60 * 1000, private providerEnvironment: (route?: SessionNetworkRoute) => NodeJS.ProcessEnv = () => ({}), private connectionReport?: (session: AgentSession, value: import('../shared/cli-connection').CliConnection) => void, readonly codexDesktop: CodexDesktopIntegration = new CodexDesktopService(), readonly cursorDesktop: CursorDesktopIntegration = new CursorDesktopService()) {
@@ -202,7 +200,6 @@ export class Workbench {
     await this.store.save(); await this.restoreLocalWorkspace(); await this.detect();
     this.ensureNativeTranscriptSync();
     await this.startCursorNativeSessions();
-    for (const session of this.store.sessions) if (session.nativeLive && session.provider === 'codex' && !session.closedAt) await this.publishDesktopHistory(session);
   }
   async restoreLocalWorkspace() {
     const settings = this.store.settings;
@@ -855,6 +852,7 @@ export class Workbench {
     const executable = s.cursorNative ? 'CURSOR_NATIVE_NO_CLI' : await resolveProvider(s.provider, this.store.settings.providerPaths[s.provider]);
     const storage = s.provider === 'codex' ? s.codexDesktop ? await this.codexDesktop.storage(s, executable, this.providerEnvironment(s.networkRoute)) : await prepareCodexStorage(this.store.root, s) : undefined;
     if (this.closing || s.closedAt || epoch !== this.accountRevision) throw new Error('会话或账号已改变，未启动 CLI');
+    if (s.codexPrivateFork) await this.store.save();
     const hooks = { changed: this.changed, event: (value: unknown) => this.event(s.id, value), done: () => void this.onDone(s.id).catch(e => this.sessionNotice(s, '运行结果保存失败：' + e.message)), authFailed: (error: unknown) => this.accounts.failed(s.provider, error, s.cwd, s.networkRoute), needsApproval: (kind: 'question' | 'approval') => this.sessionNotice(s, kind === 'question' ? `“${s.title}”有问题需要你回答。` : `待授权：“${s.title}”需要你确认 CLI 操作，请查看待授权提醒。`) };
     Object.assign(hooks, { connectionChanged: (value: import('../shared/cli-connection').CliConnection) => {
       if (!this.configuring && this.ownsLocal(s.binding)) {
@@ -895,6 +893,17 @@ export class Workbench {
       catch(error:any) { if(!/未登录|尚未登录/.test(error.message))throw error; }
     }
     await this.codexDesktop.open(s,executable,this.providerEnvironment(s.networkRoute));return true;
+  }
+  async reconnectCodexDesktop(id: string) {
+    const session = this.session(id); this.assertCanWork(session.binding);
+    if (!session.codexDesktop || session.closedAt) throw new Error('请选择打开的 Codex 联动会话');
+    if (this.sending.has(id) || this.stoppingSessions.has(id)) throw new Error('这条会话仍在处理当前操作，请稍候');
+    const current = this.runtimes.get(id);
+    if (current && ['starting', 'running', 'approval'].includes(session.status)) throw new Error('这条会话仍在运行，无需重新连接');
+    if (current) { this.runtimes.delete(id); await current.close(); }
+    await (await this.runtime(session)).ensureStarted();
+    this.ensureNativeTranscriptSync(); await this.store.save(); this.broadcast();
+    return session;
   }
   private async mcpRuntime(id: string) {
     const s = this.session(id); this.assertCanWork(s.binding);
@@ -1313,6 +1322,7 @@ export class Workbench {
       if (canceled() || s.closedAt) { if (this.runtimes.get(id) === runtime) this.runtimes.delete(id); await runtime.close(); if (s.closedAt) throw new Error('此会话已关闭'); return false; }
       // Resolve the actual native conversation before deciding what it already knows.
       await runtime.ensureStarted();
+      await this.store.save(); // Persist a new/private-fork native identity before any model task is sent.
       if(s.codexDesktop)this.ensureNativeTranscriptSync();
       if (canceled()) return false;
       if (s.closedAt) throw new Error('此会话已关闭');
@@ -1362,7 +1372,7 @@ export class Workbench {
     if (!this.closing && s.purpose === 'work' && !s.closedAt && !s.stoppedAt && s.status === 'idle' && !s.error) {
       s.completion = { id: randomUUID() }; this.changed();
     }
-    if (s.nativeLive && s.purpose === 'work') { try { await this.readNativeTranscriptInto(s); } catch (error: any) { this.sessionNotice(s, '原会话记录尚未刷新：' + error.message); } if (s.provider === 'codex') await this.publishDesktopHistory(s); }
+    if (!this.closing && !s.closedAt && s.nativeLive && s.purpose === 'work') { try { await this.readNativeTranscriptInto(s); } catch (error: any) { this.sessionNotice(s, '原会话记录尚未刷新：' + error.message); } }
     if (s.purpose === 'prepare') {
       const draft = this.store.drafts.find(d => d.prepareSessionId === id);
       if (draft && draft.generation === 'running') {
@@ -1430,7 +1440,9 @@ export class Workbench {
   async listNativeSessions(provider: 'codex' | 'cursor') {
     this.assertWorkspace();
     const linked = new Map<string, string>();
-    for (const session of this.store.sessions) if (session.provider === provider && session.nativeId && this.ownsLocal(session.binding)) linked.set(session.nativeId, session.id);
+    for (const session of this.store.sessions) if (session.provider === provider && session.nativeId && this.ownsLocal(session.binding)) {
+      linked.set(session.nativeId, session.id); if (session.nativeSourceId) linked.set(session.nativeSourceId, session.id);
+    }
     return listProviderSessions(provider, linked);
   }
   async listCursorDesktopSessions(cwd: string, launch = false) {
@@ -1542,7 +1554,6 @@ export class Workbench {
         for (const session of sessions) {
           try { if (await this.readNativeTranscriptInto(session, false)) changed = true; }
           catch { read = false; }
-          if (session.provider === 'codex') await this.publishDesktopHistory(session);
         }
         const after = await fs.stat(file).catch(() => undefined);
         const state = [...this.nativeSyncState.values()].find(item => sameNativePath(item.file, file));
@@ -1555,36 +1566,18 @@ export class Workbench {
       if (this.nativeSyncPending.size && !this.nativeSyncQueued) this.queueNativeTranscript([...this.nativeSyncPending][0]);
     }
   }
-  private openDesktopMessage(provider: 'codex' | 'cursor', action: 'publish' | 'sync') {
+  private openDesktopMessage(provider: 'codex' | 'cursor') {
     const app = provider === 'codex' ? '桌面 Codex' : 'Cursor';
-    if (action === 'publish') return `${app} 正在运行。请先保存并退出，再登记到桌面端；不会改写已打开的会话数据。`;
-    return `${app} 正在运行，没有把新内容写入它的会话索引。请保存并退出后重新打开工作台，或使用「在桌面端显示」。`;
+    return `${app} 正在运行。请先保存并退出，再登记到桌面端；不会改写已打开的会话数据。`;
   }
-  private async blockOpenDesktop(provider: 'codex' | 'cursor', action: 'publish' | 'sync') {
+  private async blockOpenDesktop(provider: 'codex' | 'cursor') {
     let open = true;
     try { open = await this.desktopAppOpen(provider); }
     catch {
       const message = provider === 'codex' ? '无法确认桌面 Codex 是否正在运行，已停止写入它的会话数据。' : '无法确认 Cursor 是否正在运行，已停止写入它的会话数据。';
-      if (action === 'publish') throw new Error(message);
-      const key = provider + ':unknown';
-      if (!this.openDesktopReminded.has(key)) { this.openDesktopReminded.add(key); this.notice(message); }
-      return true;
+      throw new Error(message);
     }
-    if (!open) { this.openDesktopReminded.delete(provider); return false; }
-    if (action === 'sync' && !this.openDesktopReminded.has(provider)) { this.openDesktopReminded.add(provider); this.notice(this.openDesktopMessage(provider, 'sync')); }
-    return true;
-  }
-  private async publishDesktopHistory(session: AgentSession, allowRetry = true) {
-    if (session.provider !== 'codex' || !session.nativeLive || !session.nativeId || session.closedAt) return;
-    if (session.codexDesktop || process.env.WORKBENCH_CODEX_DESKTOP_BRIDGE) return; // The shared backend owns its index; never copy stale private rows over it.
-    if (await this.blockOpenDesktop('codex', 'sync')) return;
-    try {
-      const result = await syncCodexDesktopHistory(session.nativeId, codexHome(), path.join(this.store.root, 'codex-home', 'sqlite'));
-      if (result === 'behind' && allowRetry) {
-        await new Promise(resolve => setTimeout(resolve, 200));
-        await this.publishDesktopHistory(session, false);
-      }
-    } catch (error: any) { this.sessionNotice(session, '桌面 Codex 还没有跟上这条会话：' + error.message); }
+    return open;
   }
   private async readNativeTranscriptInto(session: AgentSession, persist = true) {
     if (!session.nativeLive || !session.nativePath || this.nativeTranscriptBlocked(session)) return false;
@@ -1609,7 +1602,7 @@ export class Workbench {
   private async nativeImportSource(provider: 'codex' | 'cursor', nativeId: string) {
     this.assertWorkspace();
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(nativeId)) throw new Error('原会话标识无效');
-    const existing = this.store.sessions.find(session => session.provider === provider && session.nativeId?.toLowerCase() === nativeId.toLowerCase() && this.ownsLocal(session.binding));
+    const existing = this.store.sessions.find(session => session.provider === provider && [session.nativeId, session.nativeSourceId].some(id => id?.toLowerCase() === nativeId.toLowerCase()) && this.ownsLocal(session.binding));
     if (existing) throw new Error('「' + existing.title + '」已在工作台，请从工作会话列表打开；不能重复导入');
     const source = await resolveNativeSession(provider, nativeId);
     if (!source || !nativeRecordAllowed(provider, source.nativePath)) throw new Error(provider === 'codex' ? '找不到这条 Codex 会话，请刷新列表后再选' : '找不到这条 Cursor 会话，请刷新列表后再选');
@@ -1649,7 +1642,7 @@ export class Workbench {
     if (['starting', 'running', 'approval'].includes(session.status)) throw new Error('请等这条会话结束再登记到桌面端');
     if (session.nativeLive && session.nativePath && nativeRecordAllowed(session.provider, session.nativePath)) throw new Error(session.provider === 'codex' ? '这条会话已经在桌面 Codex 的列表里' : '这条会话已经在 Cursor 的会话列表里');
     if (this.sending.has(id) || this.steering.has(id) || this.stoppingSessions.has(id)) throw new Error('请等当前会话操作完成后再登记到桌面端');
-    if ((session.provider === 'codex' || session.provider === 'cursor') && await this.blockOpenDesktop(session.provider, 'publish')) throw new Error(this.openDesktopMessage(session.provider, 'publish'));
+    if ((session.provider === 'codex' || session.provider === 'cursor') && await this.blockOpenDesktop(session.provider)) throw new Error(this.openDesktopMessage(session.provider));
     // Flush and release the private runtime before copying its record. The next
     // message must resume the published record and use the desktop history DB.
     const runtime = this.runtimes.get(id);

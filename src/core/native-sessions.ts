@@ -11,7 +11,7 @@ export const codexHome = () => path.resolve(process.env.CODEX_HOME || path.join(
 export const cursorChatsRoot = () => path.resolve(process.env.WORKBENCH_CURSOR_CHATS || path.join(os.homedir(), '.cursor', 'chats'));
 
 function inside(root: string, file: string) {
-  const rel = path.relative(path.resolve(root), path.resolve(file));
+  const rel = path.relative(nativeCwd(root), nativeCwd(file));
   return !!rel && !path.isAbsolute(rel) && rel !== '..' && !rel.startsWith('..' + path.sep);
 }
 

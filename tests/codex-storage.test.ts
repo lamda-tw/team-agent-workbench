@@ -57,7 +57,7 @@ test('legacy Codex migration copies only the owned full rollout, retains the ori
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
 
-test('a linked Codex session drops the isolated copy and the stopped fork warning', async () => {
+test('ordinary imported Codex sessions retarget only private indexes and leave personal records intact', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'wb-native-copy-')), personal = path.join(root, 'personal'), nativeId = randomUUID(), otherId = randomUUID();
   try {
     const personalFile = path.join(personal, 'sessions', '2026', '10', '12', 'rollout-2026-10-12T10-08-44-' + nativeId + '.jsonl');
@@ -75,14 +75,16 @@ test('a linked Codex session drops the isolated copy and the stopped fork warnin
     const insert = db.prepare('INSERT INTO threads (id, rollout_path) VALUES (?, ?)');
     insert.run(nativeId, copy); insert.run(otherId, other); db.close();
     const storage = await prepareCodexStorage(data, { ...session(root), nativeId, nativeLive: true, nativePath: personalFile }, personal);
-    assert.equal(storage.resumePath, personalFile);
+    assert.notEqual(storage.resumePath, personalFile);
+    assert(storage.resumePath!.startsWith(home+path.sep));
+    assert.equal(await fs.readFile(storage.resumePath!,'utf8'),'original\n');
     await assert.rejects(fs.access(copy));
     assert.equal(await fs.readFile(other, 'utf8'), 'other thread\n');
     assert.equal(await fs.readFile(personalFile, 'utf8'), 'original\n');
     const check = new DatabaseSync(path.join(home, 'sqlite', 'state_5.sqlite'), { readOnly: true });
     const rows = check.prepare('SELECT id, rollout_path FROM threads').all() as { id: string; rollout_path: string }[];
     check.close();
-    assert.equal(rows.find(row => row.id === nativeId)?.rollout_path, personalFile);
+    assert.equal(rows.find(row => row.id === nativeId)?.rollout_path, storage.resumePath);
     assert.equal(rows.find(row => row.id === otherId)?.rollout_path, other);
     const stopped = { ...session(root), nativeLive: true, status: 'error' as const, error: nativeRolloutForkError };
     assert.equal(clearStoppedNativeFork(stopped), true);

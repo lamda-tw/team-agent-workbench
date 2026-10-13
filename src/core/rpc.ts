@@ -1,4 +1,4 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import readline from 'node:readline';
 import fs from 'node:fs';
@@ -11,8 +11,8 @@ export interface AgentRpc extends EventEmitter {
   reject(id: number | string, message?: string): void;
   close(): Promise<void>;
 }
-const stopping = new WeakMap<ChildProcessWithoutNullStreams, Promise<void>>();
-export function stopCLI(child: ChildProcessWithoutNullStreams): Promise<void> {
+const stopping = new WeakMap<ChildProcess, Promise<void>>();
+export function stopCLI(child: ChildProcess): Promise<void> {
   const pending = stopping.get(child); if (pending) return pending;
   const operation = new Promise<void>(resolve => {
     if (child.exitCode !== null || child.signalCode !== null) { resolve(); return; }

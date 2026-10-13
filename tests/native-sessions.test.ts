@@ -17,6 +17,16 @@ import type { AgentSession, Message } from '../src/shared/types';
 import { grantTestWorkspace, offlineProjectId } from './fixtures/offline-workspace';
 
 const codexId = '01a0bc6c-6276-7110-bb10-8ab94a8fe0a0';
+
+test('Windows extended rollout paths stay inside the personal profile; foreign paths remain rejected', async () => {
+  if (process.platform !== 'win32') return;
+  const home = path.join(os.tmpdir(), 'wb-native-path-check');
+  await withEnv('CODEX_HOME', home, async () => {
+    const owned = path.join(home, 'sessions', 'rollout-' + codexId + '.jsonl');
+    assert.equal(nativeRecordAllowed('codex', '\\\\?\\' + owned), true);
+    assert.equal(nativeRecordAllowed('codex', '\\\\?\\' + path.join(os.tmpdir(), 'foreign', 'rollout-' + codexId + '.jsonl')), false);
+  });
+});
 const looseId = '01a0d216-9636-70e3-bc68-f16e3c3938ae';
 const pinnedId = '01a0ad02-ca87-7b51-bb4d-77ed8027ca90';
 const archivedId = '01a0ad03-5cbe-7c52-91c2-5a020bba7662';
@@ -157,8 +167,9 @@ test('Codex transcript keeps dialogue and operations and leaves the personal fil
     assert.equal(sameNativePath('file:///C:/work/a.jsonl', 'C:\\work\\a.jsonl'), process.platform === 'win32');
     const session = { id: 's', title: '关联', provider: 'codex' as const, cwd: root, purpose: 'work' as const, createdAt: '', status: 'idle' as const, messages: [], approvals: [], sources: [], autoUpload: false, handoffPath: path.join(root, 'handoff.md'), nativeId: codexId, nativeLive: true };
     const storage = await prepareCodexStorage(path.join(root, 'data'), session, personal);
-    assert.equal(storage.resumePath, file);
-    assert.deepEqual(await fs.readdir(path.join(storage.home, 'sessions')), []);
+    assert.notEqual(storage.resumePath, file);
+    assert(storage.resumePath!.includes(path.join('data','codex-home')));
+    assert.equal(await fs.readFile(storage.resumePath!, 'utf8'), await fs.readFile(file, 'utf8'));
     assert.equal(await fs.readFile(file, 'utf8'), lines.map(line => JSON.stringify(line)).join('\n') + '\n');
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
@@ -213,6 +224,10 @@ test('linking a Codex session keeps its project name and reads the original reco
     assert.equal(imported.nativeLive, true);
     assert.equal(imported.nativePath, otherFile);
     assert.equal(wb.store.sessions.filter(session => session.nativeId === codexId || session.nativeId === looseId).length, 2);
+    imported.nativeSourceId = looseId; imported.nativeId = randomUUID(); imported.nativeLive = false;
+    const forkedCatalog = await wb.listNativeSessions('codex');
+    assert.equal(forkedCatalog.sessions.find(session => session.nativeId === looseId)?.linkedSessionId, imported.id);
+    await assert.rejects(() => wb.linkNativeSession('codex', looseId, offlineProjectId), /不能重复导入/, 'a private continuation must retain its import-source deduplication');
   } finally {
     if (previous === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = previous;
     await wb.close();
@@ -459,10 +474,8 @@ test('an already open desktop app is reminded and its session files stay untouch
     await wb.store.init(); grantTestWorkspace(wb, workspace);
     const session = await wb.createSession('codex', workspace, offlineProjectId, 'work', undefined, undefined, 'inherit', false);
     session.nativeLive = true; session.nativeId = codexId;
-    await (wb as any).publishDesktopHistory(session);
-    await (wb as any).publishDesktopHistory(session);
-    assert.equal(notices.length, 1);
-    assert.match(notices[0], /桌面 Codex 正在运行/);
+    await wb.refreshNativeTranscript(session.id);
+    assert.equal(notices.length, 0, 'reading an imported transcript never attempts an automatic desktop-index write');
     assert.deepEqual(await fs.readdir(codex), []);
     let closed = false;
     (wb as any).runtimes.set(session.id, { session, close: async () => { closed = true; } });

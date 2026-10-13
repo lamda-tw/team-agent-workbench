@@ -11,22 +11,27 @@ import { Store } from '../src/core/store';
 import type { AgentSession } from '../src/shared/types';
 import { accountIdentity } from '../src/shared/account-data';
 import { grantTestWorkspace, offlineProjectId } from './fixtures/offline-workspace';
-import { hasNoLoadedThreads } from '../src/core/codex-desktop-worker';
+import { hasNoLoadedThreads, hasNoActiveThreads } from '../src/core/codex-desktop-worker';
 
 async function fixture() {
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'wb-codex-service-')),sourceHome=path.join(root,'personal'),parent=path.join(root,'managers');
   await fs.mkdir(sourceHome,{recursive:true});
   let healthy=true,starts=0,discovered=0,desktopOpens=0,inputText='',desktopArgs:string[]=[],desktopEnv:NodeJS.ProcessEnv={};
   const route='/rpc/'+'a'.repeat(64);
-  const server=http.createServer((req,res)=>{res.writeHead(healthy&&req.url===route+'/readyz'?200:503);res.end();});
+  const server=http.createServer((req,res)=>{
+    if(req.method==='POST'&&req.url===route+'/renew'){
+      void(async()=>{const {file}=JSON.parse(await fs.readFile(path.join(parent,'active.json'),'utf8'));const value=JSON.parse(await fs.readFile(file,'utf8'));value.expiresAt=new Date(Date.now()+60000).toISOString();await fs.writeFile(file,JSON.stringify(value));res.writeHead(200);res.end();})().catch(()=>{res.writeHead(503);res.end();});return;
+    }
+    res.writeHead(healthy&&req.url===route+'/readyz'?200:503);res.end();
+  });
   await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
   const endpoint='ws://127.0.0.1:'+(server.address() as any).port+route;
   const options={sourceHome,parent,running:async()=>false,discover:async()=>{discovered++;return{app:'fake-desktop.exe',executable:'fake-native.exe'};},privateDirectory:async(root:string)=>{await fs.mkdir(root,{recursive:true});return fs.mkdtemp(path.join(root,'run-'));},launchWorker:async(file:string,_env:NodeJS.ProcessEnv)=>{
     starts++;inputText=await fs.readFile(file,'utf8');const input=JSON.parse(inputText);
     await new Promise(resolve=>setTimeout(resolve,30));
-    await fs.writeFile(path.join(input.stateDirectory,'bridge.json'),JSON.stringify({version:1,endpoint,sourceHome,executable:'fake-native.exe',pid:process.pid,expiresAt:new Date(Date.now()+60000).toISOString()}));
+    await fs.writeFile(path.join(input.stateDirectory,'bridge.json'),JSON.stringify({version:1,endpoint,sourceHome,executable:'fake-native.exe',pid:process.pid,approvalRoutingVersion:1,expiresAt:new Date(Date.now()+60000).toISOString()}));
   },launchDesktop:async(_target:any,args:string[],env:NodeJS.ProcessEnv)=>{desktopOpens++;desktopArgs=args;desktopEnv=env;}};
-  return {root,sourceHome,parent,endpoint,options,counts:()=>({starts,discovered,desktopOpens,inputText,desktopArgs,desktopEnv}),fail:()=>{healthy=false;},async close(){server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));await fs.rm(root,{recursive:true,force:true});}};
+  return {root,sourceHome,parent,endpoint,options,counts:()=>({starts,discovered,desktopOpens,inputText,desktopArgs,desktopEnv}),fail:()=>{healthy=false;},revive:()=>{healthy=true;},async close(){server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));await fs.rm(root,{recursive:true,force:true});}};
 }
 test('ordinary startup and session creation are lazy; Beta is independent, persisted, and account scoped',async()=>{
   const f=await fixture(),service=new CodexDesktopService(f.options),wb=new Workbench(path.join(f.root,'data'),()=>{},()=>{},undefined,undefined,undefined,service);
@@ -56,7 +61,7 @@ test('concurrent windows and sessions share exactly one lazy backend; reconnect 
     const nativeId=randomUUID(),file=path.join(f.sourceHome,'sessions','rollout-'+nativeId+'.jsonl');await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,'original');
     assert.equal((await resumed.storage({...a,nativeId},'ignored',{})).resumePath,file);assert.equal(await fs.readFile(file,'utf8'),'original');
     await assert.rejects(resumed.storage({...a,nativeId:randomUUID()},'ignored',{}),/不会另建会话/);assert.equal(f.counts().starts,1);
-    f.fail();await assert.rejects(resumed.ensure(),/无法连接/);assert.equal(f.counts().starts,1,'an uncertain backend is never replaced with a second writer');
+    f.fail();await assert.rejects(resumed.ensure(),/连接暂时中断/);assert.equal(f.counts().starts,1,'an uncertain backend is never replaced with a second writer');
   }finally{await f.close();}
 });
 test('native open is explicit, targets its own thread, and does not mutate global settings or credentials',async()=>{
@@ -91,6 +96,31 @@ test('idle cleanup conservatively preserves loaded threads and uncertain backend
   assert.equal(await hasNoLoadedThreads({request:async()=>{throw new Error('unknown method');}}),false);
   assert.equal(await hasNoLoadedThreads({request:async method=>{assert.equal(method,'thread/loaded/list');return{data:[]};}}),true);
 });
+test('expiry renews a healthy backend without restarting its process',async()=>{
+  const f=await fixture(),service=new CodexDesktopService(f.options);
+  try{
+    const original=await service.ensure(),{file}=JSON.parse(await fs.readFile(path.join(f.parent,'active.json'),'utf8'));
+    await fs.writeFile(file,JSON.stringify({...original,expiresAt:new Date(0).toISOString()}));
+    const renewed=await service.ensure();assert.equal(renewed.endpoint,original.endpoint);assert.equal(renewed.pid,original.pid);assert(Date.parse(renewed.expiresAt)>Date.now());assert.equal(f.counts().starts,1);
+  }finally{await f.close();}
+});
+test('confirmed dead managers recover under one lock, preserve their endpoint, and do not resend turns',async()=>{
+  const f=await fixture(),first=new CodexDesktopService(f.options);
+  try{
+    const original=await first.ensure(),{file}=JSON.parse(await fs.readFile(path.join(f.parent,'active.json'),'utf8'));
+    const old={...original,pid:99999999};await fs.writeFile(file,JSON.stringify(old));
+    await fs.writeFile(path.join(path.dirname(file),'backend.json'),JSON.stringify({version:1,endpoint:original.endpoint,sourceHome:f.sourceHome,executable:'fake-native.exe',port:12345,token:'b'.repeat(64),process:{pid:99999998,startedAt:'old',executable:'fake-native.exe'}}));
+    f.fail();const options={...f.options,launchWorker:async(input:string,env:NodeJS.ProcessEnv)=>{assert.equal(JSON.parse(await fs.readFile(input,'utf8')).recover,true);f.revive();await f.options.launchWorker(input,env);}};
+    const [a,b]=await Promise.all([new CodexDesktopService(options).ensure(),new CodexDesktopService(options).ensure()]);
+    assert.equal(a.endpoint,original.endpoint);assert.equal(b.endpoint,original.endpoint);assert.equal(f.counts().starts,2);
+    assert.equal(f.counts().desktopOpens,0);assert(!f.counts().inputText.includes('turn/start'));
+  }finally{await f.close();}
+});
+test('idle expiry keeps active or uncertain threads alive and may close confirmed idle threads',async()=>{
+  for(const state of ['active','systemError',undefined])assert.equal(await hasNoActiveThreads({request:async(method)=>method==='thread/loaded/list'?{data:['thread']}:{thread:{status:{type:state}}}}),false);
+  assert.equal(await hasNoActiveThreads({request:async(method)=>method==='thread/loaded/list'?{data:['thread']}:{thread:{status:{type:'idle'}}}}),true);
+  assert.equal(await hasNoActiveThreads({request:async()=>({data:[],nextCursor:'more'})}),false);
+});
 test('opening several linked sessions serializes native launch and preserves the original desktop process identity',async()=>{
   const f=await fixture();let running=false,launched=0,active=0,maximum=0;
   const service=new CodexDesktopService({...f.options,running:async()=>running,launchDesktop:async()=>{active++;maximum=Math.max(maximum,active);await new Promise(resolve=>setTimeout(resolve,20));active--;running=true;return ++launched===1?process.pid:99999999;}});
@@ -106,7 +136,7 @@ test('a worker can publish the registry after its launching UI exits; another wi
   const f=await fixture(),service=new CodexDesktopService(f.options);
   try{
     const directory=path.join(f.parent,'run-orphan');await fs.mkdir(directory,{recursive:true});
-    const file=path.join(directory,'bridge.json');await fs.writeFile(file,JSON.stringify({version:1,endpoint:f.endpoint,sourceHome:f.sourceHome,executable:'fake-native.exe',pid:process.pid,expiresAt:new Date(Date.now()+60000).toISOString()}));
+    const file=path.join(directory,'bridge.json');await fs.writeFile(file,JSON.stringify({version:1,endpoint:f.endpoint,sourceHome:f.sourceHome,executable:'fake-native.exe',pid:process.pid,approvalRoutingVersion:1,expiresAt:new Date(Date.now()+60000).toISOString()}));
     await fs.writeFile(path.join(f.parent,'launch.lock'),JSON.stringify({pid:99999999,nonce:'orphan',at:Date.now()-10000,directory}));
     const publish=new Promise<void>(resolve=>setTimeout(()=>{void fs.writeFile(path.join(f.parent,'active.json'),JSON.stringify({file,managed:true})).then(resolve);},100));
     assert.equal((await service.ensure()).endpoint,f.endpoint);await publish;

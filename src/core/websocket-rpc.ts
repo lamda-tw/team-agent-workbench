@@ -13,10 +13,10 @@ export class WebSocketRpc extends EventEmitter implements AgentRpc {
     if (this.closed) return Promise.reject(new Error('共享 Codex 连接已关闭，请重新打开会话；输入已保留'));
     return this.opening ||= new Promise<void>((resolve, reject) => {
       const socket = this.socket = new WebSocket(this.endpoint);
-      const timer = setTimeout(() => { const error = new Error('共享 Codex 后台连接超时，请从 Beta 入口重新启动'); reject(error); this.finish(error); socket.close(); }, 10000);
+      const timer = setTimeout(() => { const error = new Error('连接未能恢复，请点击“重新连接”；会话和输入已保留'); reject(error); this.finish(error); socket.close(); }, 10000);
       socket.addEventListener('open', () => { clearTimeout(timer); resolve(); }, { once: true });
-      socket.addEventListener('error', () => { clearTimeout(timer); const error = new Error('无法连接共享 Codex 后台，请从 Beta 入口重新启动'); reject(error); this.finish(error); });
-      socket.addEventListener('close', () => { clearTimeout(timer); const error = new Error('共享 Codex 连接已断开；请核对已有回复后重新发送'); reject(error); this.finish(error); });
+      socket.addEventListener('error', () => { clearTimeout(timer); const error = new Error('无法连接，请点击“重新连接”；会话和输入已保留'); reject(error); this.finish(error); });
+      socket.addEventListener('close', () => { clearTimeout(timer); const error = new Error('连接已断开；请重新连接并核对已有结果，不会自动重发任务'); reject(error); this.finish(error); });
       socket.addEventListener('message', event => {
         let message: RpcMessage;
         try { message = JSON.parse(String(event.data)); } catch { this.finish(new Error('共享 Codex 返回了无效消息')); socket.close(); return; }

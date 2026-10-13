@@ -9,7 +9,7 @@ import type { AgentRpc } from './rpc';
 import { sameNativePath } from './native-transcript';
 import { readCodexDesktopBridge } from './codex-desktop-bridge';
 
-export interface CodexStorage { home: string; sourceHome: string; args: string[]; env: NodeJS.ProcessEnv; resumePath?: string; sharedEndpoint?: string; }
+export interface CodexStorage { home: string; sourceHome: string; args: string[]; env: NodeJS.ProcessEnv; resumePath?: string; sharedEndpoint?: string; sharedApprovalRouting?: boolean; }
 const inside = (root: string, file: string) => { const rel = path.relative(root, file); return !!rel && !path.isAbsolute(rel) && rel !== '..' && !rel.startsWith('..' + path.sep); };
 const jobs = new Map<string, Promise<void>>();
 
@@ -56,12 +56,12 @@ async function initialize(home: string, sourceHome: string) {
   }
 }
 
-async function locateRollout(root: string, id: string): Promise<string | undefined> {
+async function locateRollout(root: string, id: string, keep?: string): Promise<string | undefined> {
   for (const item of await fs.readdir(root, { withFileTypes: true }).catch((e: any) => { if (e.code === 'ENOENT') return []; throw e; })) {
     if (item.isSymbolicLink()) continue;
     const file = path.join(root, item.name);
-    if (item.isDirectory()) { const found = await locateRollout(file, id); if (found) return found; }
-    else if (item.isFile() && item.name.endsWith('-' + id + '.jsonl')) return file;
+    if (item.isDirectory()) { const found = await locateRollout(file, id, keep); if (found) return found; }
+    else if (item.isFile() && item.name.endsWith('-' + id + '.jsonl') && (!keep || !sameNativePath(file, keep))) return file;
   }
 }
 
@@ -72,8 +72,11 @@ export async function findCodexRollout(home: string, id: string) {
 
 async function releaseIsolatedNativeCopy(home: string, id: string, resumePath: string) {
   for (const dir of ['sessions', 'archived_sessions']) {
-    const copy = await locateRollout(path.join(home, dir), id);
-    if (copy && !sameNativePath(copy, resumePath)) await fs.rm(copy, { force: true });
+    let copy: string | undefined;
+    while ((copy = await locateRollout(path.join(home, dir), id, resumePath))) {
+      if (!inside(home, copy)) throw new Error('独立会话副本路径无效');
+      await fs.rm(copy, { force: true });
+    }
   }
   for (const directory of [path.join(home, 'sqlite'), home]) {
     const names = (await fs.readdir(directory).catch((error: any) => { if (error.code === 'ENOENT') return [] as string[]; throw error; })).filter(name => /^state_\d+\.sqlite$/.test(name));
@@ -104,19 +107,23 @@ export async function prepareCodexStorage(root: string, session: AgentSession, s
     const bridge = (await readCodexDesktopBridge(sourceHome))!;
     const resumePath = session.nativeId && await findCodexRollout(sourceHome, session.nativeId);
     if (!resumePath) throw new Error('找不到原 Codex 会话记录，无法关联共享后台');
-    return { home: sourceHome, sourceHome, args: [], env: { CODEX_HOME: sourceHome, CODEX_SQLITE_HOME: sourceHome }, resumePath, sharedEndpoint: bridge.endpoint };
+    return { home: sourceHome, sourceHome, args: [], env: { CODEX_HOME: sourceHome, CODEX_SQLITE_HOME: sourceHome }, resumePath, sharedEndpoint: bridge.endpoint, sharedApprovalRouting: bridge.approvalRoutingVersion===1 };
   }
   const home = path.resolve(root, 'codex-home');
   await refreshCodexConfiguration({ home, sourceHome });
   let resumePath: string | undefined;
-  // A session the user explicitly linked keeps the personal rollout as its only record.
+  // Ordinary imports continue in a private fork. Only a shared backend may write the personal rollout.
   if (session.nativeLive) {
     if (!session.nativeId || !/^[a-f0-9-]{36}$/i.test(session.nativeId)) throw new Error('原会话标识无效，无法恢复上下文');
-    resumePath = await findCodexRollout(sourceHome, session.nativeId);
-    if (!resumePath) throw new Error('找不到原会话记录，无法恢复上下文；请恢复原 Codex 会话文件后重试');
-    // An earlier resume may have left the same thread id pointing at a private copy.
-    // Drop that copy so the next resume continues the personal rollout.
+    const original = await findCodexRollout(sourceHome, session.nativeId);
+    if (!original) throw new Error('找不到原会话记录，无法恢复上下文；请恢复原 Codex 会话文件后重试');
+    resumePath = path.join(home, path.relative(sourceHome, original));
+    if (!inside(home, resumePath)) throw new Error('原会话路径无效');
+    await fs.mkdir(path.dirname(resumePath), { recursive: true, mode: 0o700 });
+    await fs.copyFile(original, resumePath);
     await releaseIsolatedNativeCopy(home, session.nativeId, resumePath);
+    session.nativeSourceId ||= session.nativeId;
+    session.codexPrivateFork = true; session.nativeLive = false; session.codexStorage = 'workbench'; session.nativePath = resumePath;
   }
   // Account migration copies each owned rollout, not another account's SQLite index.
   // Resume by its explicit file so the CLI can register it in the new private index.

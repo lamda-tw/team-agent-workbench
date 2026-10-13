@@ -54,7 +54,7 @@ export class Store {
       try { const data = JSON.parse(await fs.readFile(path.join(this.root, key + '.json'), 'utf8')); if (!Array.isArray(data)) throw new Error('Invalid array'); (this[key] as unknown[]) = data; } catch (e: any) { if (e.code !== 'ENOENT') throw new Error(`本地 ${key}.json 无法读取`); }
     }
     try { this.inputs = JSON.parse(await fs.readFile(path.join(this.root, 'inputs.json'), 'utf8')); } catch (e: any) { if (e.code !== 'ENOENT') throw new Error('本地 inputs.json 无法读取'); }
-    this.sessions.forEach(s => { delete s.cliConnection; if (['starting', 'running', 'approval'].includes(s.status)) { s.status = s.closedAt || s.stoppedAt || s.codexDesktop ? 'idle' : 'error'; if(s.codexDesktop)s.error=undefined; if (s.status === 'error') s.error = '应用关闭时任务尚未完成，已中断；可检查已有结果后继续发送。'; } s.approvals = []; migrateSessionContext(s); });
+    this.sessions.forEach(s => { delete s.cliConnection; delete s.desktopSyncPending; delete s.desktopWaitingApproval; if (['starting', 'running', 'approval'].includes(s.status)) { s.status = s.closedAt || s.stoppedAt || s.codexDesktop ? 'idle' : 'error'; if(s.codexDesktop)s.error=undefined; if (s.status === 'error') s.error = '应用关闭时任务尚未完成，已中断；可检查已有结果后继续发送。'; } s.approvals = []; migrateSessionContext(s); });
     // MCP now belongs to configuration, not the next-message selection. Keep historic messages intact.
     for (const session of this.sessions) if (session.provider === 'cursor' && this.inputs[session.id]?.capabilities) {
       this.inputs[session.id].capabilities = this.inputs[session.id].capabilities!.filter(item => !item.id.startsWith('plugin:mcp:'));

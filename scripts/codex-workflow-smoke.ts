@@ -8,6 +8,9 @@ import { CodexDesktopService } from '../src/core/codex-desktop-service';
 import { installedCodexDesktopExecutable } from '../src/core/codex-shared-backend';
 import { resolveProvider } from '../src/core/providers';
 import { WebSocketRpc } from '../src/core/websocket-rpc';
+import { AgentRuntime } from '../src/core/agents';
+import { prepareCodexStorage } from '../src/core/codex-storage';
+import { processAlive } from '../src/core/codex-process';
 import { LocalAdminConnection } from '../src/admin/local-connection';
 import { memberProfile } from '../tests/fixtures/member-profile';
 import { authLauncher } from '../tests/fixtures/auth-launcher.mjs';
@@ -18,19 +21,41 @@ async function main(){
   const root=path.resolve('.test-data','codex-workflow-'+Date.now()),personal=path.join(root,'personal'),userData=path.join(root,'user'),share=path.join(root,'share');
   await fs.mkdir(personal,{recursive:true});await fs.mkdir(share,{recursive:true});
   const requests:string[]=[],priorHome=process.env.CODEX_HOME,priorBridge=process.env.WORKBENCH_CODEX_DESKTOP_BRIDGE;
-  let concurrent=0,maxConcurrent=0,release:undefined|(()=>void),hold=false,starts=0;
+  let concurrent=0,maxConcurrent=0,release:undefined|(()=>void),hold=false,starts=0,halfHold=false;
+  const requestedTools = new Set<string>();
   const responses=http.createServer(async(req,res)=>{
     let body='';for await(const chunk of req)body+=chunk;
     if(req.method!=='POST'||!req.url?.endsWith('/responses')){res.writeHead(404);res.end();return;}
     requests.push(body);concurrent++;maxConcurrent=Math.max(maxConcurrent,concurrent);
+    if (process.argv.includes('--extended') && requests.length === 1) {
+      const tools = JSON.parse(body).tools || [];
+      await fs.writeFile(path.join(root, 'model-tools.json'), JSON.stringify(tools.map((tool: any) => ({ type: tool.type, name: tool.name, tools: tool.tools?.map((inner: any) => ({ type: inner.type, name: inner.name })) })), null, 2));
+    }
     if(hold)await new Promise<void>(resolve=>{release=resolve;});else await pause(400);
     const tag=[...body.matchAll(/WF_TASK_[ABC](?:_[A-Z]+)?/g)].at(-1)?.[0]||'BACKGROUND';
     const text='WF_REPLY_'+tag,itemId='msg_'+randomUUID().replaceAll('-',''),part={type:'output_text',text,annotations:[]};
+    if (tag.endsWith('APPROVALWB') || tag.endsWith('APPROVALNATIVE')) {
+      if (!requestedTools.has(tag)) {
+        requestedTools.add(tag);
+        const item = { type: 'function_call', id: 'fc_' + randomUUID().replaceAll('-', ''), call_id: 'call_' + randomUUID().replaceAll('-', ''), name: 'exec_command', arguments: JSON.stringify({ cmd: 'echo WORKBENCH_APPROVAL_FIXTURE', sandbox_permissions: 'require_escalated', justification: '本机审批测试，仅执行 echo' }), status: 'completed' };
+        const response = { id: 'resp_' + randomUUID().replaceAll('-', ''), object: 'response', created_at: Math.floor(Date.now() / 1000), model: 'beta-local', status: 'completed', output: [item], usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 } };
+        res.writeHead(200, { 'content-type': 'text/event-stream' });
+        res.write('data: ' + JSON.stringify({ type: 'response.created', response: { ...response, status: 'in_progress', output: [] } }) + '\n\n');
+        res.write('data: ' + JSON.stringify({ type: 'response.output_item.added', output_index: 0, item: { ...item, arguments: '', status: 'in_progress' } }) + '\n\n');
+        res.write('data: ' + JSON.stringify({ type: 'response.function_call_arguments.delta', output_index: 0, item_id: item.id, delta: item.arguments }) + '\n\n');
+        res.write('data: ' + JSON.stringify({ type: 'response.output_item.done', output_index: 0, item }) + '\n\n');
+        res.write('data: ' + JSON.stringify({ type: 'response.completed', response }) + '\n\n');
+        res.end(); concurrent--; return;
+      }
+    }
     const item={id:itemId,type:'message',role:'assistant',status:'completed',content:[part]};
     const done={id:'resp_'+randomUUID().replaceAll('-',''),object:'response',created_at:Math.floor(Date.now()/1000),model:'beta-local',status:'completed',output:[item],usage:{input_tokens:1,output_tokens:1,total_tokens:2,input_tokens_details:{cached_tokens:0},output_tokens_details:{reasoning_tokens:0}}};
     res.writeHead(200,{'content-type':'text/event-stream'});
     const emit=(type:string,value:any)=>res.write('event: '+type+'\ndata: '+JSON.stringify({type,...value})+'\n\n');
-    emit('response.created',{response:{...done,status:'in_progress',output:[]}});emit('response.output_item.added',{output_index:0,item:{...item,status:'in_progress',content:[]}});emit('response.content_part.added',{output_index:0,item_id:itemId,content_index:0,part:{...part,text:''}});emit('response.output_text.delta',{output_index:0,item_id:itemId,content_index:0,delta:text});emit('response.output_text.done',{output_index:0,item_id:itemId,content_index:0,text});emit('response.output_item.done',{output_index:0,item});emit('response.completed',{response:done});res.end();concurrent--;
+    emit('response.created',{response:{...done,status:'in_progress',output:[]}});emit('response.output_item.added',{output_index:0,item:{...item,status:'in_progress',content:[]}});emit('response.content_part.added',{output_index:0,item_id:itemId,content_index:0,part:{...part,text:''}});
+    if(halfHold){const split=Math.floor(text.length/2);emit('response.output_text.delta',{output_index:0,item_id:itemId,content_index:0,delta:text.slice(0,split)});await new Promise<void>(resolve=>{release=resolve;});emit('response.output_text.delta',{output_index:0,item_id:itemId,content_index:0,delta:text.slice(split)});}
+    else emit('response.output_text.delta',{output_index:0,item_id:itemId,content_index:0,delta:text});
+    emit('response.output_text.done',{output_index:0,item_id:itemId,content_index:0,text});emit('response.output_item.done',{output_index:0,item});emit('response.completed',{response:done});res.end();concurrent--;
   });
   await new Promise<void>(resolve=>responses.listen(0,'127.0.0.1',resolve));
   await fs.writeFile(path.join(personal,'config.toml'),`model="beta-local"\nmodel_provider="beta_local"\napproval_policy="never"\nsandbox_mode="danger-full-access"\n[model_providers.beta_local]\nname="Local workflow fixture"\nbase_url="http://127.0.0.1:${(responses.address() as any).port}/v1"\nwire_api="responses"\nrequires_openai_auth=false\n`);
@@ -104,7 +129,60 @@ async function main(){
       await until(async()=>{const s=(await snapshot()).sessions.find((s:any)=>s.id===created.id);if(s.error)throw new Error(s.error);return s.status==='idle'&&s.messages.some((m:any)=>m.text==='WF_REPLY_WF_TASK_B_UI');});
       await page.screenshot({path:path.join(root,'workflow-ui.png')});assert.equal((await service.ensure()).pid,bridge.pid);console.log('Existing User UI passed: Beta switch, disabled option, new-session binding, native-open entry and sending.');
     }
-    const result={passed:true,root,backendStarts:starts,nativeThreadCount:3,maxConcurrent,requests:requests.length,externalModelRequests:0,ui:process.argv.includes('--ui'),cases:['lazy creation','single shared manager','independent native thread IDs','parallel model requests','no cross-thread messages','closing one does not close others','native peer receives shared context','closing Workbench preserves native turn','resume after restart','UI entry and Beta gating']};
+    const extendedCases:string[]=[];
+    if(process.argv.includes('--extended')){
+      await application?.close();application=undefined;
+      await wb.close();wb=new Workbench(userData,()=>{},console.log,undefined,environment,undefined,service);await wb.store.init();await wb.configureWorkspace(profile,'123','',async()=>false);
+      const a=wb.store.sessions.find(s=>s.id===sessions[2].id)!,id=a.nativeId!;
+      halfHold=true;release=undefined;
+      await peer!.request('turn/start',{threadId:id,input:[{type:'text',text:'WF_TASK_A_MIDJOIN'}]});await until(()=>!!release);
+      await wb.reconnectCodexDesktop(a.id);assert(a.desktopSyncPending||a.messages.some(m=>m.text.includes('WF_REPLY_WF_TASK')));
+      halfHold=false;release!();release=undefined;await until(()=>a.status==='idle'&&a.messages.some(m=>m.text==='WF_REPLY_WF_TASK_A_MIDJOIN'));
+      assert.equal(a.messages.filter(m=>m.text==='WF_REPLY_WF_TASK_A_MIDJOIN').length,1);extendedCases.push('mid-turn hydration with authoritative completion');
+      const managerDirectory=path.dirname(JSON.parse(await fs.readFile(path.join(service.parent,'active.json'),'utf8')).file);
+      assert.equal(bridge.sourceHome,personal);
+      await fs.writeFile(path.join(managerDirectory,'bridge.json'), JSON.stringify({...bridge,expiresAt:new Date(0).toISOString()}));
+      assert.equal((await service.ensure(environment())).pid,bridge.pid); extendedCases.push('real broker lease renewal without ending a task');
+      hold=true;release=undefined;
+      await peer!.request('turn/start',{threadId:id,input:[{type:'text',text:'WF_TASK_C_RECOVERLIVE'}]});await until(()=>!!release&&a.status==='running');
+      const originalBackend=JSON.parse(await fs.readFile(path.join(managerDirectory,'backend.json'),'utf8'));
+      const before=requests.length;process.kill(bridge.pid,'SIGKILL');await until(()=>processAlive(bridge.pid)===false);await peer!.close();
+      await until(()=>a.status==='error');
+      const recovered=await Promise.all([service.ensure(environment()),service.ensure(environment())]);bridge=recovered[0];assert.equal(bridge.endpoint,recovered[1].endpoint);assert.equal(requests.length,before);
+      const adoptedBackend=JSON.parse(await fs.readFile(path.join(managerDirectory,'backend.json'),'utf8'));
+      assert.equal(adoptedBackend.process.pid,originalBackend.process.pid,'surviving model backend must be adopted');
+      await wb.reconnectCodexDesktop(a.id);assert.equal(a.nativeId,id);assert.equal(a.status,'running');assert(a.messages.some(m=>m.text==='WF_REPLY_WF_TASK_A_MIDJOIN'));
+      hold=false;release!();release=undefined;await until(()=>a.status==='idle'&&a.messages.some(m=>m.text==='WF_REPLY_WF_TASK_C_RECOVERLIVE'));assert.equal(requests.length,before);
+      extendedCases.push('hard manager exit during generation, surviving backend adopted once, preserved native identity and no resend');
+      await wb.send(a.id,'WF_TASK_A_RECOVERED');await until(()=>a.status==='idle'&&a.messages.some(m=>m.text==='WF_REPLY_WF_TASK_A_RECOVERED'));
+      assert(requests.at(-1)!.includes('WF_REPLY_WF_TASK_A_MIDJOIN'));
+      const state=JSON.parse(await fs.readFile(path.join(managerDirectory,'backend.json'),'utf8'));
+      if(processAlive(state.process.pid)===true)process.kill(state.process.pid,'SIGKILL');await until(()=>processAlive(state.process.pid)===false);
+      await until(()=>processAlive(bridge.pid)===false&&a.status==='error');
+      const priorEndpoint=bridge.endpoint;bridge=await service.ensure(environment());assert.equal(bridge.endpoint,priorEndpoint);
+      await wb.reconnectCodexDesktop(a.id);assert.equal(a.nativeId,id);assert(a.messages.some(m=>m.text==='WF_REPLY_WF_TASK_A_RECOVERED'));extendedCases.push('manager and model backend exit, recovered persisted conversation');
+      const originalFile=a.nativePath!,original=await fs.readFile(originalFile,'utf8');
+      const copy={...a,id:randomUUID(),messages:[],approvals:[],nativeLive:true,codexDesktop:false,codexStorage:undefined,status:'idle' as const};
+      const storage=await prepareCodexStorage(path.join(root,'independent'),copy,personal);
+      const runtime=new AgentRuntime(copy,executable,{changed:()=>{},event:()=>{},done:()=>{}},storage,environment());
+      try{await runtime.ensureStarted();assert.notEqual(copy.nativeId,id);assert.equal(copy.nativeSourceId,id);assert.equal(requests.length,before+1);await runtime.prompt('WF_TASK_A_COPY');await until(()=>copy.status==='idle');assert.equal(await fs.readFile(originalFile,'utf8'),original);}
+      finally{await runtime.close();}
+      extendedCases.push('ordinary continuation forks privately without changing the personal rollout');
+      peer = new WebSocketRpc(bridge.endpoint); await peer.request('initialize', { clientInfo: { name: 'native_approval_fixture', version: '1' }, capabilities: { experimentalApi: true } }); peer.notify('initialized');
+      await peer.request('thread/resume', { threadId: id });
+      const nativeApprovals: any[] = [];
+      peer.on('message', (message: any) => { if (message.id !== undefined && message.method?.includes('requestApproval')) nativeApprovals.push(message); });
+      await wb.changePermissions(a.id, 'review');
+      await wb.send(a.id, 'WF_TASK_C_APPROVALWB'); await until(() => a.approvals.length > 0 || a.status === 'idle');
+      assert.equal(a.approvals.length, 1, 'real CLI must request approval at the initiating Workbench'); assert.equal(nativeApprovals.length, 0);
+      const denial = a.approvals[0].options.find(option => option.kind === 'deny')!;
+      assert(denial); await wb.answer(a.id, a.approvals[0].id, denial.id, {}); await until(() => a.status === 'idle');
+      await peer.request('turn/start', { threadId: id, input: [{ type: 'text', text: 'WF_TASK_C_APPROVALNATIVE' }] });
+      await until(() => nativeApprovals.length === 1); assert.equal(a.approvals.length, 0); assert.equal(a.desktopWaitingApproval, true);
+      peer.respond(nativeApprovals[0].id, { decision: nativeApprovals[0].params.availableDecisions?.includes('cancel') ? 'cancel' : 'decline' }); await until(() => a.status === 'idle'); assert.equal(a.desktopWaitingApproval, false);
+      extendedCases.push('real CLI approvals route only to the initiating client and observers never reject');
+    }
+    const result={passed:true,root,backendStarts:starts,nativeThreadCount:3,maxConcurrent,requests:requests.length,externalModelRequests:0,ui:process.argv.includes('--ui'),cases:['lazy creation','single shared manager','independent native thread IDs','parallel model requests','no cross-thread messages','closing one does not close others','native peer receives shared context','closing Workbench preserves native turn','resume after restart',...(process.argv.includes('--ui')?['UI entry and Beta gating']:[]),...extendedCases]};
     await fs.writeFile(path.join(root,'result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result,null,2));
   }finally{
     release?.();await application?.close();await wb.close();admin.disconnect();await peer?.close();
