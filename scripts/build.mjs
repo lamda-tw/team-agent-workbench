@@ -21,12 +21,16 @@ for (const edition of ['user', 'admin']) {
   const files = Object.fromEntries([...preload.outputFiles, ...renderer.outputFiles].map(file => [path.basename(file.path), file.contents]));
   files['index.html'] = await readFile('src/renderer/index.html');
   if (edition === 'user') files['project-journal-worker.cjs'] = await readFile('src/core/project-journal-worker.cjs');
+  if (edition === 'user') {
+    const worker=await build({entryPoints:['src/core/codex-desktop-worker.ts'],outfile:out+'/codex-desktop-worker.cjs',write:false,bundle:true,platform:'node',format:'cjs',target:'node22'});
+    files['codex-desktop-worker.cjs']=worker.outputFiles[0].contents;
+  }
   if (edition === 'admin') {
     const worker = await build({ entryPoints: ['src/admin/egress-worker.ts'], outfile: out + '/egress-worker.cjs', write: false, bundle: true, platform: 'node', format: 'cjs', target: 'node22' });
     files['egress-worker.cjs'] = worker.outputFiles[0].contents;
   }
   const assets = await publishRuntimeAssets(out, files);
-  const main = await build({ entryPoints: [edition === 'user' ? 'src/main/index.ts' : 'src/admin/main.ts'], outfile: out + '/main.cjs', write: false, bundle: true, platform: 'node', format: 'cjs', target: 'node22', external: ['electron', 'ssh2'], sourcemap: false, define: { __WORKBENCH_ASSETS__: JSON.stringify(assets) } });
+  const main = await build({ entryPoints: [edition === 'user' ? 'src/main/index.ts' : 'src/admin/main.ts'], outfile: out + '/main.cjs', write: false, bundle: true, platform: 'node', format: 'cjs', target: 'node22', external: ['electron', 'ssh2', 'original-fs'], sourcemap: false, define: { __WORKBENCH_ASSETS__: JSON.stringify(assets) } });
   if (edition === 'admin') { await copyFile('server/acl_support.py', out + '/acl_support.py'); await copyFile('server/group_ops.py', out + '/group_ops.py'); await copyFile('server/admin.py', out + '/admin.py'); await copyFile('server/content.py', out + '/content.py'); }
   await copyDependency('ssh2', out);
   await writeFile(out + '/package.json', JSON.stringify({ name: 'team-agent-' + edition, version, description: 'Team Agent ' + edition, author: 'Team Agent Workbench', main: 'main.cjs', dependencies: { ssh2: '^1.17.0' } }, null, 2));

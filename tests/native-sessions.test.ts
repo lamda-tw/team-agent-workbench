@@ -409,7 +409,11 @@ test('publishing a workbench session registers it in the desktop Codex and Curso
     session.title = '继续修复用户端问题';
     session.messages.push({ id: 'm1', role: 'user', text: '你好', createdAt: new Date().toISOString() });
     await wb.store.save();
+    let closedPrivateRuntime = false;
+    (wb as any).runtimes.set(session.id, { session, close: async () => { closedPrivateRuntime = true; } });
     const published = await wb.publishToDesktop(session.id);
+    assert.equal(closedPrivateRuntime, true, 'publishing must release the private runtime before continuing the desktop record');
+    assert.equal((wb as any).runtimes.has(session.id), false);
     assert.equal(published.nativeLive, true);
     assert.equal(published.codexStorage, undefined);
     assert.equal(published.messages.some(message => message.text === '你好'), true);

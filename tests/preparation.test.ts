@@ -28,7 +28,7 @@ test('new summaries use at most three category fields without truncating verific
     assert.equal(contract[category].length, 3);
     assert(contract[category].every((field: string) => contributionCategoryFields[category].includes(field)));
   }
-  const draft = { id: 'concise', binding } as Draft;
+  const draft = { id: 'concise', binding, files: [], sessionId: 's', title: '', body: '', inputDir: '', outputPath: '', createdAt: '' } as Draft;
   applyPreparation(draft, JSON.stringify({ artifacts: [{ category: 'experiment_result', title: 'v29 Q-head 候选', fields: {
     change: '在 v28 上改为 16 个 Q heads，K、V、Linear 不变。',
     result: '静态编译通过；无 PyTorch，尚未运行 self_check，未证明精度和耗时收益。',
@@ -84,7 +84,7 @@ test('semantic content merge preserves consensus, conflicts, evidence and source
 });
 
 test('structured results classify independent artifacts, keep only category fields and use fixed paths', () => {
-  const d = { id: 'draft', binding, body: '', supplement: '人补充的说明', repoUrlOverride: 'https://github.com/human/repo', preparationVersion: 3 } as Draft;
+  const d = { id: 'draft', binding, files: [], sessionId: 's', title: '', inputDir: '', outputPath: '', createdAt: '', body: '', supplement: '人补充的说明', repoUrlOverride: 'https://github.com/human/repo', preparationVersion: 3 } as Draft;
   applyPreparation(d, '```json\n' + JSON.stringify({ artifacts: [
     { category: 'experiment_result', title: '阈值实验', fields: { objective: '验证阈值', result: 'F1 提升 1.2', unknown: '不得保留' }, repoUrl: 'https://github.com/owner/repo' },
     { category: 'baseline_change_proposal', title: '调整验收阈值', fields: { baselineItem: 'F1 下限', proposedValue: '0.91', rationale: '新数据分布' } }
@@ -98,7 +98,7 @@ test('structured results classify independent artifacts, keep only category fiel
 });
 
 test('structured results reject categories that the user did not request', () => {
-  const d = { id: 'selected-categories', binding, body: '', preparationVersion: 3, requestedCategories: ['finding'] } as Draft;
+  const d = { id: 'selected-categories', binding, files: [], sessionId: 's', title: '', inputDir: '', outputPath: '', createdAt: '', body: '', preparationVersion: 3, requestedCategories: ['finding'] } as Draft;
   applyPreparation(d, JSON.stringify({ artifacts: [{ category: 'finding', title: '覆盖率结论', fields: { statement: '覆盖率需要补齐。' } }] }));
   assert.equal(d.artifacts?.[0].category, 'finding');
   assert.throws(() => applyPreparation(d, JSON.stringify({ artifacts: [{ category: 'issue', title: '额外风险', fields: { problem: '不应生成' } }] })), /未选择的“问题与风险”/);

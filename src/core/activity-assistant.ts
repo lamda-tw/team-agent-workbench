@@ -87,7 +87,7 @@ export class ActivityAssistant {
     for (const s of sessions) if (s.networkRoute === 'management' && s.handoffState?.error) this.summaryRetries.add(s.id);
     this.wake();
   }
-  private sessions() { return this.host.store.sessions.filter(s => s.purpose === 'work' && !s.closedAt && s.binding && this.host.owns(s)); }
+  private sessions() { return this.host.store.sessions.filter(s => s.purpose === 'work' && !s.cursorNative && !s.closedAt && s.binding && this.host.owns(s)); }
   private active(s: AgentSession) { return [...this.projects.values()].includes(s.binding!.project.id); }
   observe(projectId: string, owner: string, events: ContentUpdate[]) {
     if (![...this.projects.values()].includes(projectId)) return;

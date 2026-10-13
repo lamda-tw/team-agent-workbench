@@ -4,6 +4,7 @@ import type { AgentCapabilityCatalog, AgentCapabilityKind, AgentCapabilityOption
 import { CodexComposerTools, type ComposerToolProps } from './composer-codex-tools';
 
 export function ComposerCapabilities(props: ComposerToolProps) {
+  if (props.session.cursorNative) return <button className="composer-setting" onClick={props.attach} title="添加工作台参考文件">添加参考文件</button>;
   return props.session.provider === 'claude' ? <LegacyComposerCapabilities {...props}/> : <CodexComposerTools {...props}/>;
 }
 function LegacyComposerCapabilities({ session, selected, change }: { session: AgentSession; selected: AgentCapabilitySelection[]; change: (items: AgentCapabilitySelection[]) => void }) {

@@ -19,6 +19,10 @@
     "test:workflow-ui": "node scripts/workflow-state-smoke.mjs",
     "test:permissions-ui": "node scripts/permissions-smoke.mjs",
     "test:codex-isolation": "tsx scripts/codex-isolation-smoke.ts",
+    "test:codex-desktop-sync": "tsx scripts/codex-desktop-sync-smoke.ts",
+    "test:codex-desktop-beta": "tsx scripts/codex-desktop-beta-smoke.ts",
+    "test:cursor-native-ui": "tsx scripts/cursor-native-ui-smoke.ts",
+    "test:codex-workflow": "tsx scripts/codex-workflow-smoke.ts --ui",
     "test:composer-ui": "node scripts/composer-smoke.mjs",
     "test:composer-tools-ui": "node scripts/composer-tools-smoke.mjs",
     "test:native-sessions-ui": "node scripts/native-session-import-smoke.mjs",
@@ -39,6 +43,7 @@
     "test:competition": "tsx scripts/competition-pilot.ts",
     "test:collaboration-ui": "tsx scripts/collaboration-smoke.ts",
     "test:activity-ui": "tsx scripts/activity-results-smoke.ts",
+    "test:result-sessions-ui": "node scripts/result-session-selection-smoke.mjs",
     "test:assignments-files-ui": "tsx scripts/assignments-files-smoke.ts",
     "test:server": "python -m unittest discover -s tests -p test_*.py",
     "test:preparation-permissions-ui": "node scripts/preparation-permissions-smoke.mjs",
@@ -59,6 +64,7 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@electron/asar": "3.4.1",
     "@playwright/test": "^1.63.0",
     "@types/archiver": "^8.0.0",
     "@types/node": "^26.5.1",

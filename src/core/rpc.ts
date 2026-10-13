@@ -4,6 +4,13 @@ import readline from 'node:readline';
 import fs from 'node:fs';
 import path from 'node:path';
 export type RpcMessage = { id?: number | string; method?: string; params?: any; result?: any; error?: { code: number; message: string; data?: unknown } };
+export interface AgentRpc extends EventEmitter {
+  request(method: string, params?: unknown, timeout?: number, onWritten?: () => void): Promise<any>;
+  notify(method: string, params?: unknown): void;
+  respond(id: number | string, result: unknown): void;
+  reject(id: number | string, message?: string): void;
+  close(): Promise<void>;
+}
 const stopping = new WeakMap<ChildProcessWithoutNullStreams, Promise<void>>();
 export function stopCLI(child: ChildProcessWithoutNullStreams): Promise<void> {
   const pending = stopping.get(child); if (pending) return pending;

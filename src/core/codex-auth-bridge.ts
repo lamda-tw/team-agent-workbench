@@ -1,4 +1,4 @@
-import { JsonRpc } from './rpc';
+import { JsonRpc, type AgentRpc } from './rpc';
 
 type Credential = { type: 'apiKey'; apiKey: string } | { type: 'chatgptAuthTokens'; accessToken: string; chatgptAccountId: string; chatgptPlanType?: string };
 
@@ -29,7 +29,7 @@ export class CodexAuthBridge {
     this.accountId = claims.chatgpt_account_id;
     return { type: 'chatgptAuthTokens', accessToken: auth.authToken, chatgptAccountId: this.accountId!, ...(typeof claims.chatgpt_plan_type === 'string' ? { chatgptPlanType: claims.chatgpt_plan_type } : {}) };
   }
-  async login(runtime: JsonRpc) {
+  async login(runtime: AgentRpc) {
     try { const credential = await this.credential(); if (credential) await runtime.request('account/login/start', credential, 15000); }
     catch { throw new Error('无法沿用个人 Codex 登录，请检查登录状态和网络后重试'); }
   }
@@ -38,7 +38,7 @@ export class CodexAuthBridge {
     if (!this.source || this.closed) throw new Error('个人 Codex 配置连接已关闭');
     return this.source.request(method, params, 20000);
   }
-  async refresh(runtime: JsonRpc, requestId: string | number) {
+  async refresh(runtime: AgentRpc, requestId: string | number) {
     try {
       const credential = await this.credential();
       if (credential?.type !== 'chatgptAuthTokens') throw new Error('No ChatGPT credential');

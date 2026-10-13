@@ -5,7 +5,15 @@ import { permissionEffects, permissionLabels, sessionPermissionDescription, sess
 
 type Choice = { kind: 'model' | 'permission'; value: string };
 
-export function ComposerSettings({ session, networkEnabled, openConnection, authCheckedAt }: { session: AgentSession; networkEnabled?: boolean; openConnection?: () => void; authCheckedAt?: string }) {
+type ComposerSettingsProps = { session: AgentSession; networkEnabled?: boolean; openConnection?: () => void; authCheckedAt?: string };
+export function ComposerSettings(props: ComposerSettingsProps) {
+  return props.session.cursorNative ? <CursorNativeSettings session={props.session}/> : <CliComposerSettings {...props}/>;
+}
+function CursorNativeSettings({ session }: { session: AgentSession }) {
+  const [error, setError] = useState('');
+  return <><button className="composer-setting" title="模型、模式、权限和工具在 Cursor 原生窗口内设置" onClick={() => { setError(''); void window.workbench.call('session.cursorNative.focus', { id: session.id }).catch(e => setError(e.message)); }}>在 Cursor 中设置 · Beta<ExternalLink size={12}/></button>{error && <span className="inline-error" role="alert">{error}</span>}</>;
+}
+function CliComposerSettings({ session, networkEnabled, openConnection, authCheckedAt }: ComposerSettingsProps) {
   networkEnabled = session.networkRoute ? session.networkRoute === 'management' : networkEnabled;
   const [open, setOpen] = useState<Choice['kind']>(), [catalog, setCatalog] = useState<ProviderCatalog>(), [report, setReport] = useState<PermissionReport>();
   const [loading, setLoading] = useState(false), [saving, setSaving] = useState(false), [error, setError] = useState('');

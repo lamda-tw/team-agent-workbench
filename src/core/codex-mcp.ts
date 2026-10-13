@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { z } from 'zod';
 import type { McpCatalog, McpMutation, McpServerInput, McpServerView } from '../shared/mcp';
-import type { JsonRpc } from './rpc';
+import type { AgentRpc } from './rpc';
 import type { CodexStorage } from './codex-storage';
 
 export const mcpServerInputSchema = z.object({
@@ -23,7 +23,7 @@ const mutations = new Map<string, Promise<unknown>>();
 // Never expose full config, endpoints, headers, environment values or OAuth URLs in snapshots.
 export class CodexMcp {
   private logins = new Map<string, { expires: number; error?: string }>();
-  constructor(private rpc: JsonRpc, private storage: CodexStorage, private sourceRequest: ConfigRequest,
+  constructor(private rpc: AgentRpc, private storage: CodexStorage, private sourceRequest: ConfigRequest,
     private threadId: () => string | undefined) {}
 
   async list(): Promise<McpCatalog> {

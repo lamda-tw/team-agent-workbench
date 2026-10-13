@@ -14,6 +14,7 @@ import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 import { serverIdentityKey } from '../shared/server-identity';
 import { Workbench } from '../core/workbench';
+import { CodexDesktopService } from '../core/codex-desktop-service';
 import { mcpServerInputSchema } from '../core/codex-mcp';
 import { SharedFiles } from '../core/shared-files';
 import { atomicJson } from '../core/store';
@@ -100,7 +101,7 @@ async function dispatch(action: string, raw: unknown, owner: BrowserWindow): Pro
       await atomicJson(windowStateFile(context.slot), { profile: workbench.store.settings.workspaceSnapshot?.profile, sidebarProjectHeight: context.sidebarProjectHeight, sidebarPanes: context.sidebarPanes });
       return true;
     }
-    case 'beta.set': { const p = z.object({ feature: z.enum(['sessionHandoff', 'subsessions']), enabled: z.boolean() }).parse(raw); return workbench.setBetaFeature(p.feature, p.enabled); }
+    case 'beta.set': { const p = z.object({ feature: z.enum(['sessionHandoff', 'subsessions', 'codexDesktopSync']), enabled: z.boolean() }).parse(raw); return workbench.setBetaFeature(p.feature, p.enabled); }
     case 'providers.detect': return workbench.detect();
     case 'account.sync': await workbench.accountSync.sync(); return workbench.accountSync.state;
     case 'account.sync.resolve': { const p = z.object({ key: z.string(), choice: z.enum(['local', 'remote']) }).parse(raw); await workbench.accountSync.resolve(p.key, p.choice); return workbench.accountSync.state; }
@@ -171,11 +172,13 @@ async function dispatch(action: string, raw: unknown, owner: BrowserWindow): Pro
       await workbench.queue.enqueueDownload(binding, p.path, result.filePath); notice('文件已加入下载队列，可在传输记录查看结果'); return true;
     }
     case 'remote.upload': { const p = z.object({ projectId: z.string(), folder: text }).parse(raw); const binding = workbench.remote.binding(p.projectId); const files = await chooseFiles(owner); await workbench.uploadFiles(binding, p.folder, files); return files.length; }
-    case 'session.create': { const p = z.object({ provider, cwd: text, projectId: z.string().optional(), model: z.string().min(1).max(256).regex(/^[^\x00-\x1f]+$/).optional(), permissionMode: z.enum(['inherit', 'review', 'auto', 'full']).optional(), includeBrief: z.boolean().default(true), networkRoute: z.enum(['direct', 'management']).optional() }).parse(raw); if ((p.networkRoute || (workbench.store.settings.egress?.enabled ? 'management' : 'direct')) === 'management') await workbench.requireAuth(p.provider, p.cwd.trim() || await workbench.researchWorkspace(), 'management'); return workbench.createSession(p.provider, p.cwd, p.projectId, 'work', undefined, p.model, p.permissionMode, p.includeBrief, p.networkRoute); }
+    case 'session.create': { const p = z.object({ provider, cwd: text, projectId: z.string().optional(), model: z.string().min(1).max(256).regex(/^[^\x00-\x1f]+$/).optional(), permissionMode: z.enum(['inherit', 'review', 'auto', 'full']).optional(), includeBrief: z.boolean().default(true), networkRoute: z.enum(['direct', 'management']).optional(), desktopSync: z.boolean().default(false) }).parse(raw); if ((p.networkRoute || (workbench.store.settings.egress?.enabled ? 'management' : 'direct')) === 'management') await workbench.requireAuth(p.provider, p.cwd.trim() || await workbench.researchWorkspace(), 'management'); return workbench.createSession(p.provider, p.cwd, p.projectId, 'work', undefined, p.model, p.permissionMode, p.includeBrief, p.networkRoute, p.desktopSync); }
     case 'session.native.list': return workbench.listNativeSessions(z.object({ provider: z.enum(['codex', 'cursor']) }).parse(raw).provider);
     case 'session.native.link': { const p = z.object({ provider: z.enum(['codex', 'cursor']), nativeId: z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i), projectId: z.string().min(1) }).parse(raw); return workbench.linkNativeSession(p.provider, p.nativeId, p.projectId); }
     case 'session.native.linkMany': { const p = z.object({ provider: z.enum(['codex', 'cursor']), nativeIds: z.array(z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)).min(1).max(50), projectId: z.string().min(1) }).parse(raw); return workbench.linkNativeSessions(p.provider, p.nativeIds, p.projectId); }
     case 'session.native.refresh': return workbench.refreshNativeTranscript(sessionInput.parse(raw).id);
+    case 'session.codexDesktop.open': return workbench.openCodexDesktop(sessionInput.parse(raw).id);
+    case 'session.cursorNative.focus': return workbench.focusCursorNative(sessionInput.parse(raw).id);
     case 'session.native.publish': return workbench.publishToDesktop(sessionInput.parse(raw).id);
     case 'subsession.create': { const p = z.object({ parentId: id, focus: z.string().trim().min(1).max(120) }).parse(raw); return workbench.forkSubsession(p.parentId, p.focus); }
     case 'subsession.report.preview': return workbench.previewSubsessionReport(sessionInput.parse(raw).id);
@@ -215,7 +218,7 @@ async function dispatch(action: string, raw: unknown, owner: BrowserWindow): Pro
       return true;
     }
     case 'assignment.status': { const p = z.object({ projectId: z.string(), change: assignmentStatusSchema }).parse(raw); return workbench.updateAssignment(p.projectId, p.change); }
-    case 'assignment.start': { const p = z.object({ projectId: z.string(), taskId: id, revision: z.number().int().positive(), provider, cwd: text, model: z.string().min(1).max(256).optional(), permissionMode: z.enum(['inherit', 'review', 'auto', 'full']).optional(), includeBrief: z.boolean().default(true), networkRoute: z.enum(['direct', 'management']).optional() }).parse(raw); if ((p.networkRoute || (workbench.store.settings.egress?.enabled ? 'management' : 'direct')) === 'management') await workbench.requireAuth(p.provider, p.cwd.trim() || await workbench.researchWorkspace(), 'management'); return workbench.startAssignment(p.projectId, p.taskId, p.revision, p.provider, p.cwd, p.model, p.permissionMode, p.includeBrief, p.networkRoute); }
+    case 'assignment.start': { const p = z.object({ projectId: z.string(), taskId: id, revision: z.number().int().positive(), provider, cwd: text, model: z.string().min(1).max(256).optional(), permissionMode: z.enum(['inherit', 'review', 'auto', 'full']).optional(), includeBrief: z.boolean().default(true), networkRoute: z.enum(['direct', 'management']).optional(), desktopSync: z.boolean().default(false) }).parse(raw); if ((p.networkRoute || (workbench.store.settings.egress?.enabled ? 'management' : 'direct')) === 'management') await workbench.requireAuth(p.provider, p.cwd.trim() || await workbench.researchWorkspace(), 'management'); return workbench.startAssignment(p.projectId, p.taskId, p.revision, p.provider, p.cwd, p.model, p.permissionMode, p.includeBrief, p.networkRoute, p.desktopSync); }
     case 'conclusion.match': { const p = z.object({ projectId: z.string(), query: text.min(1) }).parse(raw); return workbench.matchConclusions(p.projectId, p.query); }
     case 'conclusion.create': { const p = z.object({ projectId: z.string(), title: z.string().trim().min(1).max(200), content: text.min(1), category: contributionCategorySchema.optional(), resultStatus: resultStatusSchema.optional(), resultOwner: z.string().max(160).optional(), fileIds: z.array(id).max(30).optional() }).parse(raw); return workbench.createConclusion(p.projectId, p.title, p.content, p.category, p.resultStatus, p.resultOwner, p.fileIds); }
     case 'conclusion.files.stage': return workbench.stageConclusionFiles(await chooseFiles(owner));
@@ -262,7 +265,7 @@ async function dispatch(action: string, raw: unknown, owner: BrowserWindow): Pro
     case 'cache.clean': return workbench.cleanUploadCache();
     case 'session.send': {
       const p = z.object({ id, text: text.min(1), sourceIds: z.array(z.string()).default([]), capabilities: z.array(capability).max(20).default([]) }).parse(raw); const s = workbench.session(p.id); workbench.assertCanWork(s.binding);
-      await workbench.requireAuth(s.provider, s.cwd, s.networkRoute);
+      if (!s.cursorNative && !s.codexDesktop) await workbench.requireAuth(s.provider, s.cwd, s.networkRoute);
       if (s.title === '新会话') s.title = p.text.trim().slice(0, 40);
       return new Promise<boolean>((resolve, reject) => {
         let submitted = false;
@@ -509,7 +512,7 @@ async function createDataContext(root: string): Promise<DataContext> {
     if (route === 'management' && !environment.HTTPS_PROXY) throw new Error('该会话的管理端出口未启动，请先恢复管理端连接');
     return environment;
   },
-    (session, value) => { if (session.networkRoute === 'management') egress?.reportCliStatus(session.provider, session.id, value, session.binding?.username || ''); });
+    (session, value) => { if (session.networkRoute === 'management') egress?.reportCliStatus(session.provider, session.id, value, session.binding?.username || ''); },new CodexDesktopService({workerFile:path.join(__dirname,runtimeAssets,'codex-desktop-worker.cjs')}));
   try {
     await workbench.init();
     workbench.store.settings.trustedServerIdentities = serverIdentities.snapshot();

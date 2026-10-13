@@ -5,21 +5,22 @@ import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import type { AgentSession } from '../shared/types';
-import type { JsonRpc } from './rpc';
+import type { AgentRpc } from './rpc';
 import { sameNativePath } from './native-transcript';
+import { readCodexDesktopBridge } from './codex-desktop-bridge';
 
-export interface CodexStorage { home: string; sourceHome: string; args: string[]; env: NodeJS.ProcessEnv; resumePath?: string; }
+export interface CodexStorage { home: string; sourceHome: string; args: string[]; env: NodeJS.ProcessEnv; resumePath?: string; sharedEndpoint?: string; }
 const inside = (root: string, file: string) => { const rel = path.relative(root, file); return !!rel && !path.isAbsolute(rel) && rel !== '..' && !rel.startsWith('..' + path.sep); };
 const jobs = new Map<string, Promise<void>>();
 
-export async function validateCodexStorage(rpc: JsonRpc, storage: CodexStorage) {
+export async function validateCodexStorage(rpc: AgentRpc, storage: CodexStorage) {
   const { requirements } = await rpc.request('configRequirements/read', {}, 15000);
   if (requirements?.sqliteHome) {
     const required = fileURLToPath(requirements.sqliteHome);
     const normalize = (value: string) => process.platform === 'win32' ? path.resolve(value).toLowerCase() : path.resolve(value);
     if (normalize(required) !== normalize(storage.env.CODEX_SQLITE_HOME!)) throw new Error('当前管理策略不允许独立保存工作台会话，请联系管理员调整会话存储设置');
   }
-  if (requirements?.cliAuthCredentialsStore && requirements.cliAuthCredentialsStore !== 'ephemeral') throw new Error('当前管理策略不允许工作台沿用临时登录，请联系管理员调整登录设置');
+  if (!storage.sharedEndpoint && requirements?.cliAuthCredentialsStore && requirements.cliAuthCredentialsStore !== 'ephemeral') throw new Error('当前管理策略不允许工作台沿用临时登录，请联系管理员调整登录设置');
 }
 
 async function copyConfig(source: string, destination: string) {
@@ -91,12 +92,20 @@ async function releaseIsolatedNativeCopy(home: string, id: string, resumePath: s
 }
 
 export async function refreshCodexConfiguration({ home, sourceHome }: Pick<CodexStorage, 'home' | 'sourceHome'>) {
+  if (sameNativePath(home, sourceHome)) return; // Shared backend already reads the personal configuration.
   const previous = jobs.get(home) || Promise.resolve();
   const job = previous.catch(() => {}).then(() => initialize(home, sourceHome)); jobs.set(home, job);
   try { await job; } finally { if (jobs.get(home) === job) jobs.delete(home); }
 }
 
 export async function prepareCodexStorage(root: string, session: AgentSession, sourceHome = path.resolve(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'))): Promise<CodexStorage> {
+  if (session.nativeLive && session.purpose === 'work' && process.env.WORKBENCH_CODEX_DESKTOP_BRIDGE) {
+    if (session.networkRoute === 'management') throw new Error('同步 Beta 使用桌面版的网络连接；通过管理端访问的会话请用普通入口');
+    const bridge = (await readCodexDesktopBridge(sourceHome))!;
+    const resumePath = session.nativeId && await findCodexRollout(sourceHome, session.nativeId);
+    if (!resumePath) throw new Error('找不到原 Codex 会话记录，无法关联共享后台');
+    return { home: sourceHome, sourceHome, args: [], env: { CODEX_HOME: sourceHome, CODEX_SQLITE_HOME: sourceHome }, resumePath, sharedEndpoint: bridge.endpoint };
+  }
   const home = path.resolve(root, 'codex-home');
   await refreshCodexConfiguration({ home, sourceHome });
   let resumePath: string | undefined;

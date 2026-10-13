@@ -29,7 +29,7 @@ export function sessionContext(s: AgentSession, userText: string, sourceIds: str
   });
   const sources = uniqueSources(selected).filter(f => known[f.id] !== f.sha256);
   const managed = s.messages.some(m => m.context?.accepted && m.context.nativeId === s.nativeId && m.text.includes(managedHandoffNotice));
-  const workRecord = s.purpose === 'work' && (!hasWorkRecord || !managed);
+  const workRecord = s.purpose === 'work' && !s.cursorNative && (!hasWorkRecord || !managed);
   const text = userText + (workRecord ? workRecordInstructions(s) : '') + (sources.length ? sourceHeader + sources.map(sourceText).join('\n\n') : '') + (journal?.text || '');
   const context: Omit<MessageContext, 'nativeId' | 'accepted'> = { workRecord, sourceHashes: Object.fromEntries(sources.map(f => [f.id, f.sha256])), ...(journal ? { projectJournal: journal.receipt } : {}) };
   return { text, sources, context };

@@ -1,0 +1,116 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import os from 'node:os';
+import http from 'node:http';
+import { randomUUID } from 'node:crypto';
+import { CodexDesktopService, validateManagedBridge } from '../src/core/codex-desktop-service';
+import { Workbench } from '../src/core/workbench';
+import { Store } from '../src/core/store';
+import type { AgentSession } from '../src/shared/types';
+import { accountIdentity } from '../src/shared/account-data';
+import { grantTestWorkspace, offlineProjectId } from './fixtures/offline-workspace';
+import { hasNoLoadedThreads } from '../src/core/codex-desktop-worker';
+
+async function fixture() {
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'wb-codex-service-')),sourceHome=path.join(root,'personal'),parent=path.join(root,'managers');
+  await fs.mkdir(sourceHome,{recursive:true});
+  let healthy=true,starts=0,discovered=0,desktopOpens=0,inputText='',desktopArgs:string[]=[],desktopEnv:NodeJS.ProcessEnv={};
+  const route='/rpc/'+'a'.repeat(64);
+  const server=http.createServer((req,res)=>{res.writeHead(healthy&&req.url===route+'/readyz'?200:503);res.end();});
+  await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const endpoint='ws://127.0.0.1:'+(server.address() as any).port+route;
+  const options={sourceHome,parent,running:async()=>false,discover:async()=>{discovered++;return{app:'fake-desktop.exe',executable:'fake-native.exe'};},privateDirectory:async(root:string)=>{await fs.mkdir(root,{recursive:true});return fs.mkdtemp(path.join(root,'run-'));},launchWorker:async(file:string,_env:NodeJS.ProcessEnv)=>{
+    starts++;inputText=await fs.readFile(file,'utf8');const input=JSON.parse(inputText);
+    await new Promise(resolve=>setTimeout(resolve,30));
+    await fs.writeFile(path.join(input.stateDirectory,'bridge.json'),JSON.stringify({version:1,endpoint,sourceHome,executable:'fake-native.exe',pid:process.pid,expiresAt:new Date(Date.now()+60000).toISOString()}));
+  },launchDesktop:async(_target:any,args:string[],env:NodeJS.ProcessEnv)=>{desktopOpens++;desktopArgs=args;desktopEnv=env;}};
+  return {root,sourceHome,parent,endpoint,options,counts:()=>({starts,discovered,desktopOpens,inputText,desktopArgs,desktopEnv}),fail:()=>{healthy=false;},async close(){server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));await fs.rm(root,{recursive:true,force:true});}};
+}
+test('ordinary startup and session creation are lazy; Beta is independent, persisted, and account scoped',async()=>{
+  const f=await fixture(),service=new CodexDesktopService(f.options),wb=new Workbench(path.join(f.root,'data'),()=>{},()=>{},undefined,undefined,undefined,service);
+  try{
+    await wb.store.init();grantTestWorkspace(wb,f.root);
+    assert.equal(wb.betaFeatureEnabled('codexDesktopSync'),false);
+    await assert.rejects(wb.createSession('codex',f.root,offlineProjectId,'work',undefined,undefined,'inherit',false,'direct',true),/Beta/);
+    await wb.setBetaFeature('codexDesktopSync',true);assert.equal(wb.betaFeatureEnabled('sessionHandoff'),false);assert.equal(wb.betaFeatureEnabled('subsessions'),false);
+    const a=await wb.createSession('codex',f.root,offlineProjectId,'work',undefined,undefined,'inherit',false,'direct',true);
+    const b=await wb.createSession('codex',f.root,offlineProjectId,'work',undefined,undefined,'inherit',false,'direct',true);
+    assert(a.codexDesktop&&b.codexDesktop);assert.equal(a.nativeId,undefined);assert.equal(f.counts().starts,0);assert.equal(f.counts().desktopOpens,0);
+    await wb.setBetaFeature('sessionHandoff',true);await wb.setBetaFeature('subsessions',true);assert.equal(wb.betaFeatureEnabled('codexDesktopSync'),true);
+    const profile=wb.store.settings.workspaceSnapshot!.profile;const owner=accountIdentity(profile);wb.store.settings.workspaceSnapshot!.profile={...profile,username:'bob'};
+    assert.equal(wb.betaFeatureEnabled('codexDesktopSync'),false);wb.store.settings.workspaceSnapshot!.profile=profile;
+    await wb.setBetaFeature('codexDesktopSync',false);assert.equal(a.codexDesktop,true);assert.equal(wb.betaFeatureEnabled('sessionHandoff'),true);assert.equal(wb.betaFeatureEnabled('subsessions'),true);
+    await wb.store.save();const copy=new Store(wb.store.root);await copy.init();assert.equal(copy.sessions.find(s=>s.id===a.id)!.codexDesktop,true);assert.equal(copy.settings.betaFeatures![owner].codexDesktopSync,false);
+    await assert.rejects(wb.changeNetworkRoute(a.id,'management'),/本机网络/);
+  }finally{await wb.close();assert.equal(f.counts().starts,0);await f.close();}
+});
+test('concurrent windows and sessions share exactly one lazy backend; reconnect reuses it without opening a desktop',async()=>{
+  const f=await fixture(),first=new CodexDesktopService(f.options),second=new CodexDesktopService(f.options);
+  try{
+    const a={provider:'codex',purpose:'work',codexDesktop:true,networkRoute:'direct',cwd:f.root} as AgentSession;
+    const [s1,s2]=await Promise.all([first.storage(a,'ignored',{HTTPS_PROXY:'TEST_ONLY_SECRET'}),second.storage(a,'ignored',{})]);
+    assert.equal(s1.sharedEndpoint,s2.sharedEndpoint);assert.equal(s1.home,f.sourceHome);assert.equal(f.counts().starts,1);assert.equal(f.counts().discovered,1);assert.equal(f.counts().desktopOpens,0);assert(!f.counts().inputText.includes('TEST_ONLY_SECRET'));
+    const resumed=new CodexDesktopService(f.options);assert.equal((await resumed.ensure()).endpoint,f.endpoint);assert.equal(f.counts().starts,1);
+    const nativeId=randomUUID(),file=path.join(f.sourceHome,'sessions','rollout-'+nativeId+'.jsonl');await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,'original');
+    assert.equal((await resumed.storage({...a,nativeId},'ignored',{})).resumePath,file);assert.equal(await fs.readFile(file,'utf8'),'original');
+    await assert.rejects(resumed.storage({...a,nativeId:randomUUID()},'ignored',{}),/不会另建会话/);assert.equal(f.counts().starts,1);
+    f.fail();await assert.rejects(resumed.ensure(),/无法连接/);assert.equal(f.counts().starts,1,'an uncertain backend is never replaced with a second writer');
+  }finally{await f.close();}
+});
+test('native open is explicit, targets its own thread, and does not mutate global settings or credentials',async()=>{
+  const f=await fixture(),service=new CodexDesktopService(f.options),before=process.env.CODEX_APP_SERVER_WS_URL;
+  try{
+    const nativeId=randomUUID();await service.open({provider:'codex',purpose:'work',codexDesktop:true,networkRoute:'direct',nativeId} as AgentSession,'ignored',{});
+    assert.equal(f.counts().starts,1);assert.equal(f.counts().desktopOpens,1);assert.deepEqual(f.counts().desktopArgs,['codex://threads/'+nativeId]);assert.equal(f.counts().desktopEnv.CODEX_APP_SERVER_WS_URL,f.endpoint);assert.equal(process.env.CODEX_APP_SERVER_WS_URL,before);
+    await assert.rejects(service.storage({provider:'codex',purpose:'work',codexDesktop:true,networkRoute:'management'} as AgentSession,'ignored',{}),/本机网络/);assert.equal(f.counts().starts,1);
+  }finally{await f.close();}
+});
+test('ordinary desktop already running and invalid bridge records fail without closing it or launching another backend',async()=>{
+  const f=await fixture(),service=new CodexDesktopService({...f.options,running:async()=>true});
+  try{
+    await assert.rejects(service.ensure(),/不会自动关闭/);assert.equal(f.counts().starts,0);assert.equal(f.counts().desktopOpens,0);
+    const good={version:1 as const,endpoint:f.endpoint,sourceHome:f.sourceHome,executable:'fake-native.exe',pid:process.pid,expiresAt:new Date(Date.now()+60000).toISOString()};
+    for(const changes of [{endpoint:'ws://example.test/rpc/'+'a'.repeat(64)},{sourceHome:f.root},{expiresAt:new Date(0).toISOString()},{endpoint:f.endpoint+'?token=secret'},{pid:0}])assert.throws(()=>validateManagedBridge({...good,...changes},f.sourceHome));
+    const dir=path.join(f.parent,'run-test');await fs.mkdir(dir,{recursive:true});const file=path.join(dir,'bridge.json');await fs.writeFile(file,JSON.stringify({...good,sourceHome:f.root}));await fs.writeFile(path.join(f.parent,'active.json'),JSON.stringify({file}));
+    await assert.rejects(service.ensure(),/失效/);assert.equal(f.counts().starts,0);
+  }finally{await f.close();}
+});
+test('a desktop started through another route after backend warmup is not silently treated as linked',async()=>{
+  const f=await fixture();let running=false;
+  const service=new CodexDesktopService({...f.options,running:async()=>running});
+  try{
+    await service.ensure();running=true;
+    await assert.rejects(service.open({provider:'codex',codexDesktop:true,networkRoute:'direct',nativeId:randomUUID()} as AgentSession,'ignored',{}),/普通方式运行/);
+    assert.equal(f.counts().starts,1);assert.equal(f.counts().desktopOpens,0);
+  }finally{await f.close();}
+});
+test('idle cleanup conservatively preserves loaded threads and uncertain backend state',async()=>{
+  for(const data of [[randomUUID()],null,undefined])assert.equal(await hasNoLoadedThreads({request:async()=>({data})}),false);
+  assert.equal(await hasNoLoadedThreads({request:async()=>{throw new Error('unknown method');}}),false);
+  assert.equal(await hasNoLoadedThreads({request:async method=>{assert.equal(method,'thread/loaded/list');return{data:[]};}}),true);
+});
+test('opening several linked sessions serializes native launch and preserves the original desktop process identity',async()=>{
+  const f=await fixture();let running=false,launched=0,active=0,maximum=0;
+  const service=new CodexDesktopService({...f.options,running:async()=>running,launchDesktop:async()=>{active++;maximum=Math.max(maximum,active);await new Promise(resolve=>setTimeout(resolve,20));active--;running=true;return ++launched===1?process.pid:99999999;}});
+  try{
+    const session={provider:'codex',codexDesktop:true,networkRoute:'direct',nativeId:randomUUID()} as AgentSession;
+    await Promise.all([service.open(session,'unused',{}),service.open({...session,nativeId:randomUUID()},'unused',{}),service.open({...session,nativeId:randomUUID()},'unused',{})]);
+    assert.equal(maximum,1);assert.equal(launched,3);assert.equal(f.counts().starts,1);
+    const {file}=JSON.parse(await fs.readFile(path.join(f.parent,'active.json'),'utf8'));
+    assert.equal(JSON.parse(await fs.readFile(path.join(path.dirname(file),'desktop.json'),'utf8')).pid,process.pid);
+  }finally{await f.close();}
+});
+test('a worker can publish the registry after its launching UI exits; another window adopts it without a second start',async()=>{
+  const f=await fixture(),service=new CodexDesktopService(f.options);
+  try{
+    const directory=path.join(f.parent,'run-orphan');await fs.mkdir(directory,{recursive:true});
+    const file=path.join(directory,'bridge.json');await fs.writeFile(file,JSON.stringify({version:1,endpoint:f.endpoint,sourceHome:f.sourceHome,executable:'fake-native.exe',pid:process.pid,expiresAt:new Date(Date.now()+60000).toISOString()}));
+    await fs.writeFile(path.join(f.parent,'launch.lock'),JSON.stringify({pid:99999999,nonce:'orphan',at:Date.now()-10000,directory}));
+    const publish=new Promise<void>(resolve=>setTimeout(()=>{void fs.writeFile(path.join(f.parent,'active.json'),JSON.stringify({file,managed:true})).then(resolve);},100));
+    assert.equal((await service.ensure()).endpoint,f.endpoint);await publish;
+    assert.equal(f.counts().starts,0);assert.equal(f.counts().discovered,0);
+    assert.equal(JSON.parse(await fs.readFile(path.join(f.parent,'launch.lock'),'utf8')).nonce,'orphan','unknown worker ownership is not guessed from a dead UI pid');
+  }finally{await f.close();}
+});

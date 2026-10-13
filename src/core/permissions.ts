@@ -3,7 +3,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import type { AgentSession, PermissionIssue, PermissionMode, PermissionReport, Provider } from '../shared/types';
-import { JsonRpc } from './rpc';
+import { JsonRpc, type AgentRpc } from './rpc';
 import { atomicJson } from './store';
 
 const stamp = () => new Date().toISOString();
@@ -106,7 +106,7 @@ export async function inspectPermissions(provider: Provider, executable: string,
     return result;
   } finally { clearTimeout(timer); await rpc.close(); }
 }
-export async function probeCodexCommand(rpc: JsonRpc, report: PermissionReport, cwd: string, sandbox: any) {
+export async function probeCodexCommand(rpc: AgentRpc, report: PermissionReport, cwd: string, sandbox: any) {
   if (!sandbox?.type || sandbox.type === 'externalSandbox') return;
   try {
     const command = process.platform === 'win32' ? ['cmd.exe', '/d', '/c', 'echo WORKBENCH_PERMISSION_OK'] : ['/bin/sh', '-c', 'printf WORKBENCH_PERMISSION_OK'];
