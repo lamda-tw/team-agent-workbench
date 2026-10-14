@@ -192,7 +192,8 @@ test('closed question UI retains link and answers, removes answer and closure ac
   mutate(openItems, 'alice', { kind: 'follow', id: openQuestion.id, followId: randomUUID(), body: '请改成 v3', target: 'bob' });
   const thread = renderToStaticMarkup(React.createElement(QuestionDetail, { question: openQuestion, inbox: { items: openItems, jobs: [], read: {} }, username: 'alice', sessions: [], changed: async () => {}, openSession: () => {} }));
   assert.match(thread, /我/); assert.match(thread, /请改成 v3/); assert.match(thread, /先用 v2/);
-  assert.doesNotMatch(thread, /发给bob|发送给/);
+  assert.match(thread, /team-question-composer[\s\S]*结束提问[\s\S]*自动对话[\s\S]*team-question-send[\s\S]*发送/);
+  assert.doesNotMatch(thread, /发给bob|发送给|<select/);
   const card = renderToStaticMarkup(React.createElement(QuestionCard, { question: q, unread: true, open: () => {} }));
   assert.match(card, /已关闭/); assert.match(card, /有新动态/);
 });
