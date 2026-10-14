@@ -136,6 +136,7 @@ async function dispatch(action: string, raw: unknown, owner: BrowserWindow): Pro
     case 'provider.cursorReview': return workbench.configureCursorReview(z.object({ cwd: text.min(1) }).parse(raw).cwd);
     case 'session.permissions': { const p = z.object({ id, mode: z.enum(['inherit', 'review', 'auto', 'full']), stop: z.boolean().optional() }).parse(raw); return workbench.changePermissions(p.id, p.mode, p.stop); }
     case 'session.model': { const p = z.object({ id, model: z.string().trim().min(1).max(256).regex(/^[^\x00-\x1f\x7f]+$/), stop: z.boolean().optional() }).parse(raw); return workbench.changeModel(p.id, p.model, p.stop); }
+    case 'session.reasoningEffort': { const p = z.object({ id, effort: z.string().regex(/^[A-Za-z0-9_-]{1,32}$/).nullable() }).parse(raw); return workbench.changeReasoningEffort(p.id, p.effort); }
     case 'session.network': { const p = z.object({ id, networkRoute: z.enum(['direct', 'management']) }).parse(raw); return workbench.changeNetworkRoute(p.id, p.networkRoute); }
     case 'choose.directory': return (await dialog.showOpenDialog(owner, { properties: ['openDirectory'] })).filePaths[0] || '';
     case 'choose.executable': return (await dialog.showOpenDialog(owner, { title: '选择 CLI 程序（不是编辑器）', properties: ['openFile'], filters: [{ name: 'CLI', extensions: ['exe', 'cmd', 'ps1'] }] })).filePaths[0] || '';

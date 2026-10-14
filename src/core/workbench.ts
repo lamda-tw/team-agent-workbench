@@ -1193,6 +1193,17 @@ export class Workbench {
     // Cursor applies session/set_model after session/load; Codex and Claude resume with the selected model.
     return this.updateSessionSettings(s, () => { s.model = model; });
   }
+  async changeReasoningEffort(id: string, effort: string | null) {
+    const s = this.session(id);
+    if (s.provider !== 'codex' || s.cursorNative) throw new Error('只有 Codex 会话可以设置思考努力程度');
+    if (s.purpose !== 'work') throw new Error('成果整理使用来源会话的思考努力程度');
+    if (s.closedAt) throw new Error('此会话已关闭，请先重新打开');
+    if (s.status === 'starting') throw new Error('CLI 正在启动，请启动完成后重试');
+    const next = effort === null ? undefined : effort.trim();
+    if (next !== undefined && !/^[A-Za-z0-9_-]{1,32}$/.test(next)) throw new Error('请选择有效的思考努力程度');
+    if ((s.reasoningEffort || undefined) === next) return s;
+    return this.updateSessionSettings(s, () => { if (next) s.reasoningEffort = next; else delete s.reasoningEffort; });
+  }
   async createSession(provider: Provider, cwd: string, projectId?: string, purpose: 'work' | 'prepare' = 'work', parentId?: string, model?: string, permissionMode: PermissionMode = 'inherit', includeBrief = true, networkRoute?: SessionNetworkRoute, desktopSync = false) {
     this.assertWorkspace();
     if (desktopSync && provider === 'cursor') assertCursorSharedSessionAvailable();
