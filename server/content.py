@@ -383,6 +383,117 @@ def assignment_release(root, task, tasks):
         blob.unlink()
 
 
+
+def question_operation(root, state, username, request, project, group_name):
+    # The worker invokes this under the same process-wide flock as account changes.
+    eligible = {name: user for name, user in state['users'].items() if user.get('enabled') and not user.get('missing') and not user.get('provisioning') and group_name in user.get('groups', [])}
+    command = request.get('command')
+    if command == 'members':
+        return [dict(username=name, name=user.get('name') or name) for name, user in eligible.items() if name != username]
+    if not re.fullmatch(r'project_[a-f0-9]{32}', project['id']):
+        raise ValueError('项目身份无效')
+    file = safe(root, '.workbench/admin/questions/' + project['id'] + '.json')
+    items = read_json(file, [])
+    def view(q):
+        result = json.loads(json.dumps(q))
+        if q['author'] == username:
+            return result
+        recipients = [r for r in result['recipients'] if r['username'] == username]
+        if recipients:
+            result['recipients'], result['sessionId'] = recipients, ''
+            result['activityRevision'] = recipients[0]['activityRevision']
+            return result
+    if command is None:
+        return [v for q in items if (v := view(q)) is not None]
+    if not isinstance(command, dict):
+        raise ValueError('问题操作格式无效')
+    def identifier(key):
+        value = command.get(key)
+        if not isinstance(value, str) or not re.fullmatch(r'[a-fA-F0-9]{8}(?:-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}', value):
+            raise ValueError('问题或会话编号无效')
+        return value
+    def field(key, limit, required=True):
+        value = command.get(key, '')
+        if not isinstance(value, str) or len(value) > limit or required and not value.strip():
+            raise ValueError('问题内容为空或过长')
+        return value.strip() if key != 'context' else value
+    kind, qid, stamp = command.get('kind'), identifier('id'), now()
+    q = next((q for q in items if q['id'] == qid), None)
+    if kind == 'create':
+        values = dict(title=field('title', 200), body=field('body', 12000), context=field('context', 24000, False), sessionId=identifier('sessionId'))
+        names = command.get('recipients')
+        if not isinstance(names, list) or not 1 <= len(names) <= 50 or any(not isinstance(name, str) or name not in eligible or name == username for name in names) or len(set(names)) != len(names):
+            raise ValueError('请选择当前用户组的其他有效成员')
+        if q:
+            if q['author'] != username or any(q[key] != value for key, value in values.items()) or names != [r['username'] for r in q['recipients']]:
+                raise ValueError('问题编号已使用')
+            return view(q)
+        q = dict(id=qid, projectId=project['id'], author=username, authorName=eligible[username].get('name') or username, **values,
+                 createdAt=stamp, updatedAt=stamp, revision=1, activityRevision=1, recipientCount=len(names),
+                 recipients=[dict(username=name, name=eligible[name].get('name') or name, state='pending', activityRevision=1, answers=[]) for name in names])
+        items.append(q)
+    else:
+        if not q or view(q) is None:
+            raise PermissionError('问题不存在或无权访问')
+        if kind == 'close':
+            if q['author'] != username:
+                raise PermissionError('只有发问人可以关闭问题')
+            if q.get('closedAt'):
+                return view(q)
+            q['closedAt'] = stamp
+        else:
+            recipient = next((r for r in q['recipients'] if r['username'] == username), None)
+            if not recipient:
+                raise PermissionError('只有指定接收人可以回答')
+            run_id = identifier('runId') if kind in ('run', 'reply', 'fail') else None
+            if kind == 'reply':
+                body = field('body', 48000)
+                previous = next((a for a in recipient['answers'] if a['id'] == run_id), None)
+                if previous:
+                    if previous['body'] != body:
+                        raise ValueError('答复编号已使用')
+                    return view(q)
+            if q.get('closedAt'):
+                raise ValueError('问题已关闭，答案保留在自己的 Session 中，不再回传')
+            if kind == 'link':
+                session_id = identifier('sessionId')
+                if recipient['state'] == 'running':
+                    raise ValueError('此问题正在回答，不能更换关联')
+                if recipient.get('sessionId') == session_id:
+                    return view(q)
+                recipient.update(sessionId=session_id, state='linked')
+            elif kind == 'run':
+                if recipient.get('sessionId') != identifier('sessionId'):
+                    raise ValueError('Session 关联已改变')
+                if recipient.get('runId') == run_id:
+                    return view(q)
+                if recipient['state'] == 'running':
+                    raise ValueError('此问题已在其他窗口回答中')
+                recipient.update(runId=run_id, state='running')
+            elif kind in ('reply', 'fail'):
+                if recipient.get('runId') != run_id:
+                    raise ValueError('答复不属于当前回答轮次')
+                if kind == 'reply':
+                    recipient['answers'].append(dict(id=run_id, body=body, createdAt=stamp))
+                    recipient['state'] = 'replied'
+                elif recipient['state'] == 'running':
+                    recipient['state'] = 'linked'
+                else:
+                    return view(q)
+            else:
+                raise ValueError('不支持的问题操作')
+        q['revision'] += 1
+        if kind in ('reply', 'close'):
+            q['activityRevision'] = q['revision']
+            for recipient in q['recipients']:
+                if kind == 'close' or recipient['username'] == username:
+                    recipient['activityRevision'] = q['revision']
+        q['updatedAt'] = stamp
+    file.parent.mkdir(parents=True, exist_ok=True)
+    os.chmod(file.parent, 0o700)
+    atom(file, items)
+    return view(q)
+
 def assignment_operation(root, state, username, request, directory, project, group_name, admin, incoming=None):
     op = request['op']
     eligible = {name: user for name, user in state['users'].items() if user.get('enabled') and not user.get('missing') and not user.get('provisioning') and group_name in user.get('groups', [])}
@@ -732,6 +843,8 @@ def handle(root, state, username, request, incoming=None):
             finally:
                 temp.unlink(missing_ok=True)
         return dict(path='/' + file.relative_to(root).as_posix(), sha256=sha, size=file.stat().st_size)
+    if op == 'question':
+        return question_operation(root, state, username, request, project, group_name)
     if isinstance(op, str) and op.startswith('assignment_'):
         return assignment_operation(root, state, username, request, directory, project, group_name, admin, incoming)
     if op == 'save_brief':

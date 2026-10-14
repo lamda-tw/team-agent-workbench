@@ -1,3 +1,5 @@
+import { QuestionFiles } from './question-files';
+import type { QuestionCommand } from '../shared/questions';
 import { groupCommand, groupRole } from './group-files';
 import type { GroupCommand } from '../shared/team-groups';
 import { atomicJson } from './store';
@@ -291,6 +293,15 @@ export class LocalFileConnection {
       const members = Object.values(data.state.users).filter(item => item.enabled && !item.missing && !item.provisioning && item.groups?.includes(group.name)).map(item => ({ username: item.username, name: item.name || item.username }));
       return { username: user.username, admin: !!user.contentAdminGroups?.includes(group.name), members };
     });
+  }
+  questionRequest(binding: RemoteBinding, command?: QuestionCommand | 'members') {
+    return new QuestionFiles(this.root, async binding => {
+      this.channel(binding); const { user, group } = await this.access(binding.project.remoteRoot);
+      if ((await this.readProject(binding.project.remoteRoot))?.id !== binding.project.id) throw new Error('项目身份已改变');
+      const data = await readRegistry(this.root);
+      const members = Object.values(data.state.users).filter(item => item.enabled && !item.missing && !item.provisioning && item.groups?.includes(group.name)).map(item => ({ username: item.username, name: item.name || item.username }));
+      return { username: user.username, members };
+    }).request(binding, command);
   }
   assignmentMembers(binding: RemoteBinding) { return this.assignments().members(binding); }
   assignmentList(binding: RemoteBinding) { return this.assignments().list(binding); }

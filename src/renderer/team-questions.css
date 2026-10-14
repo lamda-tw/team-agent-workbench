@@ -1,0 +1,15 @@
+.team-question-panel{width:410px;min-width:330px;max-width:44vw;border-left:1px solid var(--border,#ddd);display:flex;flex-direction:column;background:var(--surface,#fff)}
+.team-question-panel header{padding:16px;border-bottom:1px solid var(--border,#ddd)}
+.team-question-panel h3,.team-question-feed h3{margin:0;font-size:15px;overflow-wrap:anywhere}
+.team-question-panel-body{padding:16px;overflow:auto;min-height:0;flex:1}
+.team-question-compose{margin-bottom:24px}.team-question-compose summary{font-weight:600;margin-bottom:12px;cursor:pointer}
+.team-question-compose fieldset{border:0;margin:0;padding:0;min-width:0;display:grid;gap:10px}
+.team-question-compose label,.team-question-answer label{display:grid;gap:6px;font-size:13px}
+.team-question-compose input:not([type=checkbox]),.team-question-compose textarea,.team-question-answer select{width:100%;box-sizing:border-box}
+.team-question-members{display:grid;gap:8px;max-height:160px;overflow:auto}.team-question-members label{display:flex;align-items:center;gap:7px}
+.team-question-card{display:block;text-align:left;width:100%;padding:12px;margin:8px 0;background:transparent;border:1px solid var(--border,#ddd);border-radius:9px;overflow-wrap:anywhere}
+.team-question-card.unread{border-left:3px solid #b52335}.team-question-card small{display:block;margin-top:6px;color:var(--muted,#666)}
+.team-question-text{white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;line-height:1.7;margin:10px 0}
+.team-question-detail .row{flex-wrap:wrap}.team-question-answer{padding:14px 0;border-bottom:1px solid var(--border,#ddd)}
+.team-question-replies{padding:14px 0}.team-question-replies article{border-left:2px solid var(--border,#ddd);padding-left:12px;margin-top:12px}
+.team-question-feed{padding:16px 24px;border-bottom:1px solid var(--border,#ddd);flex:none}.team-question-feed>.row{flex-wrap:wrap}.team-question-feed-list{max-height:245px;overflow:auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:0 12px}.team-question-feed input{max-width:220px}

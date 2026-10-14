@@ -1,3 +1,4 @@
+import type { QuestionCommand, QuestionMember, TeamQuestion } from '../shared/questions';
 import type { GroupCommand } from '../shared/team-groups';
 import type { ContentEdit, ContentMerge, ContentMetadata } from '../shared/content';
 import type { SharedServerRoute } from '../shared/egress';
@@ -45,6 +46,7 @@ export class SharedFiles {
   contentList(binding: RemoteBinding) { return this.backend.contentList(binding); }
   contentHistory(binding: RemoteBinding, id?: string, revision?: number, summary = false) { return this.backend.contentHistory(binding, id, revision, summary); }
   contentMerge(binding: RemoteBinding, change: ContentMerge) { return this.backend.contentMerge(binding, change); }
+  questionRequest(binding: RemoteBinding, command?: QuestionCommand | 'members'): Promise<TeamQuestion[] | TeamQuestion | QuestionMember[]> { return this.backend.questionRequest(binding, command); }
   assignmentMembers(binding: RemoteBinding) { return this.backend.assignmentMembers(binding); }
   assignmentList(binding: RemoteBinding) { return this.backend.assignmentList(binding); }
   assignmentCreate(binding: RemoteBinding, input: AssignmentCreate) { return this.backend.assignmentCreate(binding, input); }

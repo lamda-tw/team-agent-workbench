@@ -44,6 +44,66 @@ class ContentRules(unittest.TestCase):
     def publish(self, actor='bob', name='result.zip', kind='contribution'):
         return self.call(actor, op='publish', target='/projects/relation/实体抽取/submissions/' + actor + '/' + name, sha256=content.digest(self.incoming), metadata={'title': '方案结论', 'description': '已验证内容', 'kind': kind})
 
+    def test_questions_member_scope_privacy_append_dedup_and_manual_close(self):
+        # All API calls still go through handle's live account/project ACL checks.
+        self.state['users']['carol']['groups'].append('relation')
+        self.state['users']['dave'] = dict(enabled=True, groups=['relation'])
+        command = dict(kind='create', id=str(uuid.uuid4()), sessionId=str(uuid.uuid4()), title='验收数据', body='使用哪个版本？', context='补充资料', recipients=['bob', 'carol'])
+        def request(actor, cmd=None):
+            return self.call(actor, op='question', command=cmd)
+        q = request('alice', command)
+        self.assertEqual(q['activityRevision'], 1)
+        self.assertEqual(request('alice', command)['id'], q['id'])
+        self.assertEqual(len(request('alice')), 1)
+        self.assertEqual({m['username'] for m in request('bob', 'members')}, {'alice', 'carol', 'dave'})
+        self.assertEqual(request('dave'), [])
+        with self.assertRaises(PermissionError):
+            request('bob', dict(kind='close', id=q['id']))
+        run_ids, sessions = {}, {}
+        for username in ('bob', 'carol'):
+            sid, rid = str(uuid.uuid4()), str(uuid.uuid4())
+            run_ids[username], sessions[username] = rid, sid
+            request(username, dict(kind='link', id=q['id'], sessionId=sid))
+            progress = request(username, dict(kind='run', id=q['id'], sessionId=sid, runId=rid))
+            self.assertEqual(progress['activityRevision'], 1)
+            with self.assertRaises(ValueError):
+                request(username, dict(kind='run', id=q['id'], sessionId=sid, runId=str(uuid.uuid4())))
+        for username in ('bob', 'carol'):
+            request(username, dict(kind='reply', id=q['id'], runId=run_ids[username], body=username + ' answer'))
+        all_answers = request('alice')[0]
+        self.assertFalse(all_answers.get('closedAt'))
+        self.assertEqual([len(r['answers']) for r in all_answers['recipients']], [1, 1])
+        private = request('bob')[0]
+        self.assertEqual(private['sessionId'], '')
+        self.assertNotIn('carol answer', json.dumps(private))
+        closed = request('alice', dict(kind='close', id=q['id']))
+        self.assertTrue(closed['closedAt'])
+        self.assertEqual(closed['activityRevision'], closed['revision'])
+        self.assertEqual(closed['recipients'][0]['sessionId'], sessions['bob'])
+        retry = request('bob', dict(kind='reply', id=q['id'], runId=run_ids['bob'], body='bob answer'))
+        self.assertEqual(retry['revision'], closed['revision'])
+        with self.assertRaises(ValueError):
+            request('carol', dict(kind='reply', id=q['id'], runId=str(uuid.uuid4()), body='late reply'))
+        self.state['users']['bob']['enabled'] = False
+        with self.assertRaises(PermissionError):
+            request('bob')
+
+    def test_questions_reject_other_group_and_release_failed_answer_claim(self):
+        command = dict(kind='create', id=str(uuid.uuid4()), sessionId=str(uuid.uuid4()), title='数据', body='版本？', recipients=['carol'])
+        with self.assertRaises(ValueError):
+            self.call('alice', op='question', command=command)
+        command['recipients'] = ['bob']
+        q = self.call('alice', op='question', command=command)
+        with self.assertRaises(PermissionError):
+            self.call('carol', op='question')
+        sid, rid = str(uuid.uuid4()), str(uuid.uuid4())
+        for cmd in [dict(kind='link', sessionId=sid), dict(kind='run', sessionId=sid, runId=rid), dict(kind='fail', runId=rid)]:
+            result = self.call('bob', op='question', command=dict(id=q['id'], **cmd))
+        self.assertEqual(result['recipients'][0]['state'], 'linked')
+        self.assertEqual(result['activityRevision'], 1)
+        result = self.call('bob', op='question', command=dict(kind='run', id=q['id'], sessionId=sid, runId=str(uuid.uuid4())))
+        self.assertEqual(result['recipients'][0]['state'], 'running')
+
     def origin(self, actor='bob', **changes):
         value = dict(version=1, submittedBy=actor, submittedAt='2000-01-01T00:00:00Z', destination=dict(projectId=self.project, projectName='客户端旧名字', groupName='relation', groupLabel='客户端旧组名'), sources=[dict(kind='session', id=str(uuid.uuid4()), title='量化误差分析', capturedAt='2026-10-08T01:00:00Z', snapshotHash='a' * 64)])
         value.update(changes)

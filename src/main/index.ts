@@ -6,7 +6,7 @@ import { draftDeleteIdsSchema } from '../shared/draft-delete';
 import { preparationDirectionsSchema } from '../shared/preparation-directions';
 import { contentDeleteSelectionsSchema, contentEditSchema, contributionCategorySchema, resultReferenceSchema } from '../shared/content';
 import { errorMessage } from '../shared/errors';
-import { app, BrowserWindow, ipcMain, dialog, shell, clipboard, safeStorage } from 'electron';
+import { app, BrowserWindow, Notification, ipcMain, dialog, shell, clipboard, safeStorage } from 'electron';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -44,6 +44,7 @@ let sharedServerEndpoint: { host: string; port: number } | undefined;
 const pendingWindowRequests: boolean[] = [];
 const entry = path.join(__dirname, runtimeAssets, 'index.html');
 app.setName('Team Agent User');
+if (process.platform === 'win32') app.setAppUserModelId('local.teamagent.user');
 app.setPath('userData', process.env.WORKBENCH_DATA_DIR || path.join(app.getPath('appData'), 'TeamAgentUser'));
 const serverIdentities = new ServerIdentityStore(path.join(app.getPath('userData'), 'server-identities.json'));
 const accountWorkspaces = new AccountWorkspacePool<DataContext>(async (profile, seedRoot) => createDataContext(await migrateAccountWorkspace(app.getPath('userData'), profile, seedRoot)), async context => { await context.workbench.close(); await context.egress.stop(); });
@@ -207,6 +208,12 @@ async function dispatch(action: string, raw: unknown, owner: BrowserWindow): Pro
     case 'content.updates.clear': return workbench.clearReadContentUpdates();
     case 'content.updates.dismiss': return workbench.dismissContentUpdates(z.object({ eventIds: z.array(z.string()) }).parse(raw).eventIds);
     case 'conclusion.list': { const p = z.object({ projectId: z.string(), includeArchived: z.boolean().optional() }).parse(raw); return workbench.conclusions(p.projectId, p.includeArchived).map(item => ({ ...item, uploadState: workbench.conclusionUploadState(item.id) })); }
+    case 'question.members': return workbench.questions.members(z.object({ projectId: z.string() }).parse(raw).projectId);
+    case 'question.sync': return workbench.questions.sync();
+    case 'question.create': { const p = z.object({ sessionId: id, question: z.unknown() }).parse(raw); return workbench.questions.create(p.sessionId, p.question); }
+    case 'question.close': { const p = z.object({ projectId: z.string(), id }).parse(raw); return workbench.questions.closeQuestion(p.projectId, p.id); }
+    case 'question.read': { const p = z.object({ id, revision: z.number().int().positive() }).parse(raw); return workbench.questions.read(p.id, p.revision); }
+    case 'question.link': { const p = z.object({ projectId: z.string(), id, sessionId: id }).parse(raw); return workbench.questions.link(p.projectId, p.id, p.sessionId); }
     case 'assignment.list': return workbench.remote.assignmentList(workbench.remote.binding(z.object({ projectId: z.string() }).parse(raw).projectId));
     case 'assignment.members': return workbench.remote.assignmentMembers(workbench.remote.binding(z.object({ projectId: z.string() }).parse(raw).projectId));
     case 'assignment.create': { const p = z.object({ projectId: z.string(), task: assignmentCreateSchema }).parse(raw); return workbench.createAssignment(p.projectId, p.task); }
@@ -508,7 +515,12 @@ async function createDataContext(root: string): Promise<DataContext> {
   const emit = (event: WorkbenchEvent) => { for (const [window, context] of contexts) if (context.workbench === workbench && !window.isDestroyed()) window.webContents.send('workbench:event', event); };
   let emitTimer: NodeJS.Timeout | undefined;
   const broadcast = () => { egress?.sharedServerConnectionChanged(!!workbench?.remote.connected); if (!emitTimer) emitTimer = setTimeout(() => { emitTimer = undefined; emit({ type: 'state' }); }, 80); };
-  const notice = (message: string) => { emit({ type: 'notice', message }); if (message.startsWith('待授权：')) for (const [window, context] of contexts) if (context.workbench === workbench && !window.isDestroyed() && !window.isFocused()) window.flashFrame(true); };
+  const notice = (message: string) => { emit({ type: 'notice', message });
+    if (/^(收到提问|收到问题答复|问题已关闭)：/.test(message) && Notification.isSupported()) {
+      const notification = new Notification({ title: '团队工作台 · 提问', body: message });
+      notification.on('click', () => { for (const [window, context] of contexts) if (context.workbench === workbench && !window.isDestroyed()) { window.show(); window.focus(); window.webContents.send('workbench:event', { type: 'questions' }); break; } });
+      notification.show();
+    } if (message.startsWith('待授权：')) for (const [window, context] of contexts) if (context.workbench === workbench && !window.isDestroyed() && !window.isFocused()) window.flashFrame(true); };
   let egress: EgressClientProxy | undefined;
   workbench = new Workbench(root, broadcast, notice, 10 * 60 * 1000, route => {
     if (route === 'direct') return {};

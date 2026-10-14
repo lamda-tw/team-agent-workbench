@@ -1,3 +1,4 @@
+import type { QuestionCommand, QuestionMember, TeamQuestion } from '../shared/questions';
 import { groupCommandSchema, type GroupCommand, type TeamGroup } from '../shared/team-groups';
 import { storageRequest } from './storage-requests';
 import { forwardEgress } from './ssh-egress';
@@ -248,6 +249,7 @@ export class SftpConnection {
     try { return await this.request({ ...input, projectId: binding.project.id }, binding, local); }
     catch (error: any) { if (/不支持的内容操作|不支持的任务操作/.test(error.message)) throw new Error('服务器尚未更新任务功能，请管理员在新版管理端点击“更新服务端功能”'); throw error; }
   }
+  questionRequest(binding: RemoteBinding, command?: QuestionCommand | 'members'): Promise<TeamQuestion[] | TeamQuestion | QuestionMember[]> { return this.request({ op: 'question', projectId: binding.project.id, command: command || null }, binding).catch((error: Error) => { if (/不支持的内容操作/.test(error.message)) throw new Error('服务器尚未更新提问功能，请管理员更新服务端功能'); throw error; }); }
   assignmentMembers(binding: RemoteBinding): Promise<AssignmentMember[]> { return this.assignmentRequest(binding, { op: 'assignment_members' }); }
   assignmentList(binding: RemoteBinding): Promise<ProjectAssignment[]> { return this.assignmentRequest(binding, { op: 'assignment_list' }); }
   assignmentCreate(binding: RemoteBinding, input: AssignmentCreate): Promise<ProjectAssignment> { return this.assignmentRequest(binding, { op: 'assignment_create', task: input }); }
