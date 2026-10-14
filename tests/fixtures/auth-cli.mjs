@@ -89,7 +89,7 @@ else if (command === 'login') {
     else if (m.method === 'model/list') {
       if (current.catalog === 'hang') return;
       if (current.catalog === 'error') respond({ id: m.id, error: { code: -32000, message: 'fetch failed DO_NOT_FORWARD_THIS_SECRET' } });
-      else respond({ id: m.id, result: m.params.cursor ? { data: [{ id: 'id-2', model: 'gpt-fixture-2', displayName: 'GPT Fixture 2' }], nextCursor: null } : { data: [{ id: 'id-1', model: 'gpt-fixture', displayName: 'GPT Fixture', isDefault: true }], nextCursor: 'next' } });
+      else respond({ id: m.id, result: m.params.cursor ? { data: [{ id: 'id-2', model: 'gpt-fixture-2', displayName: 'GPT Fixture 2', defaultReasoningEffort: 'low', supportedReasoningEfforts: [{ reasoningEffort: 'low', description: 'Faster' }] }], nextCursor: null } : { data: [{ id: 'id-1', model: 'gpt-fixture', displayName: 'GPT Fixture', isDefault: true, defaultReasoningEffort: 'medium', supportedReasoningEfforts: [{ reasoningEffort: 'low', description: 'Faster' }, { reasoningEffort: 'medium', description: 'Balanced' }, { reasoningEffort: 'high', description: 'Deeper' }, { reasoningEffort: 'not valid' }, { reasoningEffort: 'high' }] }], nextCursor: 'next' } });
     } else if (m.method === 'account/rateLimits/read') {
       if (current.quota === 'hang') return;
       if (current.quota === 'error') respond({ id: m.id, error: { code: -32000, message: 'quota network failure DO_NOT_FORWARD_THIS_SECRET' } });

@@ -1,9 +1,17 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Check, ChevronDown, ExternalLink, RefreshCw, ShieldCheck, X } from 'lucide-react';
-import type { AgentSession, PermissionMode, PermissionReport, ProviderCatalog } from '../shared/types';
+import type { AgentSession, ModelOption, PermissionMode, PermissionReport, ProviderCatalog } from '../shared/types';
 import { permissionEffects, permissionLabels, sessionPermissionDescription, sessionPermissionLabel } from '../shared/permission-presentation';
 
 type Choice = { kind: 'model' | 'permission'; value: string };
+const effortLabels: Record<string, string> = { none: '关闭', minimal: '最少', low: '低', medium: '中', high: '高', xhigh: '超高', max: '最大', ultra: '极高' };
+const effortLabel = (id?: string) => id ? effortLabels[id] || id : '';
+function replacementEffort(session: AgentSession, model?: ModelOption) {
+  if (session.provider !== 'codex' || !session.reasoningEffort || !model?.reasoningEfforts) return undefined;
+  if (model.reasoningEfforts.some(item => item.id === session.reasoningEffort)) return undefined;
+  if (model.defaultReasoningEffort && model.reasoningEfforts.some(item => item.id === model.defaultReasoningEffort)) return model.defaultReasoningEffort;
+  return model.reasoningEfforts[0]?.id || null;
+}
 
 type ComposerSettingsProps = { session: AgentSession; networkEnabled?: boolean; openConnection?: () => void; authCheckedAt?: string };
 export function ComposerSettings(props: ComposerSettingsProps) {
@@ -42,15 +50,29 @@ function CliComposerSettings({ session, networkEnabled, openConnection, authChec
     if ((choice.kind === 'model' ? session.model : session.permissionMode || 'inherit') === choice.value) { close(); return; }
     setSaving(true); setError('');
     try {
-      await window.workbench.call(choice.kind === 'model' ? 'session.model' : 'session.permissions', { id: session.id, ...(choice.kind === 'model' ? { model: choice.value } : { mode: choice.value }) });
+      if (choice.kind === 'model') {
+        await window.workbench.call('session.model', { id: session.id, model: choice.value });
+        const effort = replacementEffort(session, models.find(item => item.id === choice.value));
+        if (effort !== undefined) await window.workbench.call('session.reasoningEffort', { id: session.id, effort });
+      } else await window.workbench.call('session.permissions', { id: session.id, mode: choice.value });
       close();
     } catch (e: any) { setError(e.message); }
     finally { setSaving(false); }
   };
   const toggle = (kind: Choice['kind']) => { setError(''); setOpen(open === kind ? undefined : kind); };
-  const modelName = catalog?.models.find(m => m.id === session.model)?.name || session.model || '默认模型';
   const models = catalog?.models || [];
   const selectedModel = session.model || models.find(m => m.isDefault)?.id;
+  const selected = models.find(m => m.id === selectedModel);
+  const efforts = session.provider === 'codex' ? selected?.reasoningEfforts || [] : [];
+  const activeEffort = efforts.some(item => item.id === session.reasoningEffort) ? session.reasoningEffort : efforts.some(item => item.id === selected?.defaultReasoningEffort) ? selected?.defaultReasoningEffort : session.provider === 'codex' ? session.reasoningEffort : undefined;
+  const modelName = (catalog?.models.find(m => m.id === session.model)?.name || session.model || '默认模型') + (activeEffort ? ' · ' + effortLabel(activeEffort) : '');
+  const chooseEffort = async (effort: string) => {
+    if (disabled || session.reasoningEffort === effort) { close(); return; }
+    setSaving(true); setError('');
+    try { await window.workbench.call('session.reasoningEffort', { id: session.id, effort }); close(); }
+    catch (e: any) { setError(e.message); }
+    finally { setSaving(false); }
+  };
   return <div className="composer-settings" ref={root}>
     {openConnection && <button className="composer-setting" aria-label="网络与登录设置" disabled={saving} onClick={() => { close(); openConnection(); }}>{networkEnabled ? '管理端出口' : '本机网络'} · 登录<ChevronDown size={12}/></button>}
     <button ref={modelButton} className="composer-setting" aria-label="选择模型" aria-expanded={open === 'model'} aria-haspopup="dialog" title={modelName} disabled={saving} onClick={() => toggle('model')}><span>{modelName}</span><ChevronDown size={12}/></button>
@@ -68,6 +90,7 @@ function CliComposerSettings({ session, networkEnabled, openConnection, authChec
           {catalog?.modelError && <p className="inline-error" role="alert">{catalog.modelError}</p>}
           {!loading && catalog && !models.length && !catalog.modelError && <p className="muted small">暂未获取可用模型，请刷新重试。</p>}
           <div role="group" aria-label="可用模型">{models.map(m => <button key={m.id} className="setting-option" aria-pressed={selectedModel === m.id} disabled={disabled || loading && !models.length} onClick={() => void apply({ kind: 'model', value: m.id })}><span>{m.name}{m.isDefault && <small>默认</small>}</span>{selectedModel === m.id && <Check size={14}/>}</button>)}</div>
+          {session.provider === 'codex' && (efforts.length > 0 || (!loading && !!selected)) && <div role="group" aria-label="思考努力程度"><p>思考努力程度</p>{efforts.map(effort => <button key={effort.id} className="setting-option" aria-pressed={activeEffort === effort.id} disabled={disabled || loading} onClick={() => void chooseEffort(effort.id)}><span>{effortLabel(effort.id)}{effort.description && <small>{effort.description}</small>}</span>{activeEffort === effort.id && <Check size={14}/>}</button>)}{!efforts.length && <p className="muted small">当前模型没有可选的思考努力程度。</p>}</div>}
           <div className="quota-panel"><div className="row"><strong>账号额度</strong><span className="spacer"/><button className="text-button" onClick={() => void window.workbench.call('open.link', session.provider === 'codex' ? 'https://chatgpt.com/codex/settings/usage' : session.provider === 'claude' ? 'https://claude.ai/settings/usage' : 'https://cursor.com/dashboard/spending').catch(() => setError('无法打开浏览器，请稍后重试。'))}><ExternalLink size={12}/>官方额度页</button></div>
             {!catalog?.quota.windows.length && <p className="muted small">{catalog?.quota.detail || (session.provider === 'cursor' ? '请在官方额度页查看' : '额度未读取')}</p>}
             {catalog?.quota.windows.map((w, i) => <div className="quota-window" key={i}><div className="row"><span>{w.name}{w.windowMinutes ? `（${w.windowMinutes >= 1440 ? w.windowMinutes / 1440 + ' 天' : w.windowMinutes / 60 + ' 小时'}）` : ''}</span><b>剩余 {Number((100 - w.usedPercent).toFixed(1))}%</b></div><progress max={100} value={100 - w.usedPercent}/>{w.resetsAt && <small>重置：{new Date(w.resetsAt * 1000).toLocaleString('zh-CN')}</small>}</div>)}

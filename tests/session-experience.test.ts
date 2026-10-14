@@ -21,7 +21,10 @@ test('identity whitelist and quota parser preserve unavailable fields and prefer
   assert.deepEqual(codexQuota({}), []);
   const windows = codexQuota({ rateLimits: { primary: { usedPercent: 99 } }, rateLimitsByLimitId: { a: { primary: { usedPercent: null }, secondary: { usedPercent: 12 } }, b: { primary: { usedPercent: 200, resetsAt: 1800000000 } } } });
   assert.equal(windows.length, 2); assert.equal(windows[0].usedPercent, 12); assert.equal(windows[0].resetsAt, undefined); assert.equal(windows[1].usedPercent, 100);
-  assert.deepEqual(codexModels({ data: [{ id: 'opaque', model: 'real-model', displayName: 'Visible' }, { model: 'hidden', hidden: true }] }).map(m => m.id), ['real-model']);
+  const parsed = codexModels({ data: [{ id: 'opaque', model: 'real-model', displayName: 'Visible', defaultReasoningEffort: 'nope', supportedReasoningEfforts: [{ reasoningEffort: 'high', description: '  Deeper  ' }, 'low', { reasoningEffort: 'not valid' }, { reasoningEffort: 'high' }] }, { model: 'hidden', hidden: true }] });
+  assert.deepEqual(parsed.map(m => m.id), ['real-model']);
+  assert.deepEqual(parsed[0].reasoningEfforts, [{ id: 'high', description: 'Deeper' }, { id: 'low' }]);
+  assert.equal(parsed[0].defaultReasoningEffort, undefined);
   assert.deepEqual(cursorModels('\x1b[90mAvailable models\x1b[0m\n\nmodel-a - Model A (current, default)\nmodel-b - Model B\nTip: ignore - this').map(m => [m.id, m.isDefault]), [['model-a', true], ['model-b', false]]);
 });
 
@@ -31,6 +34,8 @@ test('live protocol catalogs: pagination, independent quota failure, Cursor fall
   try {
     const gpt = await inspectCatalog('codex', f.launcher, root);
     assert.deepEqual(gpt.models.map(m => m.id), ['gpt-fixture', 'gpt-fixture-2']); assert.equal(gpt.quota.windows[0].usedPercent, 23);
+    assert.deepEqual(gpt.models[0].reasoningEfforts?.map(item => item.id), ['low', 'medium', 'high']); assert.equal(gpt.models[0].defaultReasoningEffort, 'medium');
+    assert.deepEqual(gpt.models[1].reasoningEfforts?.map(item => item.id), ['low']);
     await f.write({ status: 'ready', quota: 'error' });
     const partial = await inspectCatalog('codex', f.launcher, root);
     assert.equal(partial.models.length, 2); assert.equal(partial.quota.windows.length, 0); assert.match(partial.quota.detail, /不代表额度为零/);

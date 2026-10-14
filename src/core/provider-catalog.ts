@@ -2,10 +2,25 @@ import type { ModelOption, Provider, ProviderCatalog, QuotaWindow } from '../sha
 import { JsonRpc, spawnCLI, stopCLI } from './rpc';
 
 // Return only display fields. CLI diagnostics and authentication data never reach the renderer.
+const reasoningEffortId = /^[A-Za-z0-9_-]{1,32}$/;
+export function codexReasoningEfforts(model: any): Pick<ModelOption, 'reasoningEfforts' | 'defaultReasoningEffort'> {
+  if (!Array.isArray(model?.supportedReasoningEfforts)) return {};
+  const efforts: { id: string; description?: string }[] = [];
+  const seen = new Set<string>();
+  for (const item of model.supportedReasoningEfforts) {
+    const id = typeof item === 'string' ? item : item?.reasoningEffort;
+    if (typeof id !== 'string' || !reasoningEffortId.test(id) || seen.has(id)) continue;
+    seen.add(id);
+    const description = typeof item?.description === 'string' && item.description.trim() ? item.description.trim().slice(0, 200) : undefined;
+    efforts.push({ id, ...(description ? { description } : {}) });
+  }
+  const fallback = typeof model.defaultReasoningEffort === 'string' && seen.has(model.defaultReasoningEffort) ? model.defaultReasoningEffort : undefined;
+  return { reasoningEfforts: efforts, ...(fallback ? { defaultReasoningEffort: fallback } : {}) };
+}
 export function codexModels(result: any): ModelOption[] {
   if (!Array.isArray(result?.data)) throw new Error('无法识别模型列表');
   return result.data.filter((m: any) => !m.hidden && typeof m.model === 'string' && m.model.length > 0)
-    .map((m: any) => ({ id: m.model, name: typeof m.displayName === 'string' ? m.displayName : m.model, isDefault: m.isDefault === true }));
+    .map((m: any) => ({ id: m.model, name: typeof m.displayName === 'string' ? m.displayName : m.model, isDefault: m.isDefault === true, ...codexReasoningEfforts(m) }));
 }
 export function cursorModels(output: string): ModelOption[] {
   const clean = output.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '');
