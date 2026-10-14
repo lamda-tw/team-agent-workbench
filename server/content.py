@@ -402,6 +402,8 @@ def question_operation(root, state, username, request, project, group_name):
         if recipients:
             result['recipients'], result['sessionId'] = recipients, ''
             result['activityRevision'] = recipients[0]['activityRevision']
+            if result.get('followUps'):
+                result['followUps'] = [item for item in result['followUps'] if not item.get('target') or item.get('target') == username]
             return result
     if command is None:
         return [v for q in items if (v := view(q)) is not None]
@@ -435,12 +437,60 @@ def question_operation(root, state, username, request, project, group_name):
     else:
         if not q or view(q) is None:
             raise PermissionError('问题不存在或无权访问')
+        def named(target):
+            return next((item for item in q['recipients'] if item['username'] == target), None)
         if kind == 'close':
-            if q['author'] != username:
-                raise PermissionError('只有发问人可以关闭问题')
+            recipient = named(username)
+            in_dialogue = bool(recipient and (recipient.get('sessionId') or recipient.get('answers') or recipient.get('state') != 'pending'))
+            if q['author'] != username and not in_dialogue:
+                raise PermissionError('只有发问人或已参与对话的回答者可以结束提问')
             if q.get('closedAt'):
                 return view(q)
             q['closedAt'] = stamp
+        elif kind == 'follow':
+            if q['author'] != username:
+                raise PermissionError('只有发问人可以继续同一问题')
+            if q.get('closedAt'):
+                raise ValueError('问题已关闭，不能继续补充')
+            follow_id, body = identifier('followId'), field('body', 12000)
+            target = command.get('target') or ''
+            if target and not named(target):
+                raise ValueError('后续信息的接收人不存在')
+            follows = q.setdefault('followUps', [])
+            previous = next((item for item in follows if item['id'] == follow_id), None)
+            if previous:
+                if previous['body'] != body or previous.get('target', '') != target:
+                    raise ValueError('后续信息编号已使用')
+                return view(q)
+            item = dict(id=follow_id, body=body, createdAt=stamp)
+            if target:
+                item['target'] = target
+                named(target).pop('endSuggestedAt', None)
+            follows.append(item)
+        elif kind == 'suggest':
+            if q.get('closedAt'):
+                raise ValueError('问题已关闭')
+            target = command.get('username')
+            recipient = named(target) if isinstance(target, str) else None
+            if not recipient:
+                raise PermissionError('对话成员不存在')
+            if username != q['author'] and username != target:
+                raise PermissionError('只有发问人或这位回答者可以建议结束')
+            if recipient.get('endSuggestedAt'):
+                return view(q)
+            recipient['endSuggestedAt'] = stamp
+        elif kind == 'resume':
+            if q['author'] != username:
+                raise PermissionError('只有发问人可以继续自动对话')
+            if q.get('closedAt'):
+                raise ValueError('问题已关闭')
+            target = command.get('username')
+            recipient = named(target) if isinstance(target, str) else None
+            if not recipient:
+                raise PermissionError('对话成员不存在')
+            if not recipient.get('endSuggestedAt'):
+                return view(q)
+            recipient.pop('endSuggestedAt', None)
         else:
             recipient = next((r for r in q['recipients'] if r['username'] == username), None)
             if not recipient:
@@ -483,10 +533,12 @@ def question_operation(root, state, username, request, project, group_name):
             else:
                 raise ValueError('不支持的问题操作')
         q['revision'] += 1
-        if kind in ('reply', 'close'):
+        if kind in ('reply', 'close', 'follow', 'suggest', 'resume'):
             q['activityRevision'] = q['revision']
             for recipient in q['recipients']:
-                if kind == 'close' or recipient['username'] == username:
+                dialogue = bool(recipient.get('sessionId') or recipient.get('answers') or recipient.get('state') != 'pending')
+                target = command.get('target') or command.get('username') or ''
+                if ((kind == 'close' and dialogue) or (kind == 'follow' and (not command.get('target') or recipient['username'] == command.get('target'))) or (kind == 'reply' and recipient['username'] == username) or (kind in ('suggest', 'resume') and recipient['username'] == target)):
                     recipient['activityRevision'] = q['revision']
         q['updatedAt'] = stamp
     file.parent.mkdir(parents=True, exist_ok=True)

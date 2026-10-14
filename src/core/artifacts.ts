@@ -8,6 +8,7 @@ import { ZipArchive } from 'archiver';
 import type { SubmissionRecord } from '../shared/submission';
 import type { AgentSession, Draft, DraftArtifact, SourceFile } from '../shared/types';
 import { safeFilename, localWithin } from './paths';
+import { withoutIncomingQuestionNotice, withoutQuestionControl } from '../shared/session-context-text';
 export async function hashFile(file: string) {
   const hash = createHash('sha256'); for await (const chunk of fs.createReadStream(file)) hash.update(chunk); return hash.digest('hex');
 }
@@ -77,7 +78,7 @@ function gitAndSupplement(draft: Draft) {
   return (draft.includeGit && draft.git ? `\n\n## 代码版本（整理时快照）\n\n分支：${draft.git.branch}\n\nCommit：${draft.git.commit || '尚无提交'}\n\n未提交改动：${draft.git.dirty ? '存在，commit 无法代表全部本地改动' : '无'}\n\n记录时间：${draft.git.capturedAt}` : '') + (draft.supplement?.trim() ? '\n\n## 补充说明\n\n' + draft.supplement.trim() : '');
 }
 export function historyMarkdown(session: AgentSession) {
-  return `# ${session.title}\n\n提供方：${session.provider}\n原生会话 ID：${session.nativeId || '尚未创建'}\n项目：${session.binding?.project.name || '本地会话'}\n\n> 这是工作台采集的对话与工具事件，不代表厂商隐藏推理或完整训练轨迹。\n\n` + session.messages.map(m => `## ${m.role} · ${m.createdAt}\n\n${m.text}\n`).join('\n');
+  return `# ${session.title}\n\n提供方：${session.provider}\n原生会话 ID：${session.nativeId || '尚未创建'}\n项目：${session.binding?.project.name || '本地会话'}\n\n> 这是工作台采集的对话与工具事件，不代表厂商隐藏推理或完整训练轨迹。\n\n` + session.messages.map(m => `## ${m.role} · ${m.createdAt}\n\n${m.role === 'user' ? withoutIncomingQuestionNotice(m.text) : withoutQuestionControl(m.text)}\n`).join('\n');
 }
 export async function packageHistory(session: AgentSession, sessionDir: string, root: string, frozenEvents?: string) {
   const dir = path.join(root, 'packages', randomUUID()); await fsp.mkdir(dir, { recursive: true });

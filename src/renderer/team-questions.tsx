@@ -39,31 +39,56 @@ function QuestionComposer({ session, sent }: { session: AgentSession; sent: (q: 
     <label>需要补充什么<textarea rows={4} maxLength={12000} value={body} onChange={e => setBody(e.target.value)}/></label>
     <label>补充资料（可选）<textarea rows={2} maxLength={24000} placeholder="填写可以分享的背景、资料或链接" value={context} onChange={e => setContext(e.target.value)}/></label>
     <span>接收成员（可多选）</span><div className="team-question-members">{members.map(m => <label key={m.username}><input type="checkbox" checked={selected.includes(m.username)} onChange={e => setSelected(current => e.target.checked ? [...current, m.username] : current.filter(name => name !== m.username))}/>{m.name} <small className="muted">{m.username}</small></label>)}{loading ? <small>正在读取成员…</small> : !members.length && <small>当前组没有可选择的其他成员</small>}</div>
-    <p className="muted small">只发送这里填写的内容。问题由你手动关闭，收到答复后仍保持开放。</p>
+    <p className="muted small">只发送这里填写的内容。对方回复后可以手动引入；第一次回答后，也可以和其中一个人开启自动对话。</p>
     <button className="primary" disabled={!title.trim() || !body.trim() || !selected.length || busy} onClick={() => void send()}>{busy ? '发送中…' : `发送提问${selected.length ? `（${selected.length} 人）` : ''}`}</button>
   </fieldset>{error && <p className="inline-error" role="alert">{error}</p>}</details>;
 }
 
+export function questionAutoLock(inbox: QuestionInbox | undefined, sessionId: string) {
+  const dialogue = inbox?.dialogues?.find(item => item.sessionId === sessionId);
+  if (!dialogue) return;
+  const question = inbox?.items.find(item => item.id === dialogue.questionId);
+  const peer = question?.recipients.find(item => item.username === dialogue.peer);
+  return { name: peer?.name || dialogue.peer, title: question?.title || '提问', suggested: !!dialogue.suggested || !!peer?.endSuggestedAt };
+}
 export function QuestionDetail({ question: q, inbox, username, sessions, changed, openSession }: { question: TeamQuestion; inbox: QuestionInbox; username: string; sessions: AgentSession[]; changed: () => Promise<void>; openSession: (session: AgentSession) => void }) {
   const own = q.recipients.find(r => r.username === username), author = q.author === username;
-  const [sessionId, setSessionId] = useState(own?.sessionId || ''), [busy, setBusy] = useState(false), [error, setError] = useState('');
+  const [sessionId, setSessionId] = useState(own?.sessionId || ''), [laneSession, setLaneSession] = useState<Record<string, string>>({}), [laneText, setLaneText] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false), [error, setError] = useState('');
+  const followDraft = useRef<Record<string, { payload: string; id: string }>>({});
   const working = useRef(false);
   const choices = sessions.filter(s => s.binding?.project.id === q.projectId && s.purpose === 'work' && !s.closedAt && !s.cursorNative);
   const selected = choices.find(s => s.id === sessionId), linked = sessions.find(s => s.id === (author ? q.sessionId : own?.sessionId));
-  const job = [...inbox.jobs].reverse().find(j => j.questionId === q.id), active = !!job && ['queued', 'running', 'ready'].includes(job.phase);
+  const job = [...inbox.jobs].reverse().find(j => j.questionId === q.id && j.mode !== 'import' && j.mode !== 'auto'), active = !!job && ['queued', 'running', 'ready'].includes(job.phase);
+  const inDialogue = !!own && (!!own.sessionId || own.answers.length > 0 || own.state !== 'pending');
   useEffect(() => { if (questionUnread(q, inbox)) void window.workbench.call('question.read', { id: q.id, revision: q.activityRevision }).then(changed).catch(e => setError(e.message)); }, [q.id, q.activityRevision]);
-  const run = async (action: string, payload: object) => { if (working.current) return; working.current = true; setBusy(true); setError(''); try { await window.workbench.call(action, payload); await changed(); } catch (e: any) { setError(e.message); } finally { working.current = false; setBusy(false); } };
+  const run = async (action: string, payload: object) => { if (working.current) return false; working.current = true; setBusy(true); setError(''); try { await window.workbench.call(action, payload); await changed(); return true; } catch (e: any) { setError(e.message); return false; } finally { working.current = false; setBusy(false); } };
   return <section className="team-question-detail"><div className="row"><h3>{q.title}</h3><span className="spacer"/><span className="badge">{q.closedAt ? '已关闭' : '开放'}</span></div><p className="muted small">{q.authorName} · {time(q.createdAt)}</p><div className="team-question-text">{q.body}</div>{q.context && <details><summary>补充资料</summary><div className="team-question-text">{q.context}</div></details>}
-    {q.closedAt && <p className="callout">发问人已于 {time(q.closedAt)} 关闭问题，不再接收答复。已关联的 Session 保留，需要结束时请在 Session 中手动关闭。</p>}
-    <div className="row">{linked && <button className="secondary compact" onClick={() => openSession(linked)}>打开关联 Session{linked.closedAt ? '（已关闭）' : ''}</button>}{author && !q.closedAt && <button className="secondary compact" disabled={busy} onClick={() => void run('question.close', { projectId: q.projectId, id: q.id })}>关闭问题</button>}</div>
+    {q.closedAt && <p className="callout">提问已于 {time(q.closedAt)} 结束，不再接收答复。已关联的 Session 保留，需要结束时请在 Session 中手动关闭。</p>}
+    <div className="row">{linked && <button className="secondary compact" onClick={() => openSession(linked)}>打开关联 Session{linked.closedAt ? '（已关闭）' : ''}</button>}{(author || inDialogue) && !q.closedAt && <button className="secondary compact" disabled={busy} onClick={() => void run('question.close', { projectId: q.projectId, id: q.id })}>结束提问</button>}</div>
     {!author && own && !q.closedAt && <div className="team-question-answer"><label>选择回答问题的 Session<select aria-label="回答 Session" value={selected?.id || ''} disabled={busy || active || own.state === 'running'} onChange={e => setSessionId(e.target.value)}><option value="">请选择同项目的 Session</option>{choices.map(s => <option key={s.id} value={s.id}>{s.title}{['running', 'starting', 'approval'].includes(s.status) ? ' · 忙碌，排队回答' : ''}</option>)}</select></label>
-      <p className="muted small">关联后，AI 会在该 Session 空闲时回答，并将最终答复自动回传给发问人。每次补充会新增一条答复。</p>
+      <p className="muted small">关联后，AI 会在该 Session 空闲时回答。你可以随时结束这条提问，包括问到一半。结束会轻量通知发问人，并刷新提问工作区。</p>
       <button className="primary" disabled={!selected || busy || active || own.state === 'running'} onClick={() => void run('question.link', { projectId: q.projectId, id: q.id, sessionId })}>{active ? ({ queued: '等待 Session 空闲', running: '回答中…', ready: '答复待送达' } as Record<string, string>)[job!.phase] : own.state === 'running' ? '回答中…' : own.answers.length ? '关联并补充回答' : '关联并回答'}</button>
       {!choices.length && <p className="muted small">请先在这个项目中新建或打开一个工作 Session。</p>}
       {job?.phase === 'error' && <p className="inline-error">{job.error}</p>}{job?.phase === 'ready' && job.error && <p className="muted small">答复已保留，连接恢复后自动送达。</p>}
     </div>}
-    {author && <p className="muted small">{q.recipients.filter(r => r.answers.length).length}/{q.recipientCount} 人已回复 · 多人答复分别保留</p>}
-    {q.recipients.map(r => <section className="team-question-replies" key={r.username}><div className="row"><b>{r.name}</b><small className="muted">{r.answers.length ? `${r.answers.length} 条答复` : q.closedAt ? '关闭前未回复' : ({ pending: '待关联', linked: '已关联', running: '回答中', replied: '已回复' })[r.state]}</small></div>{r.answers.map(a => <article key={a.id}><time className="muted small">{time(a.createdAt)}</time><div className="team-question-text">{a.body}</div></article>)}</section>)}
+    {author && <p className="muted small">{q.recipients.filter(r => r.answers.length).length}/{q.recipientCount} 人已回复 · 每人一条对话</p>}
+    {q.recipients.map(r => {
+      const dialogue = inbox.dialogues?.find(item => item.questionId === q.id && item.peer === r.username);
+      const suggested = !!r.endSuggestedAt || !!dialogue?.suggested;
+      const laneChoices = choices.filter(s => !inbox.dialogues?.some(item => item.sessionId === s.id && !(item.questionId === q.id && item.peer === r.username)));
+      const picked = laneChoices.find(s => s.id === laneSession[r.username]) || laneChoices.find(s => s.id === dialogue?.sessionId);
+      const autoSession = sessions.find(s => s.id === dialogue?.sessionId);
+      const turns = [...(q.followUps || []).filter(item => !item.target || item.target === r.username).map(item => ({ id: item.id, at: item.createdAt, mine: author, who: author ? '我' : q.authorName, body: item.body })), ...r.answers.map(item => ({ id: item.id, at: item.createdAt, mine: !author, who: author ? r.name : '我', body: item.body, answerId: item.id }))].sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id));
+      const sendFollow = () => { const body = (laneText[r.username] || '').trim(); if (!body) return; const key = r.username + ':' + body; if (followDraft.current[key]?.payload !== body) followDraft.current[key] = { payload: body, id: crypto.randomUUID() }; const draft = followDraft.current[key]; void run('question.follow', { projectId: q.projectId, id: q.id, followId: draft.id, body, target: r.username }).then(ok => { if (ok) setLaneText(current => ({ ...current, [r.username]: '' })); }); };
+      return <section className="team-question-replies" key={r.username}><div className="row"><b>{r.name}</b><small className="muted">{dialogue ? (suggested ? '建议结束' : '自动对话中') : r.answers.length ? `${r.answers.length} 条答复` : q.closedAt ? '关闭前未回复' : ({ pending: '待关联', linked: '已关联', running: '回答中', replied: '已回复' })[r.state]}</small></div>
+        {suggested && !q.closedAt && <p className="callout">自动对话认为可以结束。上面的往来保留，确认后才会真正结束提问。</p>}
+        <div className="team-question-thread">{turns.map(turn => <article key={turn.id} className={'team-question-turn' + (turn.mine ? ' mine' : '')}><span className="who">{turn.who} · {time(turn.at)}</span><div className="team-question-text">{turn.body}</div>{author && !q.closedAt && !dialogue && turn.answerId && <button className="secondary compact" disabled={!picked || busy} onClick={() => void run('question.import', { projectId: q.projectId, id: q.id, sessionId: picked!.id, answerId: turn.answerId! })}>引入到 Session</button>}</article>)}{!turns.length && <p className="muted small">还没有往来。</p>}</div>
+        {author && !q.closedAt && <div className="team-question-composer">{dialogue && !suggested ? <p className="muted small">自动对话进行中。新的提问由 Session 发出，并出现在上面的对话里。</p> : <><textarea rows={2} maxLength={12000} aria-label={`回复${r.name}`} value={laneText[r.username] || ''} placeholder="继续提问" onChange={e => setLaneText(current => ({ ...current, [r.username]: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && e.nativeEvent.keyCode !== 229) { e.preventDefault(); if (!e.repeat) sendFollow(); } }}/><div className="row"><button className="primary compact" disabled={!laneText[r.username]?.trim() || busy} onClick={sendFollow}>{busy ? '发送中…' : '发送'}</button></div></>}
+          {!!r.answers.length && <div className="row">{!dialogue && <label className="muted small">Session<select aria-label={`${r.name}的 Session`} value={picked?.id || ''} disabled={busy} onChange={e => setLaneSession(current => ({ ...current, [r.username]: e.target.value }))}><option value="">选择 Session</option>{laneChoices.map(s => <option key={s.id} value={s.id}>{s.title}</option>)}</select></label>}{!dialogue && <button className="secondary compact" disabled={!picked || busy} onClick={() => void run('question.auto', { projectId: q.projectId, id: q.id, sessionId: picked!.id, peer: r.username })}>自动对话</button>}{dialogue && autoSession && <button className="secondary compact" onClick={() => openSession(autoSession)}>打开 Session</button>}{dialogue && <button className="secondary compact" disabled={busy} onClick={() => void run('question.auto.stop', { projectId: q.projectId, id: q.id, peer: r.username })}>停止自动</button>}{suggested && <button className="primary compact" disabled={busy} onClick={() => void run('question.close', { projectId: q.projectId, id: q.id })}>确认结束</button>}</div>}
+        </div>}
+      </section>;
+    })}
     {error && <p className="inline-error" role="alert">{error}</p>}
   </section>;
 }

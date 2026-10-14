@@ -152,7 +152,7 @@ export class Workbench {
     this.journal = new ProjectJournal(this.store);
     this.questions = new Questions(this.store, this.remote, {
       profile: () => this.configuring ? undefined : this.localProfile(), session: id => this.session(id),
-      send: (id, text, runId) => this.runAccountOperation('question.answer', () => this.send(id, text, [], [], undefined, runId)),
+      send: (id, text, runId, agentNotice) => this.runAccountOperation('question.answer', () => this.send(id, text, [], [], undefined, runId, agentNotice)),
       changed: () => this.broadcast(), notice: text => this.notice(text),
     });
     this.activity = new ActivityAssistant({ store: this.store, prepare: () => this.journal.ready(), owns: s => !this.configuring && this.ownsLocal(s.binding), connected: () => !this.closing && !this.configuring && this.remote.connected,
@@ -1342,11 +1342,12 @@ export class Workbench {
     const ids = new Set(sessionWithAvailableReferences(session, this.store.conclusions).sources.map(source => source.id));
     if (sources.some(source => !ids.has(source.id))) throw new Error('参考成果已删除，请核对后重新发送');
   }
-  async send(id: string, userText: string, sourceIds: string[] = [], capabilitySelections: AgentCapabilitySelection[] = [], submitted?: () => void, questionRunId?: string) {
+  async send(id: string, userText: string, sourceIds: string[] = [], capabilitySelections: AgentCapabilitySelection[] = [], submitted?: () => void, questionRunId?: string, agentNotice?: string) {
     this.assertWorkspace();
     if (this.changingSettings.has(id)) throw new Error('正在切换会话设置，请稍后发送');
     if (!userText.trim()) throw new Error('请输入任务内容');
     const s = this.session(id); this.assertCanWork(s.binding);
+    if (!questionRunId) { const autoPeer = this.questions.lockedPeer(id); if (autoPeer) throw new Error(`这个 Session 正在与${autoPeer}自动对话，不能手动发送`); }
     if (s.cursorNative) assertCursorSharedSessionAvailable();
     if (s.provider === 'cursor' && this.configuringCursorPermissions) throw new Error('正在保存 Cursor 权限配置，请保存完成后再发送任务');
     if (s.closedAt) throw new Error('此会话已关闭，请先重新打开');
@@ -1371,7 +1372,10 @@ export class Workbench {
       if (s.closedAt) throw new Error('此会话已关闭');
       s.status = 'starting';
       const input = await this.availableSessionContext(s, userText, sourceIds);
-      if (questionRunId) input.context.questionRunId = questionRunId;
+      if (questionRunId) {
+        input.context.questionRunId = questionRunId;
+        if (agentNotice) input.text = agentNotice + input.text;
+      }
       for (const source of input.sources) if (await hashFile(source.localPath) !== source.sha256) throw new Error('参考快照已改变，请重新添加文件：' + source.name);
       if (s.closedAt) throw new Error('此会话已关闭');
       const capabilities = await runtime.resolveCapabilities(capabilitySelections);
@@ -1387,6 +1391,7 @@ export class Workbench {
   async steer(id: string, expectedTurnId: string, userText: string, sourceIds: string[] = [], capabilitySelections: AgentCapabilitySelection[] = []) {
     this.assertWorkspace();
     const s = this.session(id); this.assertCanWork(s.binding);
+    const autoPeer = this.questions.lockedPeer(id); if (autoPeer) throw new Error(`这个 Session 正在与${autoPeer}自动对话，不能手动发送`);
     if (!userText.trim()) throw new Error('请输入引导内容');
     if (s.provider !== 'codex') throw new Error(`当前 ${s.provider === 'claude' ? 'Claude Code' : 'Cursor'} 接入暂不支持生成中引导，请等待本轮结束后发送`);
     if (s.closedAt || this.stoppingSessions.has(id) || this.closing) throw new Error('会话已关闭或正在停止，引导未发送');
