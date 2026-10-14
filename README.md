@@ -132,7 +132,7 @@ npm.cmd run start:admin
 
 Codex 桌面联动从用户版的 **Beta 功能** 开启，新建会话时选择联动，首次发送自动准备共享后台；需要原生窗口时点击 **在 Codex 中打开**。无需额外的启动或停止脚本，详见[桌面联动说明](docs/codex-desktop-sync.md)。
 
-Cursor **Agents Window** 联动从 **Beta 功能 → Cursor Agents 联动** 开启，可在新建会话时选择，或通过左侧 **接入 Cursor 会话 → Agents 会话** 按项目关联本地 Agent。支持多个面板，使用 Cursor 桌面账号，同步时对应面板需保持打开；当前限制及步骤见 [Cursor Agents 联动说明](docs/cursor-desktop-sync.md)。
+Cursor CLI 会话可独立创建或导入并继续使用。CLI 与 Agents 的强一致关联暂不可用：当前原生接口不能证明完整历史和执行上下文共享，工作台已禁止新建这类关联、续聊及伪造桌面登记。旧关联记录保留，仅能查看面板已加载消息并在原生 Agents 中继续。详见 [Cursor 会话一致性与当前边界](docs/cursor-desktop-sync.md)。
 
 `scripts/` 中的文件用于内部构建、开发验证和手册维护，不是额外的应用启动入口。用途和执行方式见[开发脚本说明](scripts/README.md)。
 

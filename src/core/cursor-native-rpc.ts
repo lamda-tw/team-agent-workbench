@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import type { AgentRpc } from './rpc';
 import type { AgentSession, Message } from '../shared/types';
 import { sameNativePath } from './native-transcript';
+import { assertCursorSharedSessionAvailable } from '../shared/cursor-session-consistency';
 
 export interface CursorNativeDescriptor { version: 1; endpoint: string; sessionId: string; workspace: string; expiresAt: string }
 export interface CursorNativeSnapshot { sessionId: string; status: string; messages: Array<{ id: string; role: 'user' | 'assistant'; text: string }>; title?: string }
@@ -40,7 +41,8 @@ export class CursorNativeRpc extends EventEmitter implements AgentRpc {
   private polling?: NodeJS.Timeout;
   private refreshing = false;
   private last = '';
-  private sending = false;
+  private connectionState?: 'connected' | 'disconnected';
+  private connectionError?: string;
   constructor(private session: AgentSession) { super(); }
   private async invoke(operation: string, body?: unknown, timeout = 10000) {
     if (this.closed) throw new Error('Cursor 原生连接已关闭');
@@ -63,43 +65,31 @@ export class CursorNativeRpc extends EventEmitter implements AgentRpc {
     this.last = fingerprint;
     this.emit('message', { method: 'cursor/nativeSnapshot', params: { sessionId: snapshot.sessionId, snapshot } });
   }
-  async snapshot() { const value = await this.invoke('snapshot'); this.publish(value); return value as CursorNativeSnapshot; }
+  private connection(state: 'connected' | 'disconnected', error?: unknown) {
+    if (this.closed) return;
+    if (state === 'disconnected') this.last = ''; // Reapply native status on recovery even when its content is unchanged.
+    const message = state === 'disconnected' ? error instanceof Error ? error.message : '原生会话暂时不可用' : undefined;
+    if (state === this.connectionState && message === this.connectionError) return;
+    this.connectionState = state; this.connectionError = message;
+    this.emit('message', { method: 'cursor/nativeConnection', params: { sessionId: this.session.nativeId, state, message } });
+  }
+  async snapshot() {
+    try { const value = await this.invoke('snapshot'); this.publish(value); this.connection('connected'); return value as CursorNativeSnapshot; }
+    catch (error) { this.connection('disconnected', error); throw error; }
+  }
   private async refresh() {
     if (this.refreshing || this.closed) return;
     this.refreshing = true;
     try { await this.snapshot(); }
-    catch (error) { if (!this.closed && !this.sending) this.emit('diagnostic', error instanceof Error ? error.message : 'Cursor 原生窗口暂时不可用'); }
+    catch { /* snapshot publishes an explicit connection state, including when no task is running. */ }
     finally { this.refreshing = false; }
   }
-  async request(method: string, params: any = {}, _timeout = 60000, onWritten?: () => void): Promise<any> {
+  async request(method: string, params: any = {}, _timeout = 60000, _onWritten?: () => void): Promise<any> {
     if (method === 'initialize') { await this.snapshot(); this.polling ||= setInterval(() => void this.refresh(), 400); this.polling.unref(); return { protocolVersion: 1 }; }
     if (method === 'authenticate') return {};
     if (params.sessionId && params.sessionId !== this.session.nativeId) throw new Error('操作不属于关联的 Cursor 原生会话');
     if (method === 'session/load') { await this.snapshot(); return { sessionId: this.session.nativeId, modes: { currentModeId: 'agent', availableModes: [] } }; }
-    if (method === 'session/new') throw new Error('请先在 Cursor 原生窗口创建并关联会话');
-    if (method === 'session/prompt') {
-      const text = params.prompt?.map((part: any) => part.type === 'text' ? part.text : '').join('\n');
-      if (!text?.trim()) throw new Error('请输入任务内容');
-      if (this.sending) throw new Error('正在向 Cursor 提交消息，请稍候');
-      this.sending = true;
-      try {
-        const before = await this.snapshot();
-        if (before.status === 'generating') throw new Error('Cursor 原生会话仍在运行，请等待本轮结束');
-        const previousIds = new Set(before.messages.filter(message => message.role === 'assistant').map(message => message.id));
-        // A lost acknowledgement must not trigger an automatic repeat send.
-        const acknowledgement = await this.invoke('send', { text }, 20000);
-        if (acknowledgement?.submitted !== true) throw new Error('Cursor 送达状态未确认，请核对原生窗口，避免重复发送');
-        onWritten?.();
-        const deadline = Date.now() + 600000;
-        while (!this.closed && Date.now() < deadline) {
-          const state = await this.snapshot();
-          if (['aborted','error'].includes(state.status)) throw new Error('Cursor 原生会话已停止或失败，请核对已有回复');
-          if (state.status !== 'generating' && state.messages.some(message => message.role === 'assistant' && !previousIds.has(message.id) && message.text.trim())) return { stopReason: 'end_turn' };
-          await new Promise(resolve => setTimeout(resolve, 200));
-        }
-        throw new Error('Cursor 回复尚未确认完成，请核对原生窗口，避免重复发送');
-      } finally { this.sending = false; }
-    }
+    if (method === 'session/new' || method === 'session/prompt') assertCursorSharedSessionAvailable();
     if (method === 'session/cancel') return this.invoke('stop', {});
     if (method === 'cursor/nativeFocus') return this.invoke('focus', {});
     throw new Error('请在 Cursor 原生窗口设置模型、模式、权限及工具');

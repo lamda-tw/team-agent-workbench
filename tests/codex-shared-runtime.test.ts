@@ -6,7 +6,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { AgentRuntime } from '../src/core/agents';
 import type { AgentRpc, RpcMessage } from '../src/core/rpc';
 import type { AgentSession } from '../src/shared/types';
-import { CodexDesktopControls } from '../src/renderer/codex-desktop-controls';
+import { NativeDesktopControls } from '../src/renderer/native-desktop-controls';
 
 class FixtureRpc extends EventEmitter implements AgentRpc {
   replies: RpcMessage[] = [];
@@ -101,7 +101,17 @@ test('changing a loaded shared thread applies permissions on the next turn witho
 });
 test('native controls offer explicit recovery and read-only status without exposing approval buttons', () => {
   const f = setup(); f.session.status = 'error'; f.session.desktopSyncPending = true; f.session.desktopWaitingApproval = true;
-  const html = renderToStaticMarkup(React.createElement(CodexDesktopControls, { session: f.session, run: () => {} }));
-  assert.match(html, /重新连接/); assert.match(html, /正在补齐对话/); assert.match(html, /发起任务的窗口/); assert.doesNotMatch(html, /允许本次|拒绝/);
-  f.session.closedAt = 'now'; assert.equal(renderToStaticMarkup(React.createElement(CodexDesktopControls, { session: f.session, run: () => {} })), '');
+  const html = renderToStaticMarkup(React.createElement(NativeDesktopControls, { session: f.session, run: () => {} }));
+  assert.match(html, /恢复同步/); assert.match(html, /正在补齐对话/); assert.match(html, /发起任务的窗口/); assert.doesNotMatch(html, /允许本次|拒绝/);
+  f.session.closedAt = 'now'; assert.equal(renderToStaticMarkup(React.createElement(NativeDesktopControls, { session: f.session, run: () => {} })), '');
+});
+
+test('native controls restore idle associations for either provider and suppress recovery while connected', () => {
+  const f = setup(); f.session.status='idle';
+  const render=()=>renderToStaticMarkup(React.createElement(NativeDesktopControls,{session:f.session,run:()=>{}}));
+  assert.match(render(),/尚未同步/);assert.match(render(),/恢复同步/);
+  f.session.desktopSyncState='connected';assert.match(render(),/同步中/);assert.doesNotMatch(render(),/恢复同步/);
+  f.session.codexDesktop=false;f.session.provider='cursor';f.session.cursorNative={managed:true,descriptorFile:'fixture'};f.session.desktopSyncState='disconnected';
+  assert.match(render(),/记录未连接/);assert.match(render(),/重新读取/);assert.match(render(),/无法让 CLI 与 Agents 共用完整历史和上下文/);assert.doesNotMatch(render(),/同步中|恢复同步|CLI 请求失败/);
+  f.session.nativeId=undefined;assert.doesNotMatch(render(),/重新读取/);
 });

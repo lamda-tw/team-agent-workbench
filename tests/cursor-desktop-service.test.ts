@@ -36,110 +36,79 @@ test('the normal launcher explicitly selects Agents Window and retains the full 
   assert.deepEqual(cursorAgentsLaunchArgs(cwd,1234),['--glass','--remote-debugging-address=127.0.0.1','--remote-debugging-port=1234',cwd]);
 });
 
-test('first-send promotion persists the new native ID and renews its descriptor before acknowledging, including restart recovery',async()=>{
-  const f=await fixture();let service=new CursorDesktopService(f.options);let rpc:CursorNativeRpc|undefined;
-  const saved=path.join(f.root,'saved-session.json');
-  try {
-    await service.prepare(f.session,true,async()=>{f.calls.push('persist');await fs.writeFile(saved,JSON.stringify(f.session));});
-    const draftId=f.session.nativeId;
-    f.promote();rpc=new CursorNativeRpc(f.session);
-    await rpc.request('session/prompt',{sessionId:draftId,prompt:[{type:'text',text:'promote'}]});
-    assert.notEqual(f.session.nativeId,draftId);
-    const persisted:AgentSession=JSON.parse(await fs.readFile(saved,'utf8'));
-    assert.equal(persisted.nativeId,f.state.sessionId);
-    assert.equal(JSON.parse(await fs.readFile(f.session.cursorNative!.descriptorFile,'utf8')).sessionId,f.state.sessionId);
-    assert.equal(f.calls.filter(x=>x==='persist').length,1);
-    await rpc.close();await service.close();service=new CursorDesktopService(f.options);
-    await service.prepare(persisted,false);rpc=new CursorNativeRpc(persisted);
-    assert.equal((await rpc.snapshot()).messages[0].text,'promote');
-    assert.equal(f.calls.filter(x=>x==='create').length,1);assert.equal(f.calls.filter(x=>x==='send').length,1);
-  } finally {await rpc?.close();await service.close();await f.clean();}
-});
-
-test('normal Cursor desktop service creates once, confirms delivery, recovers after Workbench restart without launching or replacing the native chat', async()=>{
-  const f=await fixture();let service=new CursorDesktopService(f.options);let rpc:CursorNativeRpc|undefined;
-  try {
-    await assert.rejects(service.prepare(f.session,false),/尚未打开/);
-    assert.equal(f.calls.length,0);
-    await Promise.all([service.prepare(f.session),service.prepare(f.session)]);
-    assert.equal(f.calls.filter(x=>x==='create').length,1);assert.equal(f.calls.filter(x=>x==='launch').length,1);
-    rpc=new CursorNativeRpc(f.session);await rpc.request('initialize');
-    await rpc.request('session/prompt',{sessionId:f.session.nativeId,prompt:[{type:'text',text:'hello'}]});
-    assert.equal(f.calls.filter(x=>x==='send').length,1);
-    const prior=f.session.cursorNative!.descriptorFile;
-    await rpc.close();await service.close();assert.ok(!f.calls.includes('stop'));
-    service=new CursorDesktopService(f.options);await service.prepare(f.session,false);
-    assert.notEqual(prior,f.session.cursorNative!.descriptorFile);
-    assert.equal(f.calls.filter(x=>x==='launch').length,1);assert.equal(f.calls.filter(x=>x==='create').length,1);
-    rpc=new CursorNativeRpc(f.session);const snapshot=await rpc.snapshot();assert.equal(snapshot.messages.length,2);
-    await service.open(f.session);assert.ok(f.calls.includes('focus'));
-  } finally {await rpc?.close();await service.close();await f.clean();}
-});
-
-test('Cursor refuses to replace an already open unmanaged app, and never retries a send with an uncertain acknowledgement', async()=>{
-  const f=await fixture(), service=new CursorDesktopService(f.options);let rpc:CursorNativeRpc|undefined;
-  try {
-    f.running(true);await assert.rejects(service.prepare(f.session),/保存并退出/);assert.ok(!f.calls.includes('launch'));
-    f.running(false);await service.prepare(f.session);rpc=new CursorNativeRpc(f.session);f.rejectSend();
-    await assert.rejects(rpc.request('session/prompt',{prompt:[{type:'text',text:'once'}]}),/ack lost/);
-    assert.equal(f.calls.filter(x=>x==='send').length,1);
-    f.unavailable(true);f.running(true);await assert.rejects(service.prepare(f.session),/保存并退出/);
-    assert.equal(f.calls.filter(x=>x==='launch').length,1);assert.equal(f.calls.filter(x=>x==='create').length,1);
-  } finally {await rpc?.close();await service.close();await f.clean();}
-});
-
-test('local Cursor bridge scopes paths and methods, denies browser origins and revokes closed session access', async()=>{
+test('unknown native identity is rejected before starting Cursor or creating a substitute Agent',async()=>{
   const f=await fixture(),service=new CursorDesktopService(f.options);
-  try {
+  try{
+    for(const launch of [false,true])await assert.rejects(service.prepare(f.session,launch),{code:'CURSOR_SHARED_SESSION_UNAVAILABLE'});
+    f.session.cursorNative!.creationUnconfirmed=true;await assert.rejects(service.prepare(f.session),{code:'CURSOR_SHARED_SESSION_UNAVAILABLE'});
+    assert.equal(f.calls.length,0);assert.equal(f.session.nativeId,undefined);assert.equal(f.session.cursorNative!.descriptorFile,'');
+  }finally{await service.close();await f.clean();}
+});
+
+test('legacy record viewing restores the same Agent after restart without creating, sending or replacing its identity',async()=>{
+  const f=await fixture();let service=new CursorDesktopService(f.options);let rpc:CursorNativeRpc|undefined;
+  f.session.nativeId=f.state.sessionId;f.state.messages.push({id:'original-user',role:'user',text:'original context'},{id:'original-reply',role:'assistant',text:'original reply'});
+  try{
+    await assert.rejects(service.prepare(f.session,false),/尚未打开/);assert.equal(f.calls.length,0);
+    await Promise.all([service.prepare(f.session),service.prepare(f.session)]);assert.equal(f.calls.filter(x=>x==='launch').length,1);
+    rpc=new CursorNativeRpc(f.session);await rpc.request('initialize');assert.equal((await rpc.snapshot()).messages.length,2);
+    await assert.rejects(rpc.request('session/prompt',{sessionId:f.session.nativeId,prompt:[{type:'text',text:'blocked'}]}),{code:'CURSOR_SHARED_SESSION_UNAVAILABLE'});
+    const prior=f.session.cursorNative!.descriptorFile;
+    await rpc.close();await service.close();service=new CursorDesktopService(f.options);await service.prepare(f.session,false);
+    assert.notEqual(f.session.cursorNative!.descriptorFile,prior);rpc=new CursorNativeRpc(f.session);assert.equal((await rpc.snapshot()).sessionId,f.state.sessionId);
+    await service.open(f.session);assert.ok(f.calls.includes('focus'));assert.equal(f.calls.filter(x=>['create','send','stop'].includes(x)).length,0);
+  }finally{await rpc?.close();await service.close();await f.clean();}
+});
+
+test('legacy viewing refuses to replace an already open unmanaged Cursor',async()=>{
+  const f=await fixture(),service=new CursorDesktopService(f.options);f.session.nativeId=f.state.sessionId;
+  try{
+    f.running(true);await assert.rejects(service.prepare(f.session),/保存并退出/);assert.ok(!f.calls.includes('launch'));
+    f.running(false);await service.prepare(f.session);f.unavailable(true);f.running(true);await assert.rejects(service.prepare(f.session),/保存并退出/);
+    assert.equal(f.calls.filter(x=>x==='launch').length,1);assert.equal(f.calls.filter(x=>x==='create').length,0);
+  }finally{await service.close();await f.clean();}
+});
+
+test('local observer denies the send endpoint even when its native descriptor and origin are valid',async()=>{
+  const f=await fixture(),service=new CursorDesktopService(f.options);f.session.nativeId=f.state.sessionId;
+  try{
     await service.prepare(f.session);const descriptor=JSON.parse(await fs.readFile(f.session.cursorNative!.descriptorFile,'utf8'));
     assert.equal((await fetch(descriptor.endpoint+'/snapshot',{headers:{Origin:'http://example.com'}})).status,403);
     assert.equal((await fetch(descriptor.endpoint+'/send')).status,405);
-    assert.equal((await fetch(descriptor.endpoint.replace(/native\/.+/, 'native/'+'0'.repeat(64))+'/snapshot')).status,403);
-    assert.equal((await fetch(descriptor.endpoint+'/snapshot')).status,200);
+    const before=JSON.stringify(f.state);const response=await fetch(descriptor.endpoint+'/send',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text:'blocked'})});
+    assert.equal(response.status,409);assert.match((await response.json()).message,/共用完整历史和上下文/);assert.equal(JSON.stringify(f.state),before);assert.equal(f.calls.filter(x=>x==='send').length,0);
     service.release(f.session.id);assert.equal((await fetch(descriptor.endpoint+'/snapshot')).status,403);
-    assert.ok(!f.calls.includes('send'));assert.ok(!f.calls.includes('stop'));
   }finally{await service.close();await f.clean();}
 });
 
-test('formal Workbench creation and desktop import use Cursor desktop identity without CLI login, deduplicate and retain associations when Beta is disabled',async()=>{
+test('unsupported shared-session creation, import and enabling Beta fail without creating workbench records or launching Cursor',async()=>{
   const f=await fixture(),service=new CursorDesktopService(f.options),wb=new Workbench(path.join(f.root,'data'),()=>{},()=>{},undefined,undefined,undefined,undefined,service);
-  try {
-    await wb.store.init();grantTestWorkspace(wb,f.root);
-    await assert.rejects(wb.createSession('cursor',f.root,offlineProjectId,'work',undefined,undefined,'inherit',false,'direct',true),/Beta/);
-    await wb.setBetaFeature('cursorDesktopSync',true);
-    const s=await wb.createSession('cursor',f.root,offlineProjectId,'work',undefined,'ignored','full',false,'direct',true);
-    assert.equal(s.cursorNative?.managed,true);assert.equal(s.codexDesktop,undefined);assert.equal(s.nativeId,undefined);assert.equal(f.calls.length,0);
-    wb.requireAuth=async()=>{throw new Error('CLI login must not run');};
-    (wb as any).availableSessionContext=async(_:AgentSession,text:string)=>({text,sources:[],context:{sourceHashes:{}}});
-    (wb as any).adoptLatestProjectBrief=async()=>{};
-    const draftId=f.state.sessionId;f.promote();
-    assert.equal(await wb.send(s.id,'from workbench'),true);assert.equal(s.nativeId,f.state.sessionId);
-    assert.notEqual(s.nativeId,draftId);assert.equal(s.messages.find(m=>m.role==='user')?.context?.nativeId,s.nativeId);
-    await assert.rejects(wb.linkCursorDesktopSessions([s.nativeId!],offlineProjectId),/已关联/);
-    await wb.setBetaFeature('cursorDesktopSync',false);assert.equal(await wb.send(s.id,'still linked'),true);
-    await wb.closeSession(s.id);assert.ok(!f.calls.includes('stop'));
-    const fresh=new CursorDesktopService(f.options);await fresh.close();
-  } finally {await wb.close();await f.clean();}
-});
-
-test('existing desktop chat import hydrates visible history and never creates a replacement session',async()=>{
-  const f=await fixture(),service=new CursorDesktopService(f.options),wb=new Workbench(path.join(f.root,'data'),()=>{},()=>{},undefined,undefined,undefined,undefined,service);
-  try {
-    await wb.store.init();grantTestWorkspace(wb,f.root);await wb.setBetaFeature('cursorDesktopSync',true);
-    await service.list(f.root,true);f.state.messages.push({id:'earlier',role:'user',text:'native context'});
-    const [s]=await wb.linkCursorDesktopSessions([f.state.sessionId],offlineProjectId);
-    assert.equal(s.nativeId,f.state.sessionId);assert.equal(s.messages[0].text,'native context');assert.ok(!f.calls.includes('create'));
-    const catalog=await wb.listCursorDesktopSessions('');assert.equal(catalog.sessions[0].linkedSessionId,s.id);
+  try{
+    await wb.store.init();grantTestWorkspace(wb,f.root);const beforeSessions=JSON.stringify(wb.store.sessions),beforeSettings=JSON.stringify(wb.store.settings);
+    await assert.rejects(wb.setBetaFeature('cursorDesktopSync',true),{code:'CURSOR_SHARED_SESSION_UNAVAILABLE'});
+    await assert.rejects(wb.createSession('cursor',f.root,offlineProjectId,'work',undefined,'ignored','full',false,'direct',true),{code:'CURSOR_SHARED_SESSION_UNAVAILABLE'});
+    await assert.rejects(wb.linkCursorDesktopSessions([f.state.sessionId],offlineProjectId),{code:'CURSOR_SHARED_SESSION_UNAVAILABLE'});
+    assert.equal(JSON.stringify(wb.store.sessions),beforeSessions);assert.equal(JSON.stringify(wb.store.settings),beforeSettings);assert.equal(f.calls.length,0);
+    const normal=await wb.createSession('cursor',f.root,offlineProjectId,'work',undefined,undefined,'inherit',false,'direct');assert.equal(normal.cursorNative,undefined);
+    await wb.setBetaFeature('cursorDesktopSync',false);
   }finally{await wb.close();await f.clean();}
 });
 
-test('an uncertain native creation is remembered and a later attempt cannot create a duplicate chat',async()=>{
-  const f=await fixture(),service=new CursorDesktopService(f.options);
-  f.client.create=async()=>{f.calls.push('create');throw Object.assign(new Error('unconfirmed'),{code:'CURSOR_CREATE_UNCONFIRMED'});};
-  try {
-    await assert.rejects(service.prepare(f.session),/unconfirmed/);
-    assert.equal(f.session.cursorNative?.creationUnconfirmed,true);
-    await assert.rejects(service.prepare(f.session),/上次新建结果未确认/);
-    assert.equal(f.calls.filter(x=>x==='create').length,1);
-  }finally{await service.close();await f.clean();}
+test('existing workbench associations remain viewable and reopen the original Agent without CLI execution or new messages',async()=>{
+  const f=await fixture(),service=new CursorDesktopService(f.options),wb=new Workbench(path.join(f.root,'data'),()=>{},()=>{},undefined,undefined,undefined,undefined,service);
+  try{
+    await wb.store.init();grantTestWorkspace(wb,f.root);f.state.messages.push({id:'native-user',role:'user',text:'existing task'},{id:'native-reply',role:'assistant',text:'existing response'});
+    const s=await wb.createSession('cursor',f.root,offlineProjectId,'work',undefined,undefined,'inherit',false,'direct');s.nativeId=f.state.sessionId;s.cursorNative={managed:true,descriptorFile:''};s.nativeLive=true;
+    wb.requireAuth=async()=>{throw Error('CLI login must not run');};
+    await wb.restoreDesktopSync(s.id);assert.equal(s.messages.length,2);assert.equal(s.nativeId,f.state.sessionId);await wb.store.save();await wb.close();
+    const nextService=new CursorDesktopService(f.options),next=new Workbench(path.join(f.root,'data'),()=>{},()=>{},undefined,undefined,undefined,undefined,nextService);
+    try{
+      await next.store.init();grantTestWorkspace(next,f.root);const restored=next.store.sessions.find(value=>value.id===s.id)!;
+      await next.restoreDesktopSync(restored.id);assert.equal(restored.nativeId,s.nativeId);assert.equal(restored.messages.length,2);
+      await assert.rejects(next.send(restored.id,'blocked'),{code:'CURSOR_SHARED_SESSION_UNAVAILABLE'});
+      const calls=f.calls.length;await next.restoreDesktopSync(restored.id);assert.equal(f.calls.length,calls);
+      assert.equal(f.calls.filter(x=>['send','create','stop'].includes(x)).length,0);
+      const noNative={...restored,id:randomUUID(),nativeId:undefined};next.store.sessions.push(noNative);await assert.rejects(next.restoreDesktopSync(noNative.id),/已关联/);
+    }finally{await next.close();}
+  }finally{await wb.close();await f.clean();}
 });

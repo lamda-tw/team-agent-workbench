@@ -1,44 +1,35 @@
-﻿# Cursor Agents 联动（Beta）
+# Cursor 会话一致性与当前边界
 
-普通用户版的 Cursor 原生联动现在适配 **Agents Window**。从工作台新建、接入、打开及续聊本地 Agent，使用 Cursor 桌面账号；无需 Cursor Agent CLI 登录。仍使用原有用户版启动入口。
+## 必须满足的两项原则
 
-## 使用方式
+1. 关联的工作台 Cursor CLI 会话和 Cursor Agents，会有同一份完整、有序的原生历史。正常传输延迟结束后，不得漏消息、重复消息或以相同标题、文本猜测会话身份。
+2. 无论从哪边继续，都使用同一个原生执行状态，行为等同于在单一原生会话中操作。工具结果、权限和提问、模型与模式设置、上下文压缩及压缩后的恢复均由同一原生执行者负责；一轮任务只执行一次。
 
-1. 在 **Beta 功能** 中开启 **Cursor Agents 联动**。设置属于当前团队账号；关闭开关不解除已有会话关联。
-2. **新建工作会话** → 选择 Cursor、本机网络，勾选 **联动 Cursor Agents**。首次发送或点击 **在 Cursor Agents 中打开 · Beta** 时，在对应项目下创建原生 Agent。
-3. 接入已有会话：左侧 **接入 Cursor 会话 → Agents 会话**，按原生项目目录勾选本地会话。**打开 Cursor Agents** 可启动联动窗口。原有 **CLI 会话** 列表独立保留。
-4. 首次联动时，如果普通 Cursor 已在运行，请先保存并退出，再从工作台打开联动。工作台使用 Agents Window 启动参数，不结束用户进程、不修改安装文件或原生数据库、不绕过账号开关。
-5. 同步、发送前，在 Agents Window 中打开对应 Agent 面板；可以同时打开多个不同 Agent。点击工作台的 **在 Cursor Agents 中打开** 会定位该会话。模型、模式、工具、权限、授权和提问均在 Agents 内处理。
-6. 关闭工作台仅断开连接，不停止原生任务。重启后恢复已关联且仍打开的会话；不会创建替代聊天。
+工作台只管理会话和消息，不自行重建另一套上下文、不生成用来替代原生压缩的摘要、不把两份独立运行的历史文件拼起来当作共享执行状态。
 
-新建需要 Agents 侧栏已有对应的本地项目分组。如果项目尚未出现，请在 Agents 侧栏添加并展开完整目录。新草稿应选择当前本地目录；Cloud、Private Worker 和首次发送时新建工作树的草稿不作为发送目标。已有本地工作树会话按其实际绝对目录关联。
+## 当前功能
 
-## 会话和目录边界
+- 普通 Cursor CLI 会话仍可以创建、导入和继续。它们是 CLI 的原会话，不能与 Agents 当作一条会话交替执行。
+- 新建窗口的 **联动 Cursor Agents** 显示为 **暂不可用**。Beta 开关不能新开启，旧的已开启设置可以关闭。
+- 旧关联、原生 ID、已保存消息和本地草稿保留。工具栏明确显示 **仅查看已加载记录**，不宣称完整同步。**重新读取** 只重连原来的观察通道；**在 Cursor Agents 中打开** 仍定位原会话，不创建替代 Agent。
+- 旧关联会话的发送按钮禁用，回车也不会发送。用户可在 Cursor Agents 原生面板继续。窗口未加载的历史、工具和思考记录不能被此观察通道完整读取，不能作为完整会话验收。
+- CLI 会话的 **在桌面端显示** 禁用，服务端也拒绝该操作，不向 Cursor 的会话数据库写入合成记录。
+- 关联断开、身份丢失或描述文件过期时，不回退到独立 CLI、不自动重发，也不切换到其他原生 ID。关闭工作台只移除观察连接，不停止原生任务。
 
-- 根据 Agents 页面配置、原生 Agent ID、每条会话的完整本地工作目录确认身份。Agents Window 可包含多个项目，不能用窗口级目录代替各会话目录，也不根据标题或项目名猜测。
-- 每个面板独立读取消息、输入状态和停止按钮，排除嵌套子 Agent 的内容。旁边面板有草稿或正在回复，不影响向目标面板发送。
-- 同一 Agent 在多个窗口或多个面板重复打开时，不作为自动发送目标。远程、多根工作区、Cloud 和 Claude Code Agent 暂不支持。
-- 已有草稿、正在回复、目录改变、身份无法确认或输入焦点改变时停止发送。提交使用目标面板的原生发送按钮；送达未确认不自动重发。
-- 新建 Agent 最初可能是草稿 ID。首次发送后，只有原面板出现新的本地会话及本次用户消息，才接纳正式 ID；工作台保存新 ID 并更新本机连接描述后再确认送达。不能通过相同标题或相同文本猜测另一个既有会话。
-- 只同步原生面板当前已加载、可见的用户和助手消息，按消息 ID 合并，不删除工作台已保留的屏幕外历史。尚未覆盖完整早期记录、工具和思考事件，未发送草稿不进入同步记录。
-- 当前仍需原生面板保持打开。原生会话暂不支持自动摘要、项目日志后台更新、自动匹配团队动态、整理成果及派生 Subsession。
+## 为什么暂不可用
 
-## 实现与兼容
+本机检查的是 Cursor 3.24.12 和 Cursor Agent CLI 2026.09.10-fd3934a。CLI 帮助没有接入原生桌面 Agent 的命令。Cursor 官方在 2026-09-29 说明 Desktop Bridge / `cursor desktop` 仍是未向客户账号开放的内部开发能力，并说明 CLI 会话管理命令不能接入桌面 Agent，参见 [官方支持说明](https://forum.cursor.com/t/enable-desktop-bridge-desktop-bridge-for-my-account/173277)。2026-10-14 核对最新公开发布说明，未找到这一能力已经对外开放的证据。
 
-普通工作台进程内的 CursorDesktopService 管理生命周期，CursorDesktopCdp 验证并连接 Agents 页面，cursorAgentsPage 负责面板定位，CursorNativeRpc 接入现有会话运行时。内部 cursorDesktopSync 设置及会话字段保留，避免升级丢失已有配置。
+现有 Agents Window 适配操作原生控件，并读取已加载的视图消息；这可以验证面板身份与部分消息，不能证明真正的 CLI 和 Agents 共享完整模型状态。因而这轮修改落实了拒绝不满足原则的路径，尚未实现两端完整关联。不能把打桩通过当作原生端到端验收。
 
-适配基于本机 Cursor 3.21.18 的 Agents 页面结构。只在已渲染组件上有限读取 React 视图属性以取得原生会话和项目标识，操作使用原生界面控件；不调用内部仓库服务或受限 Desktop Bridge。Cursor 升级导致结构变化时会拒绝无法核对的操作，需要更新适配。
+## 实现和验证
 
-连接只监听 127.0.0.1；每条关联使用随机访问路径，拒绝浏览器 Origin 和错误请求方法。凭据位于本机用户受限目录。关闭、删除会话或切换团队账号会撤销当前连接访问，不删除 Cursor 自身历史。
+共享能力边界由 src/shared/cursor-session-consistency.ts 定义。界面、工作台业务层、AgentRuntime、CursorNativeRpc、本机窗口连接服务，以及低层桌面登记均拒绝不满足条件的发送或登记。拒绝发生在创建替代会话、构造补充上下文、写入新消息或启动 CLI 之前。
 
-原有 IDE 会话关联不会自动迁移成新的 Agent，也不会复制上下文。旧会话只有在 Agents 中以同一原生 ID、同一工作目录打开后才能继续关联；无法确认时提示打开原会话。
+后台用例覆盖：新建、Beta 开启、批量导入和任务启动的拒绝；旧关联续聊的非修改行为；低层窗口发送与桌面登记的拒绝；历史、原生 ID、草稿和原生任务的保留；观察通道按原 ID 恢复；普通 CLI 入口保留；Cursor 不再显示“同步中”；发送按钮和回车不可发送。Codex 的共享后台流程单独验证。
 
-## 验证范围
+    npx tsx --test tests/cursor-desktop-client.test.ts tests/cursor-desktop-service.test.ts tests/cursor-native-rpc.test.ts tests/cursor-session-consistency.test.ts tests/beta-features.test.ts tests/codex-shared-runtime.test.ts tests/codex-desktop-service.test.ts tests/native-sessions.test.ts
+    npm run typecheck
+    npm run build
 
-后台测试使用内存 Agents 页面和本机 HTTP/WebSocket 替身，覆盖多项目同名目录、多面板消息隔离、原生项目内创建、草稿 ID 转正式 ID及重启恢复、原生发送与停止、已有草稿保护、焦点变化、送达不明不重发、CLI 免登录、导入去重和关闭工作台不停止任务。
-
-    node scripts/test-background.mjs tests/cursor-desktop-client.test.ts tests/cursor-desktop-service.test.ts tests/cursor-native-rpc.test.ts tests/beta-features.test.ts
-    node node_modules/typescript/bin/tsc --noEmit
-    node scripts/build.mjs --check
-
-此前 2026-10-13 的四轮双向同步演示针对 Cursor IDE，不代表 Agents Window 验收。本次依据安装包源码核对原生结构并运行后台测试；没有操作用户正在使用的 Cursor。真实 Agents Window 的登录、项目选择、跨端多轮续聊与安装包仍需在独立测试环境或用户安排的空闲时段验收。
+恢复完整关联前，需要一个实际可用的原生共享会话接口，并完成双向多轮、工具调用、授权、上下文压缩、重启恢复和并发发送的真实验收。版本更新、相同 UUID 或相同聊天文字均不自动解除能力限制。

@@ -179,6 +179,7 @@ async function dispatch(action: string, raw: unknown, owner: BrowserWindow): Pro
     case 'session.native.refresh': return workbench.refreshNativeTranscript(sessionInput.parse(raw).id);
     case 'session.codexDesktop.open': return workbench.openCodexDesktop(sessionInput.parse(raw).id);
     case 'session.codexDesktop.reconnect': return workbench.reconnectCodexDesktop(sessionInput.parse(raw).id);
+    case 'session.desktopSync.restore': return workbench.restoreDesktopSync(sessionInput.parse(raw).id);
     case 'session.cursorDesktop.list': { const p=z.object({cwd:z.string().default(''),launch:z.boolean().default(false)}).parse(raw); return workbench.listCursorDesktopSessions(p.cwd,p.launch); }
     case 'session.cursorDesktop.linkMany': { const p=z.object({nativeIds:z.array(z.string().uuid()).min(1).max(50),projectId:z.string().min(1)}).parse(raw); return workbench.linkCursorDesktopSessions(p.nativeIds,p.projectId); }
     case 'session.cursorNative.focus': return workbench.focusCursorNative(sessionInput.parse(raw).id);

@@ -8,6 +8,7 @@ import type { AgentSession } from '../shared/types';
 import { CursorDesktopCdp, type CursorDesktopClient, type CursorDesktopChat } from './cursor-desktop-client';
 import { privateBridgeDirectory } from './codex-shared-backend';
 import { userDesktopAppOpen } from './desktop-app-open';
+import { assertCursorSharedSessionAvailable } from '../shared/cursor-session-consistency';
 
 const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 export interface CursorDesktopIntegration {
@@ -135,6 +136,7 @@ export class CursorDesktopService implements CursorDesktopIntegration {
   async list(cwd: string, launch = false) { const client=await this.ensure(launch,cwd); if(launch)await this.workspace(client,cwd);return client.list(); }
   async prepare(session: AgentSession, launch = true, persist?: () => Promise<void>) {
     if (!session.cursorNative?.managed || !/^[0-9a-f-]{36}$/i.test(session.id) || session.provider !== 'cursor' || session.purpose !== 'work' || session.networkRoute === 'management' || session.closedAt) throw new Error('此会话不能使用 Cursor 桌面联动');
+    if (!session.nativeId) assertCursorSharedSessionAvailable();
     if(persist)this.persistence.set(session.id,persist);
     const existing = this.associations.get(session.id); if (existing) return existing;
     const job = this.publication.then(() => this.associate(session, launch));
@@ -142,14 +144,9 @@ export class CursorDesktopService implements CursorDesktopIntegration {
     try { await job; } finally { if (this.associations.get(session.id) === job) this.associations.delete(session.id); }
   }
   private async associate(session: AgentSession, launch: boolean) {
+    if (!session.nativeId) assertCursorSharedSessionAvailable();
     const client = await this.ensure(launch, session.cwd);
     if (launch) await this.workspace(client, session.cwd);
-    if (!session.nativeId) {
-      if (!launch) return;
-      if (session.cursorNative!.creationUnconfirmed) throw new Error('上次新建结果未确认，请在 Cursor Agents 中核对，再用“接入 Cursor 会话”关联已有会话');
-      try { const chat = await client.create(session.cwd); session.nativeId = chat.nativeId; session.nativeLive = true; }
-      catch (error: any) { if (error.code === 'CURSOR_CREATE_UNCONFIRMED') session.cursorNative!.creationUnconfirmed = true; throw error; }
-    }
     if (!session.nativeId) return;
     if (session.closedAt || this.closed) throw new Error('会话或工作台已经关闭，未建立联动');
     this.directory ||= await (this.options.privateDirectory || privateBridgeDirectory)(this.parent);
@@ -178,23 +175,11 @@ export class CursorDesktopService implements CursorDesktopIntegration {
     const operation = match[2];
     if (req.method !== (operation === 'snapshot' ? 'GET' : 'POST')) { respond(405, {}); return; }
     try {
+      if (operation === 'send') assertCursorSharedSessionAvailable();
       let body = ''; for await (const chunk of req) { body += chunk.toString(); if (Buffer.byteLength(body) > 256 * 1024) throw new Error('消息过长'); }
       const client = await this.ensure(false, entry.cwd);
       if(this.entries.get(match[1])!==entry||entry.session.closedAt)throw new Error('此会话关联已关闭');
       if (operation === 'snapshot') { respond(200, await client.snapshot(entry.id, entry.cwd)); return; }
-      if (operation === 'send') {
-        const text = JSON.parse(body).text;
-        if (typeof text !== 'string' || !text.trim()) throw new Error('请输入任务内容');
-        const acknowledgement=await client.send(entry.id, entry.cwd, text);
-        if(acknowledgement.sessionId && acknowledgement.sessionId!==entry.id) {
-          if(!/^[0-9a-f-]{36}$/i.test(acknowledgement.sessionId))throw new Error('Cursor Agents 返回的正式会话 ID 无效，请核对已发送的消息');
-          const prior=entry.id;entry.id=acknowledgement.sessionId;entry.session.nativeId=entry.id;
-          for(const message of entry.session.messages)if(message.context?.nativeId===prior)message.context.nativeId=entry.id;
-          await this.persistence.get(entry.owner)?.();
-          await this.writeDescriptor(entry.session,match[1]);
-        }
-        respond(200,acknowledgement);return;
-      }
       if (operation === 'focus') await client.focus(entry.id, entry.cwd); else await client.stop(entry.id, entry.cwd);
       respond(200, { ok: true });
     } catch (error: any) { respond(409, { message: error.message || 'Cursor 原生窗口暂时不可用' }); }

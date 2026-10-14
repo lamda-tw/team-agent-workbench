@@ -39,6 +39,8 @@ export interface AgentSession {
   codexPrivateFork?: boolean;
   desktopSyncPending?: boolean;
   desktopWaitingApproval?: boolean;
+  desktopSyncState?: 'connecting' | 'connected' | 'disconnected';
+  desktopSyncError?: string;
   cursorNative?: { descriptorFile: string; managed?: boolean; creationUnconfirmed?: boolean };
   mode?: import('./session-mode').SessionMode; proposedPlan?: import('./session-mode').ProposedPlan;
   id: string; title: string; provider: Provider; model?: string; closedAt?: string; nativeId?: string; nativePath?: string; nativeLive?: boolean; codexStorage?: 'workbench'; codexNeedsRegistration?: boolean;

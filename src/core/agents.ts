@@ -7,6 +7,7 @@ import { JsonRpc, type AgentRpc, type RpcMessage } from './rpc';
 import { WebSocketRpc } from './websocket-rpc';
 import { mergeSharedThread } from './codex-live-thread';
 import { CursorNativeRpc, mergeCursorNativeMessages, type CursorNativeSnapshot } from './cursor-native-rpc';
+import { assertCursorSharedSessionAvailable } from '../shared/cursor-session-consistency';
 import { codexPermissionParams, codexTurnPermissionParams, codexPermissions, cursorPermissionArgs, cursorPermissions, permissionIssue, probeCodexCommand } from './permissions';
 import { refreshCodexConfiguration, validateCodexStorage, type CodexStorage } from './codex-storage';
 import { CodexMcp } from './codex-mcp';
@@ -67,7 +68,7 @@ export class AgentRuntime {
     if (storage && (this.authBridge || storage.sharedEndpoint)) this.mcp = new CodexMcp(this.rpc, storage, (method, params) => this.authBridge ? this.authBridge.configuration(method, params) : this.rpc.request(method, params), () => this.initialized ? session.nativeId : undefined);
     this.rpc.on('message', (m: RpcMessage) => this.onMessage(m));
     this.rpc.on('diagnostic', (value: string) => { if (!this.closing) this.connection.diagnostic(value); });
-    this.rpc.on('closed', (e: Error) => { this.initialized = false; this.codexConnected = false; this.capabilityCache.invalidate(); this.fileChanges.clear(); void this.authBridge?.close(); if (!this.closing) this.finish(e.message); });
+    this.rpc.on('closed', (e: Error) => { this.initialized = false; this.codexConnected = false; this.capabilityCache.invalidate(); this.fileChanges.clear(); void this.authBridge?.close(); if (!this.closing) { if (session.cursorNative || storage?.sharedEndpoint) { session.desktopSyncState = 'disconnected'; session.desktopSyncError = e.message; } this.finish(e.message); } });
   }
   private message(id: string, role: Message['role'], text: string, append = false, metadata: Pick<Message, 'userText' | 'context'> = {}) {
     const existing = this.session.messages.find(x => x.id === id || this.storage?.sharedEndpoint && (x.nativeItemId === id || x.id === 'native:' + id));
@@ -107,6 +108,7 @@ export class AgentRuntime {
   private async startSession() {
     if (this.initialized) return;
     const s = this.session; s.status = 'starting'; s.error = undefined; this.hooks.changed();
+    if (s.cursorNative || this.storage?.sharedEndpoint) { s.desktopSyncState = 'connecting'; s.desktopSyncError = undefined; }
     if (this.storage?.sharedEndpoint) this.hydratingShared = true;
     this.connection.begin();
     if (s.cursorNative) {
@@ -215,10 +217,15 @@ export class AgentRuntime {
       if (s.permissionMode === 'full') s.permissions.warnings.push('本会话已请求 Run Everything；明确拒绝规则和团队策略仍由 Cursor 执行。');
       if (s.permissionMode === 'inherit' && ['ask', 'plan'].includes(result.modes?.currentModeId)) s.permissions.warnings.push('当前 Cursor 为 Ask 或 Plan 模式，无法直接修改代码。');
     }
-    this.initialized = true; s.status = (this.storage?.sharedEndpoint || s.cursorNative) && this.turnActive ? 'running' : 'idle'; this.hooks.changed();
+    if (this.closing) return;
+    this.initialized = true;
+    if (s.cursorNative && s.error) s.status = 'error';
+    else s.status = (this.storage?.sharedEndpoint || s.cursorNative) && this.turnActive ? 'running' : 'idle';
+    if (s.cursorNative || this.storage?.sharedEndpoint) { s.desktopSyncState = 'connected'; s.desktopSyncError = undefined; }
+    this.hooks.changed();
   }
   async ensureStarted() {
-    try { await this.start(); } catch (error) { this.connection.error(error, false); const issue = permissionIssue(error); if (issue) { this.session.permissionIssue = issue; this.hooks.changed(); } else this.hooks.authFailed?.(error); throw error; }
+    try { await this.start(); } catch (error) { if (this.session.cursorNative || this.storage?.sharedEndpoint) { this.session.desktopSyncState = 'disconnected'; this.session.desktopSyncError = error instanceof Error ? error.message : '同步暂时不可用'; this.hooks.changed(); } this.connection.error(error, false); const issue = permissionIssue(error); if (issue) { this.session.permissionIssue = issue; this.hooks.changed(); } else if (!this.session.cursorNative) this.hooks.authFailed?.(error); throw error; }
   }
   async mcpCatalog() { await this.connectCodex(); if (!this.mcp) throw new Error('当前 CLI 不支持 MCP 管理'); return this.mcp.list(); }
   async modes(): Promise<SessionModeCatalog> {
@@ -300,6 +307,7 @@ export class AgentRuntime {
     return resolved;
   }
   async prompt(text: string, options?: { userText: string; context: Omit<MessageContext, 'nativeId' | 'accepted'>; capabilities?: AgentCapabilityOption[]; submitted?: () => void }) {
+    if (this.session.cursorNative) assertCursorSharedSessionAvailable();
     if (!text.trim()) throw new Error('请输入任务内容');
     if (this.session.status === 'running' || this.session.status === 'approval') throw new Error('当前会话仍在运行，可以新建独立会话继续工作');
     await this.ensureStarted();
@@ -387,17 +395,34 @@ export class AgentRuntime {
   private finish(error?: string) {
     this.connection.finish(error);
     const completedTurn = this.turnActive; this.turnActive = false;
-    if (error) { const issue = permissionIssue(error); if (issue) this.session.permissionIssue = issue; else this.hooks.authFailed?.(error); }
+    if (error) { const issue = permissionIssue(error); if (issue) this.session.permissionIssue = issue; else if (!this.session.cursorNative) this.hooks.authFailed?.(error); }
     this.session.status = error ? 'error' : 'idle'; this.session.error = error; this.session.approvals = [];
     this.session.desktopWaitingApproval = false; this.session.desktopSyncPending = false; clearTimeout(this.sharedRefresh); this.sharedRefresh = undefined;
     this.turnId = undefined; this.requests.clear(); this.fileChanges.clear(); this.hooks.changed(); if (completedTurn) this.hooks.done();
   }
   private onMessage(m: RpcMessage) {
     if (this.closing) return;
+    if (this.session.cursorNative && m.method === 'cursor/nativeConnection') {
+      if (m.params?.sessionId !== this.session.nativeId) return;
+      const s = this.session;
+      if (m.params.state === 'disconnected') {
+        s.desktopSyncState = 'disconnected'; s.desktopSyncError = String(m.params.message || '原生会话暂时不可用');
+        s.error = '同步已断开，回复和输入已保留；恢复同步后请先核对已有回复。'; s.status = 'error';
+        this.connection.set({ state: 'failed', kind: 'unknown' });
+      } else if (m.params.state === 'connected') {
+        s.desktopSyncState = 'connected'; s.desktopSyncError = undefined;
+        if (s.error === '同步已断开，回复和输入已保留；恢复同步后请先核对已有回复。') {
+          s.error = undefined; s.status = this.turnActive ? 'running' : 'idle';
+        }
+        this.connection.responded();
+      }
+      this.hooks.changed(); return;
+    }
     if (this.session.cursorNative && m.method === 'cursor/nativeSnapshot') {
       if (m.params?.sessionId !== this.session.nativeId) return;
       const snapshot = m.params.snapshot as CursorNativeSnapshot;
       this.session.messages = mergeCursorNativeMessages(this.session.messages, snapshot.messages);
+      if (snapshot.status === 'error') { this.finish('Cursor 原生会话出现错误，请在原生窗口查看并处理。'); return; }
       if (snapshot.status === 'generating') {
         if (!this.turnActive) this.sharedTurnOwned = false;
         this.turnActive = true; this.session.status = 'running';
@@ -589,5 +614,5 @@ export class AgentRuntime {
     else if (this.session.provider === 'cursor' && this.session.nativeId) this.rpc.notify('session/cancel', { sessionId: this.session.nativeId });
     else this.close();
   }
-  async close() { this.closing = true; this.turnActive = false; clearTimeout(this.sharedRefresh); this.sharedRefresh = undefined; this.session.desktopSyncPending = false; this.session.desktopWaitingApproval = false; this.connection.stop(); for (const done of this.cursorCommandWaiters) done(); this.cursorCommandWaiters.clear(); this.session.status = 'idle'; this.session.approvals = []; this.hooks.changed(); await Promise.all([this.rpc.close(), this.authBridge?.close()]); }
+  async close() { this.closing = true; this.turnActive = false; clearTimeout(this.sharedRefresh); this.sharedRefresh = undefined; this.session.desktopSyncPending = false; this.session.desktopWaitingApproval = false; this.session.desktopSyncState = undefined; this.session.desktopSyncError = undefined; this.connection.stop(); for (const done of this.cursorCommandWaiters) done(); this.cursorCommandWaiters.clear(); this.session.status = 'idle'; this.session.approvals = []; this.hooks.changed(); await Promise.all([this.rpc.close(), this.authBridge?.close()]); }
 }

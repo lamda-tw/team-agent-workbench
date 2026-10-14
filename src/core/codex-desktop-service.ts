@@ -32,7 +32,7 @@ function codexDesktopRunning() {
 }
 export function validateManagedBridge(value: CodexDesktopBridge, sourceHome: string, allowExpired = false) {
   let endpoint: URL; try { endpoint = new URL(value.endpoint); } catch { throw new Error('Codex 联动连接记录不可用'); }
-  if(value.version!==1||endpoint.protocol!=='ws:'||endpoint.hostname!=='127.0.0.1'||!endpoint.port||endpoint.username||endpoint.password||endpoint.search||endpoint.hash||!/^\/rpc\/[a-f0-9]{64}$/.test(endpoint.pathname)||!sameNativePath(value.sourceHome,sourceHome)||!Number.isInteger(value.pid)||value.pid<=0||!Number.isFinite(Date.parse(value.expiresAt))||!allowExpired&&Date.parse(value.expiresAt)<=Date.now())throw new Error('Codex 联动连接已失效，请核对原生客户端后重新连接');
+  if(value.version!==1||endpoint.protocol!=='ws:'||endpoint.hostname!=='127.0.0.1'||!endpoint.port||endpoint.username||endpoint.password||endpoint.search||endpoint.hash||!/^\/rpc\/[a-f0-9]{64}$/.test(endpoint.pathname)||!sameNativePath(value.sourceHome,sourceHome)||!Number.isInteger(value.pid)||value.pid<=0||!Number.isFinite(Date.parse(value.expiresAt))||!allowExpired&&Date.parse(value.expiresAt)<=Date.now())throw new Error('Codex 联动连接已失效，请核对原生客户端后恢复同步');
 }
 async function ready(bridge: CodexDesktopBridge) {
   const url = new URL(bridge.endpoint); url.protocol='http:';url.pathname+='/readyz';
@@ -68,16 +68,16 @@ export class CodexDesktopService implements CodexDesktopIntegration {
     if (!healthy) for (const delay of [150, 350]) { await pause(delay); if (await ready(descriptor)) { healthy = true; break; } }
     if (!healthy) {
       const managerAlive = descriptor.process ? await sameProcess(descriptor.process) : processAlive(descriptor.pid);
-      if (managerAlive !== false) throw new Error('连接暂时中断，请重新连接；会话和输入已保留，不会重复发送任务');
+      if (managerAlive !== false) throw new Error('连接暂时中断，请恢复同步；会话和输入已保留，不会重复发送任务');
       if (!record.managed) throw new Error('无法核对原后台，已保留会话与连接记录');
       await readBackendRecord(path.dirname(record.file),descriptor);
       this.recovery = { directory: path.dirname(record.file), bridge: descriptor }; return;
     }
-    if (descriptor.approvalRoutingVersion !== 1) throw new Error('联动后台需要更新。请结束当前任务、保存并退出 Codex，再从工作台重新连接');
+    if (descriptor.approvalRoutingVersion !== 1) throw new Error('联动后台需要更新。请结束当前任务、保存并退出 Codex，再从工作台恢复同步');
     if (Date.parse(descriptor.expiresAt) <= Date.now()) {
       const url = new URL(descriptor.endpoint); url.protocol='http:';url.pathname+='/renew';
       const renewed = await fetch(url,{method:'POST',signal:AbortSignal.timeout(5000),redirect:'error'}).catch(()=>undefined);
-      if (!renewed?.ok) throw new Error('连接已到期，请重新连接；原会话和正在运行的任务保留');
+      if (!renewed?.ok) throw new Error('连接已到期，请恢复同步；原会话和正在运行的任务保留');
       descriptor=JSON.parse(await fs.readFile(record.file,'utf8')); validateManagedBridge(descriptor,this.sourceHome);
     }
     this.recovery = undefined; return descriptor;

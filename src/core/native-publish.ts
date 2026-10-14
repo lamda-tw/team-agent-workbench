@@ -1,11 +1,11 @@
-import crypto, { randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { AgentSession, Message } from '../shared/types';
 import { findCodexRollout } from './codex-storage';
-import { codexHome, cursorChatsRoot, nativeRecordAllowed } from './native-sessions';
-import { nativeCwd } from './native-transcript';
+import { codexHome, nativeRecordAllowed } from './native-sessions';
+import { assertCursorSharedSessionAvailable } from '../shared/cursor-session-consistency';
 
 const nativeIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const clip = (value: string, max: number) => value.replace(/\u0000/g, '').replace(/\s+/g, ' ').trim().slice(0, max);
@@ -97,49 +97,8 @@ function copiedId(text: string) {
   } catch { /* A rollout without a readable header keeps the workbench id. */ }
 }
 
-async function publishCursor(session: AgentSession) {
-  const cwd = nativeCwd(session.cwd);
-  if (!cwd || !(await fs.stat(cwd).catch(() => undefined))?.isDirectory()) throw new Error('这条会话的工作目录已经不在，无法登记到 Cursor');
-  const id = nativeIdPattern.test(session.nativeId || '') ? session.nativeId! : randomUUID();
-  const root = cursorChatsRoot();
-  const hashes = await fs.readdir(root, { withFileTypes: true }).catch((error: any) => { if (error.code === 'ENOENT') return []; throw error; });
-  for (const hash of hashes) {
-    if (!hash.isDirectory() || hash.isSymbolicLink()) continue;
-    const directory = path.join(root, hash.name, id);
-    if ((await fs.stat(path.join(directory, 'meta.json')).catch(() => undefined))?.isFile()) {
-      if (!nativeRecordAllowed('cursor', directory)) throw new Error('Cursor 的会话路径无效');
-      return { nativeId: id, nativePath: directory, replaceTranscript: false };
-    }
-  }
-  const directory = path.join(root, crypto.createHash('md5').update(cwd).digest('hex'), id);
-  if (!nativeRecordAllowed('cursor', directory)) throw new Error('Cursor 的会话路径无效');
-  await fs.mkdir(directory, { recursive: true });
-  const now = Date.now();
-  let wrote = false;
-  try {
-    await fs.writeFile(path.join(directory, 'meta.json'), JSON.stringify({ schemaVersion: 1, createdAtMs: Date.parse(session.createdAt) || now, updatedAtMs: now, hasConversation: session.messages.some(message => message.role === 'user' || message.role === 'assistant'), cwd, title: clip(session.title, 120) }, null, 2), { flag: 'wx' });
-    wrote = true;
-    const db = new DatabaseSync(path.join(directory, 'store.db'));
-    try {
-      db.exec('CREATE TABLE IF NOT EXISTS blobs (id TEXT, data BLOB); CREATE TABLE IF NOT EXISTS meta (key TEXT, value TEXT);');
-      const insert = db.prepare('INSERT INTO blobs (id, data) VALUES (?, ?)');
-      for (const message of session.messages) {
-        if (message.role !== 'user' && message.role !== 'assistant' && message.role !== 'tool') continue;
-        const text = message.role === 'user' ? message.userText || message.text : message.text;
-        if (!text.trim()) continue;
-        const content = message.role === 'tool' ? [{ type: 'text', text, toolName: '工具', result: text }] : text;
-        insert.run(message.id || randomUUID(), Buffer.from(JSON.stringify({ role: message.role, content })));
-      }
-    } finally { db.close(); }
-  } catch (error) {
-    if (wrote) await fs.rm(directory, { recursive: true, force: true });
-    throw error;
-  }
-  return { nativeId: id, nativePath: directory, replaceTranscript: true };
-}
-
 export async function publishToNativeList(session: AgentSession, privateCodexHome: string) {
   if (session.provider === 'codex') return { ...await publishCodex(session, privateCodexHome), replaceTranscript: true };
-  if (session.provider === 'cursor') return publishCursor(session);
+  if (session.provider === 'cursor') assertCursorSharedSessionAvailable();
   throw new Error('只有 Codex 和 Cursor 会话可以登记到桌面端');
 }

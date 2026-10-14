@@ -443,15 +443,10 @@ test('publishing a workbench session registers it in the desktop Codex and Curso
     cursorSession.title = 'Team Agent Workbench';
     cursorSession.messages.push({ id: 'c1', role: 'user', text: '看看桌面', createdAt: new Date().toISOString() });
     await wb.store.save();
-    const shown = await wb.publishToDesktop(cursorSession.id);
-    assert.equal(shown.nativeLive, true);
-    assert.equal(shown.messages.some(message => message.text === '看看桌面'), true);
-    assert.equal(JSON.parse(await fs.readFile(path.join(shown.nativePath!, 'meta.json'), 'utf8')).cwd, shown.cwd);
-    const store = new DatabaseSync(path.join(shown.nativePath!, 'store.db'), { readOnly: true });
-    try { assert.match(store.prepare('SELECT data FROM blobs').all().map((row: { data?: Uint8Array }) => Buffer.from(row.data || []).toString('utf8')).join('\n'), /看看桌面/); }
-    finally { store.close(); }
-    const cursorList = await wb.listNativeSessions('cursor');
-    assert.equal(cursorList.sessions.find(item => item.nativeId === shown.nativeId)?.name, 'Team Agent Workbench');
+    const beforeCursor = JSON.stringify(cursorSession);
+    await assert.rejects(wb.publishToDesktop(cursorSession.id),{code:'CURSOR_SHARED_SESSION_UNAVAILABLE'});
+    assert.equal(JSON.stringify(cursorSession),beforeCursor);
+    assert.deepEqual((await wb.listNativeSessions('cursor')).sessions,[]);
   } finally {
     if (previousCodex === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = previousCodex;
     if (previousCursor === undefined) delete process.env.WORKBENCH_CURSOR_CHATS; else process.env.WORKBENCH_CURSOR_CHATS = previousCursor;
@@ -484,7 +479,7 @@ test('an already open desktop app is reminded and its session files stay untouch
     assert.equal(closed, false);
     assert.equal((wb as any).runtimes.has(session.id), true);
     const cursorSession = await wb.createSession('cursor', workspace, offlineProjectId, 'work', undefined, undefined, 'inherit', false);
-    await assert.rejects(() => wb.publishToDesktop(cursorSession.id), /Cursor 正在运行/);
+    await assert.rejects(() => wb.publishToDesktop(cursorSession.id), {code:'CURSOR_SHARED_SESSION_UNAVAILABLE'});
     wb.desktopAppOpen = async () => { throw new Error('probe failed'); };
     await assert.rejects(() => wb.publishToDesktop(session.id), /无法确认桌面 Codex/);
     assert.deepEqual(await fs.readdir(codex), []);
@@ -520,7 +515,7 @@ test('session picker shows Codex group and session names without inventing a gro
   assert.match(codexPicker, /导入所选/);
   assert.doesNotMatch(codexPicker, /Cursor/);
   assert.match(cursorPicker, /接入 Cursor 会话/);
-  assert.match(cursorPicker, /Cursor 自己的工作目录和会话名/);
+  assert.match(cursorPicker, /导入已有 Cursor CLI 会话/);
   assert.doesNotMatch(cursorPicker, /Codex/);
 });
 
