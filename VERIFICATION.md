@@ -1,3 +1,11 @@
+# 2026-10-15 Cursor 原生设置同步
+
+- 关联的普通 IDE 会话接入模型、Agent / Plan 等模式和运行权限选择。选项及已生效状态来自原生当前 UI；调用原生处理函数后必须读回，不能以本地选择代替确认。原生模型参数变化也纳入发送前校验。多模型 / Multitask 运行暂不支持。
+- 待更改设置与消息队列分开持久化；忙碌时不 Stop、不重建上下文，设置未确认时后续消息等待。另一端改动不被旧选择覆盖，未确认写入不自动重试；重启后需核对。停止后的暂停队列仍允许修改设置，但不会因此继续发送。
+- 本机真实 UI 验证：工作台 Auto → GPT-5.6 Sol（原生显示 Medium）、Agent → Plan；原生端改回 Agent / Auto 后工作台正确回显。随后通过工作台发送一条不带工具和新资料的续聊，正确回答此前验证词。766 条完整历史的原生 ID、顺序和正文逐条一致；311 次工具结果、四份大内容、七份摘要归档保留，无重复发送。证据：`.test-data/formal-cursor-beta-1015/settings-verdict.json`。
+- 真实权限往返切换通过：在工作台将 Auto-review 改为 Allowlist，确认原生实际状态读回后恢复 Auto-review。两次待生效记录均清除，连接保持、队列未改变、766 条历史及工具结果保留。证据：`.test-data/formal-cursor-beta-1015/permission-verdict.json`。本轮没有触发额外原生确认弹窗；禁用选项、确认未完成、设置被另一端改动及重启恢复的故障边界由打桩用例覆盖。
+- 完整后台回归 653 项通过；之后补充设置 RPC 鉴权及 Skill 注入拒绝用例，相关服务测试 7 项通过；停止后设置修改的 6 项队列用例复测通过。`npm run test:cursor-settings`（合成原生 DOM + 实际 React 控件）、原有 IDE DOM / 队列界面冒烟均通过；TypeScript 与双端构建通过。未连接实际共享区服务器、未生成安装包。
+
 # v0.7.1 · 2026-10-15 Cursor 原生联动 Beta
 
 - `npm test`：647 项后台回归全部通过，无失败、取消或跳过；日志保存在本机 `.test-data/cursor-file-bridge-1015/final-regression.log`。后台保护器保持禁止 Shell、桌面和浏览器启动；Windows 进程身份与精确终止的两项测试另行通过，纳入显式 `test:desktop`。

@@ -1,5 +1,7 @@
 # 会话输入框与显示空间
 
+以下通用设置针对 CLI 会话。**Cursor 原生联动 Beta** 使用另一条原生控制链路：模型、模式和权限直接读取并修改关联的 IDE 会话，原生确认后才显示为生效；不使用 CLI 的选项或配置。Skill、MCP、规则、参考资料和模型详细参数统一在 Cursor 中管理。详见 [Cursor 原生联动](cursor-desktop-sync.md#模型模式与权限)。
+
 - Codex 与 Cursor 的模式、模型和执行权限放在输入框底部；文件引用、Skill 和 MCP 状态查看收入“＋”菜单。Codex 支持 `$名称` 引用 Skill、`@名称` 引用插件；Cursor 支持 `/技能名` 调用、`@名称` 选择 Skill。输入 `/` 可搜索命令和已启用 Skills。Claude Code 保留自己的能力菜单。
 - 模式切换使用原生协议：Codex 查询 `collaborationMode/list`，每轮传入 `turn/start.collaborationMode` 并使用内置模式指令；Cursor 查询 ACP 的可用模式，使用 `session/set_mode`。未支持的模式不会通过提示词伪造。输入框支持 Shift+Tab，Codex `/plan` 开关 Plan，Cursor `/plan`、`/agent`、`/ask` 切换对应模式。
 - 模式与执行权限独立。原生计划正文及进度直接展示；Codex 计划完成后可修改或执行，在原会话中重新制定计划或切回 Agent。Cursor 计划确认可执行、提交修订或取消；执行前原生切换 Agent，修订作为 `cursor/create_plan` 的拒绝理由回传，等待新计划。旧计划、未完成计划和已执行计划不能重复执行。

@@ -1550,6 +1550,11 @@ export class Workbench {
       }catch(error){for(const session of added){await this.cursorDesktop.release(session.id);await this.runtimes.get(session.id)?.close();this.runtimes.delete(session.id);this.store.sessions=this.store.sessions.filter(value=>value.id!==session.id);}await this.store.save();this.broadcast();throw error;}
     },false);
   }
+  async cursorNativeSettings(id:string,kind?:import('../shared/cursor-native-settings').CursorSettingKind,value?:string,revision?:string,cancel=false){
+    const session=this.session(id);this.assertCanWork(session.binding);assertCursorSharedSessionAvailable(session);if(session.closedAt)throw Error('此会话已关闭');
+    const runtime=await this.runtime(session);if(!(runtime instanceof AgentRuntime))throw Error('原生 Cursor 运行器不匹配');await runtime.ensureStarted();
+    return runtime.rpc.request('cursor/nativeSettings',{sessionId:session.nativeId,kind,value,revision,cancel});
+  }
   async cursorQueueAction(id:string,action:'cancel'|'resume'|'reconcile'|'confirm'|'withdraw',requestId?:string,nativeMessageId?:string){
     const session=this.session(id);this.assertCanWork(session.binding);assertCursorSharedSessionAvailable(session);if(session.closedAt)throw new Error('此会话已关闭');
     const pending=session.cursorPendingSubmission;

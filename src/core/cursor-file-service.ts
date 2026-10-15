@@ -68,6 +68,8 @@ export class CursorFileService implements CursorDesktopIntegration {
         hasWorkspace: async directory => (await this.launcher.clientFor(directory,false)).hasWorkspace(directory), list: async () => (await this.launcher.clientFor(cwd,false)).list(), create: async directory => (await this.launcher.clientFor(directory,false)).create(directory),
         snapshot: async (id,directory) => (await this.launcher.clientFor(directory,false)).snapshot(id,directory), send: async (id,directory,text) => (await this.launcher.clientFor(directory,false)).send(id,directory,text),
         focus: async (id,directory) => (await this.launcher.clientFor(directory,false)).focus(id,directory), stop: async (id,directory) => (await this.launcher.clientFor(directory,false)).stop(id,directory), close() {},
+        settings: async(id,directory,kind)=>{const client=await this.launcher.clientFor(directory,false);if(!client.settings)throw Error('当前 Cursor 设置接口不可用');return client.settings(id,directory,kind);},
+        changeSetting: async(id,directory,kind,value,revision)=>{const client=await this.launcher.clientFor(directory,false);if(!client.changeSetting)throw Error('当前 Cursor 设置接口不可用');return client.changeSetting(id,directory,kind,value,revision);},
       };
       bridge = new CursorFileBridge(path.join(this.parent, 'queues', key), { nativeId, cwd }, this.database, proxy, { readHistory: this.readHistory });
       await bridge.start(); this.bridges.set(key, bridge);
@@ -95,11 +97,11 @@ export class CursorFileService implements CursorDesktopIntegration {
       ...(request.state==='uncertain'?{candidates:cursorRequestCandidateIds(request,history)}:{})}));
     return { sessionId:history.nativeId, status:view.nativeStatus==='generating'||requests.some(request=>request.state==='accepted'||request.state==='sending')?'generating':history.settled?'completed':view.nativeStatus,
       messages:messages.filter(message=>message.role==='user'||message.role==='assistant').map(message=>({id:message.nativeItemId!,role:message.role,text:message.text})),
-      nativeHistory:{nativeId:history.nativeId,messages,checkpointSha256:history.checkpointSha256,issues:history.issues},queue:{paused:view.paused,requests},connectionError:view.error };
+      nativeHistory:{nativeId:history.nativeId,messages,checkpointSha256:history.checkpointSha256,issues:history.issues},queue:{paused:view.paused,requests},settings:view.settings,connectionError:view.error };
   }
   private async handle(request: http.IncomingMessage, response: http.ServerResponse) {
     const respond = (status:number,value:unknown) => { response.writeHead(status,{'content-type':'application/json','cache-control':'no-store'});response.end(JSON.stringify(value)); };
-    const match = /^\/native\/([a-f0-9]{64})\/(snapshot|enqueue|cancel|resume|reconcile|stop|focus)$/.exec(request.url||'');
+    const match = /^\/native\/([a-f0-9]{64})\/(snapshot|enqueue|cancel|resume|reconcile|stop|focus|settings)$/.exec(request.url||'');
     const entry = match && this.entries.get(match[1]);
     if (request.headers.origin || request.headers.host!==`127.0.0.1:${(this.server?.address() as any)?.port}` || !entry || entry.session.closedAt || this.closed || !match) { respond(403,{});return; }
     const operation=match[2];if(request.method!==(operation==='snapshot'?'GET':'POST')){respond(405,{});return;}
@@ -107,6 +109,10 @@ export class CursorFileService implements CursorDesktopIntegration {
       let raw='';for await(const chunk of request){raw+=chunk.toString();if(Buffer.byteLength(raw)>220*1024)throw Error('消息过长');}
       const body=raw?JSON.parse(raw):{};
       if(operation==='snapshot'){respond(200,await this.snapshot(entry));return;}
+      if(operation==='settings'){
+        if(body.kind!==undefined&&!['model','mode','permission'].includes(body.kind)||body.value!==undefined&&(typeof body.value!=='string'||!body.value||body.value.length>256)||body.revision!==undefined&&(typeof body.revision!=='string'||body.revision.length>24000)||body.cancel!==undefined&&typeof body.cancel!=='boolean')throw Error('原生设置参数无效');
+        respond(200,await entry.bridge.configure(body.kind,body.value,body.revision,body.cancel));return;
+      }
       if(operation==='enqueue'){
         if(typeof body.text!=='string'||typeof body.id!=='string')throw Error('发送内容无效');
         if(/^\s*\/(summarize|compact)(?:\s|$)/i.test(body.text))throw Error('请在 Cursor 原生窗口执行上下文压缩；压缩期间工作台的后续消息会等待');

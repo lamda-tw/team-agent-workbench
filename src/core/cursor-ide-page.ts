@@ -1,6 +1,6 @@
 /** Scoped adapter for the ordinary Cursor IDE. Native UI controls execute the
  * turn; this adapter never imports a CLI history or rewrites an Agent checkpoint. */
-export async function cursorIdePage(arg: { operation?: string; id?: string; cwd?: string; token?: string; text?: string } = {}) {
+export async function cursorIdePage(arg: { operation?: string; id?: string; cwd?: string; token?: string; text?: string; kind?: string; value?: string; revision?: string } = {}, settingsReader?: (root: HTMLElement, arg: any) => any) {
   const visible = (node: Element) => !!node.getClientRects().length && getComputedStyle(node).visibility !== 'hidden';
   const normalize = (value: string) => value.replace(/\\/g, '/').replace(/^\/([a-z]:\/)/i, '$1').replace(/\/$/, '').toLowerCase();
   const configuration = await (window as any).vscode?.context?.resolveConfiguration();
@@ -35,17 +35,25 @@ export async function cursorIdePage(arg: { operation?: string; id?: string; cwd?
   const anchors: Map<string, any> = (window as any).__teamWorkbenchCursorIdeAnchors ||= new Map();
   if (arg.operation === 'release') { anchors.delete(arg.token!); return {}; }
   const current = state();
-  if (arg.operation === 'snapshot') return { sessionId: current.sessionId, status: current.status, messages: current.messages };
+  const settings = settingsReader?.(current.root, { ...arg, operation: 'settings' });
+  if (arg.operation === 'snapshot') return { sessionId: current.sessionId, status: current.status, messages: current.messages, ...(settings ? { settings } : {}) };
+  if (arg.operation?.startsWith('settings')) {
+    if (!settingsReader) throw new Error('当前 Cursor 设置接口不可用');
+    if (arg.operation !== 'settings' && (current.modal || ['generating','applying'].includes(current.status))) throw new Error('请等待当前回复或原生确认结束');
+    return settingsReader(current.root, arg);
+  }
   if (arg.operation === 'reveal') return {};
   if (arg.operation === 'focus') { if(current.modal)throw new Error('请先在 Cursor 原生窗口处理弹窗');current.input.focus(); return {}; }
   if (arg.operation === 'prepareSend') {
+    if (settings && settings.state !== 'ready') throw new Error('正在确认 Cursor 设置，消息尚未发送');
     if (current.modal || ['generating','applying'].includes(current.status) || current.draft.trim()) throw new Error('Cursor 正在处理弹窗、回复或已有输入草稿，待当前操作结束后再发送');
     for(const [token,anchor]of anchors)if(Date.now()-anchor.at>60000)anchors.delete(token);
-    anchors.set(arg.token!, { id: arg.id, cwd, priorIds: current.messages.map(message => message.id), input: current.input, at: Date.now() });
+    anchors.set(arg.token!, { id: arg.id, cwd, priorIds: current.messages.map(message => message.id), input: current.input, at: Date.now(), settingsRevision: settings?.revision });
     current.input.focus(); return {};
   }
   if (arg.operation === 'checkSend' || arg.operation === 'submit') {
     const anchor=anchors.get(arg.token!);
+    if (settings && (settings.state !== 'ready' || settings.revision !== anchor?.settingsRevision)) throw new Error('Cursor 设置在发送前发生变化，输入已保留，请核对后发送');
     if (!anchor || anchor.id!==arg.id || anchor.input!==current.input || normalize(anchor.cwd)!==normalize(cwd) || current.modal || ['generating','applying'].includes(current.status) || current.draft.trim() !== arg.text?.trim() || document.activeElement !== current.input) throw new Error('Cursor 输入状态已改变，未发送；请保留并核对原生草稿');
     if (arg.operation === 'submit') {
       // Cursor's ordinary Enter path applies its native message queue policy.

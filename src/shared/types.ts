@@ -43,6 +43,7 @@ export interface AgentSession {
   desktopSyncState?: 'connecting' | 'connected' | 'disconnected';
   desktopSyncError?: string;
   cursorNative?: { descriptorFile: string; managed?: boolean; creationUnconfirmed?: boolean; transport?: 'ide-files-v1' };
+  cursorSettings?: import('./cursor-native-settings').CursorNativeSettings;
   cursorQueue?: { paused: boolean; requests: CursorQueuedRequest[] };
   cursorPendingSubmission?: { id: string; text: string };
   mode?: import('./session-mode').SessionMode; proposedPlan?: import('./session-mode').ProposedPlan;

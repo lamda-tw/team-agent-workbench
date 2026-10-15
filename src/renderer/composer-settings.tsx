@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Check, ChevronDown, ExternalLink, RefreshCw, ShieldCheck, X } from 'lucide-react';
 import type { AgentSession, ModelOption, PermissionMode, PermissionReport, ProviderCatalog } from '../shared/types';
 import { permissionEffects, permissionLabels, sessionPermissionDescription, sessionPermissionLabel } from '../shared/permission-presentation';
+import { CursorNativeSettingsControls } from './cursor-native-settings';
 
 type Choice = { kind: 'model' | 'permission'; value: string };
 const effortLabels: Record<string, string> = { none: '关闭', minimal: '最少', low: '低', medium: '中', high: '高', xhigh: '超高', max: '最大', ultra: '极高' };
@@ -15,11 +16,7 @@ function replacementEffort(session: AgentSession, model?: ModelOption) {
 
 type ComposerSettingsProps = { session: AgentSession; networkEnabled?: boolean; openConnection?: () => void; authCheckedAt?: string };
 export function ComposerSettings(props: ComposerSettingsProps) {
-  return props.session.cursorNative ? <CursorNativeSettings session={props.session}/> : <CliComposerSettings {...props}/>;
-}
-function CursorNativeSettings({ session }: { session: AgentSession }) {
-  const [error, setError] = useState('');
-  return <><button className="composer-setting" title="模型、模式、权限和工具在 Cursor 原生窗口中设置" onClick={() => { setError(''); void window.workbench.call('session.cursorNative.focus', { id: session.id }).catch(e => setError(e.message)); }}>在 Cursor 中打开 · Beta<ExternalLink size={12}/></button>{error && <span className="inline-error" role="alert">{error}</span>}</>;
+  return props.session.cursorNative ? <CursorNativeSettingsControls key={props.session.id} session={props.session}/> : <CliComposerSettings {...props}/>;
 }
 function CliComposerSettings({ session, networkEnabled, openConnection, authCheckedAt }: ComposerSettingsProps) {
   networkEnabled = session.networkRoute ? session.networkRoute === 'management' : networkEnabled;

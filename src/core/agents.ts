@@ -422,6 +422,7 @@ export class AgentRuntime {
     if (this.session.cursorNative && m.method === 'cursor/nativeSnapshot') {
       if (m.params?.sessionId !== this.session.nativeId) return;
       const snapshot = m.params.snapshot as CursorNativeSnapshot;
+      this.session.cursorSettings = snapshot.settings;
       if (snapshot.nativeHistory) {
         if (!snapshot.nativeHistory.issues.some(issue => issue.kind !== 'empty-native-checkpoint')) this.session.messages = snapshot.nativeHistory.messages;
         this.session.cursorQueue = snapshot.queue;

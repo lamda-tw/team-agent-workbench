@@ -188,6 +188,10 @@ async function dispatch(action: string, raw: unknown, owner: BrowserWindow): Pro
     case 'session.cursorDesktop.list': { const p=z.object({cwd:z.string().default(''),launch:z.boolean().default(false)}).parse(raw); return workbench.listCursorDesktopSessions(p.cwd,p.launch); }
     case 'session.cursorDesktop.linkMany': { const p=z.object({nativeIds:z.array(z.string().uuid()).min(1).max(50),projectId:z.string().min(1)}).parse(raw); return workbench.linkCursorDesktopSessions(p.nativeIds,p.projectId); }
     case 'session.cursorNative.focus': return workbench.focusCursorNative(sessionInput.parse(raw).id);
+    case 'session.cursorNative.settings': {
+      const input=z.object({id:z.string(),kind:z.enum(['model','mode','permission']).optional(),value:z.string().min(1).max(256).optional(),revision:z.string().max(24000).optional(),cancel:z.boolean().optional()}).parse(raw);
+      return workbench.cursorNativeSettings(input.id,input.kind,input.value,input.revision,input.cancel);
+    }
     case 'session.cursorNative.queue': { const p=z.object({id,action:z.enum(['cancel','resume','reconcile','confirm','withdraw']),requestId:z.string().uuid().optional(),nativeMessageId:z.string().uuid().optional()}).parse(raw);return workbench.cursorQueueAction(p.id,p.action,p.requestId,p.nativeMessageId); }
     case 'session.native.publish': return workbench.publishToDesktop(sessionInput.parse(raw).id);
     case 'subsession.create': { const p = z.object({ parentId: id, focus: z.string().trim().min(1).max(120) }).parse(raw); return workbench.forkSubsession(p.parentId, p.focus); }
