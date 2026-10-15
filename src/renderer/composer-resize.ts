@@ -15,3 +15,12 @@ export function clampComposerHeight(height: number, viewportHeight?: number) {
 export function composerHeightAfterDrag(startHeight: number, startY: number, clientY: number, viewportHeight?: number) {
   return clampComposerHeight(startHeight + (startY - clientY), viewportHeight);
 }
+
+export const QUESTION_COMPOSER_MIN = 64;
+export const QUESTION_COMPOSER_DEFAULT = 72;
+export const QUESTION_COMPOSER_MAX = 240;
+
+/** Same direction as the session composer: pointer up grows the box, pointer down shrinks it. */
+export function questionComposerHeightAfterDrag(startHeight: number, startY: number, clientY: number) {
+  return Math.round(Math.min(QUESTION_COMPOSER_MAX, Math.max(QUESTION_COMPOSER_MIN, startHeight + (startY - clientY))));
+}

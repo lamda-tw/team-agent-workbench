@@ -122,6 +122,6 @@ export function changeQuestion(items: TeamQuestion[], projectId: string, actor: 
   }
   existing.updatedAt = at; return existing;
 }
-export interface QuestionJob { questionId: string; projectId: string; sessionId: string; runId: string; phase: 'queued' | 'running' | 'ready' | 'sent' | 'error' | 'closed' | 'tracked'; mode?: 'answer' | 'import' | 'auto' | 'ingest'; sourceId?: string; covered?: string[]; peer?: string; answer?: string; error?: string; released?: boolean }
+export interface QuestionJob { questionId: string; projectId: string; sessionId: string; runId: string; phase: 'queued' | 'running' | 'ready' | 'sent' | 'error' | 'closed' | 'tracked'; mode?: 'answer' | 'import' | 'auto' | 'ingest' | 'fill'; sourceId?: string; covered?: string[]; peer?: string; answer?: string; error?: string; released?: boolean }
 export interface QuestionDialogue { questionId: string; projectId: string; peer: string; sessionId: string; mode: 'auto'; suggested?: boolean }
 export interface QuestionInbox { items: TeamQuestion[]; read: Record<string, number>; jobs: QuestionJob[]; dialogues?: QuestionDialogue[]; replyModes?: Record<string, 'manual' | 'auto'>; error?: string }

@@ -24,7 +24,7 @@ export interface RemoteEntry { name: string; path: string; kind: 'directory' | '
 export interface FilePreview { name: string; path: string; type: 'text' | 'image' | 'binary'; content: string; truncated: boolean; size: number }
 export interface SourceFile { userAttachment?: boolean; resultUnavailable?: boolean; id: string; name: string; localPath: string; sourcePath: string; sha256: string; size: number; fetchedAt: string; contentRef?: { projectId: string; id: string; revision: number } }
 export interface SessionFile { path: string; name: string; size: number; modifiedAt: string }
-export interface MessageContext { questionRunId?: string; nativeId: string; accepted: boolean; workRecord: boolean; sourceHashes: Record<string, string>; capabilities?: AgentCapabilitySelection[]; projectJournal?: import('./project-journal').JournalReceipt }
+export interface MessageContext { questionRunId?: string; questionFill?: boolean; nativeId: string; accepted: boolean; workRecord: boolean; sourceHashes: Record<string, string>; capabilities?: AgentCapabilitySelection[]; projectJournal?: import('./project-journal').JournalReceipt }
 export interface Message { id: string; nativeItemId?: string; role: 'user' | 'assistant' | 'tool' | 'system'; text: string; userText?: string; context?: MessageContext; steering?: boolean; createdAt: string; kind?: 'plan' | 'planSteps'; steps?: import('./session-mode').PlanStep[] }
 export interface ApprovalOption { id: string; label: string; kind: 'allow' | 'deny' | 'answer' }
 export interface Approval { id: string; method: string; title: string; summary?: string; details: string; options: ApprovalOption[]; questions?: { id: string; text: string; options: { id: string; label: string }[]; allowMultiple?: boolean }[] }

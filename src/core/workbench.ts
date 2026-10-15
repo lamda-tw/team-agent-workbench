@@ -152,7 +152,7 @@ export class Workbench {
     this.journal = new ProjectJournal(this.store);
     this.questions = new Questions(this.store, this.remote, {
       profile: () => this.configuring ? undefined : this.localProfile(), session: id => this.session(id),
-      send: (id, text, runId, agentNotice) => this.runAccountOperation('question.answer', () => this.send(id, text, [], [], undefined, runId, agentNotice)),
+      send: (id, text, runId, agentNotice, draft) => this.runAccountOperation('question.answer', () => this.send(id, text, [], [], undefined, runId, agentNotice, draft)),
       changed: () => this.broadcast(), notice: text => this.notice(text),
     });
     this.activity = new ActivityAssistant({ store: this.store, prepare: () => this.journal.ready(), owns: s => !this.configuring && this.ownsLocal(s.binding), connected: () => !this.closing && !this.configuring && this.remote.connected,
@@ -1342,7 +1342,7 @@ export class Workbench {
     const ids = new Set(sessionWithAvailableReferences(session, this.store.conclusions).sources.map(source => source.id));
     if (sources.some(source => !ids.has(source.id))) throw new Error('参考成果已删除，请核对后重新发送');
   }
-  async send(id: string, userText: string, sourceIds: string[] = [], capabilitySelections: AgentCapabilitySelection[] = [], submitted?: () => void, questionRunId?: string, agentNotice?: string) {
+  async send(id: string, userText: string, sourceIds: string[] = [], capabilitySelections: AgentCapabilitySelection[] = [], submitted?: () => void, questionRunId?: string, agentNotice?: string, draft = false) {
     this.assertWorkspace();
     if (this.changingSettings.has(id)) throw new Error('正在切换会话设置，请稍后发送');
     if (!userText.trim()) throw new Error('请输入任务内容');
@@ -1374,6 +1374,7 @@ export class Workbench {
       const input = await this.availableSessionContext(s, userText, sourceIds);
       if (questionRunId) {
         input.context.questionRunId = questionRunId;
+        if (draft) input.context.questionFill = true;
         if (agentNotice) input.text = agentNotice + input.text;
       }
       for (const source of input.sources) if (await hashFile(source.localPath) !== source.sha256) throw new Error('参考快照已改变，请重新添加文件：' + source.name);

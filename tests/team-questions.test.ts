@@ -11,7 +11,7 @@ import { Workbench } from '../src/core/workbench';
 import { Questions } from '../src/core/questions';
 import { memberProfile } from './fixtures/member-profile';
 import { changeQuestion, questionView, type TeamQuestion, type QuestionCommand, type QuestionMember } from '../src/shared/questions';
-import { incomingQuestionNotice, incomingReplyNotice, sessionMessageText } from '../src/shared/session-context-text';
+import { fillFollowNotice, incomingQuestionNotice, incomingReplyNotice, sessionMessageText } from '../src/shared/session-context-text';
 import { historyMarkdown } from '../src/core/artifacts';
 import { QuestionDetail, QuestionCard, questionUnread } from '../src/renderer/team-questions';
 import type { AgentSession } from '../src/shared/types';
@@ -36,6 +36,16 @@ test('incoming question notice is hidden from the visible transcript and does no
   assert.match(reply, /对同一提问的回复/);
   assert.equal(sessionMessageText(session, { id: '3', role: 'user', text: reply + '回复人：王五\n用 v2', createdAt: '' }), '回复人：王五\n用 v2');
   assert.doesNotMatch(historyMarkdown({ ...session, messages: [{ id: '3', role: 'user', text: reply + '回复人：王五\n用 v2', createdAt: '' }] }), /成员回复接入/);
+  const draft = fillFollowNotice('bob');
+  assert.match(draft, /起草继续提问/);
+  assert.equal(sessionMessageText(session, { id: '4', role: 'user', text: draft + '问题：验收口径', createdAt: '' }), '问题：验收口径');
+  const hidden = historyMarkdown({ ...session, messages: [
+    { id: '4', role: 'user', text: draft + '问题：验收口径', createdAt: '', context: { nativeId: 'n', accepted: true, workRecord: false, sourceHashes: {}, questionFill: true } },
+    { id: '5', role: 'assistant', text: '请补充样本', createdAt: '' },
+    { id: '6', role: 'user', text: '继续看结果', createdAt: '' },
+  ] });
+  assert.doesNotMatch(hidden, /请补充样本|起草继续提问/);
+  assert.match(hidden, /继续看结果/);
 });
 
 test('question permissions, append-only replies, retry deduplication, explicit closure and recipient privacy', () => {
@@ -258,7 +268,7 @@ test('closed question UI retains link and answers, removes answer and closure ac
   mutate(openItems, 'alice', { kind: 'follow', id: openQuestion.id, followId: randomUUID(), body: '请改成 v3', target: 'bob' });
   const thread = renderToStaticMarkup(React.createElement(QuestionDetail, { question: openQuestion, inbox: { items: openItems, jobs: [], read: {} }, username: 'alice', sessions: [], changed: async () => {}, openSession: () => {} }));
   assert.match(thread, /我/); assert.match(thread, /请改成 v3/); assert.match(thread, /先用 v2/);
-  assert.match(thread, /team-question-composer[\s\S]*结束提问[\s\S]*自动对话[\s\S]*team-question-send[\s\S]*发送/);
+  assert.match(thread, /team-question-resize[\s\S]*结束提问[\s\S]*自动对话[\s\S]*自动填入[\s\S]*team-question-send[\s\S]*发送/);
   assert.doesNotMatch(thread, /发给bob|发送给|<select/);
   const card = renderToStaticMarkup(React.createElement(QuestionCard, { question: q, unread: true, open: () => {} }));
   assert.match(card, /已关闭/); assert.match(card, /有新动态/);
@@ -345,6 +355,40 @@ test('replies stay manual until one auto session tracks a single person', () => 
   assert.equal(autoSession.messages.length, before);
   assert(notices.some(item => item.startsWith('问题已关闭：')));
   assert.equal(aliceQ.lockedPeer(autoSession.id), undefined);
+}));
+
+test('auto fill writes a draft and does not send it', () => fixture(async ({ alice, project }) => {
+  const ask = newSession(alice, project);
+  const q = await alice.questions.create(ask.id, create());
+  await alice.questions.close();
+  let drafted = false;
+  const questions = new Questions(alice.store, alice.remote, {
+    profile: () => alice.remote.profile, session: id => alice.session(id), changed: () => {}, notice: () => {},
+    send: async (id, text, runId, notice, draft) => {
+      assert.equal(draft, true);
+      assert.match(notice || '', /起草继续提问/);
+      assert.match(text, /需要使用哪一版数据/);
+      const s = alice.session(id); s.status = 'running';
+      s.messages.push({ id: randomUUID(), role: 'user', text: (notice || '') + text, userText: text, createdAt: new Date().toISOString(), context: { nativeId: 'test', accepted: true, workRecord: false, sourceHashes: {}, questionRunId: runId, questionFill: true } });
+      s.messages.push({ id: randomUUID(), role: 'assistant', text: '[[继续提问]]\n请补充样本', createdAt: new Date().toISOString() });
+      s.status = 'idle'; await questions.completed(s); drafted = true; return true;
+    },
+  });
+  alice.questions = questions;
+  await questions.init();
+  await questions.fillDraft(project, q.id, 'bob');
+  await until(() => drafted);
+  const job = questions.view().jobs.find(item => item.mode === 'fill' && item.questionId === q.id);
+  assert.equal(job?.phase, 'tracked');
+  assert.equal(job?.answer, '请补充样本');
+  assert.equal(questions.view().items.find(item => item.id === q.id)?.followUps?.length || 0, 0);
+  assert.doesNotMatch(historyMarkdown(ask), /请补充样本|起草继续提问/);
+  const inbox = (questions as any).inbox();
+  inbox.dialogues = [{ questionId: q.id, projectId: project, peer: 'bob', sessionId: ask.id, mode: 'auto' }];
+  await assert.rejects(questions.fillDraft(project, q.id, 'carol'), /正在自动对话/);
+  inbox.dialogues[0].suggested = true;
+  ask.status = 'running';
+  await assert.rejects(questions.fillDraft(project, q.id, 'bob'), /正在处理/);
 }));
 
 test('Codex and Cursor protocol runtimes preserve question context and return completed answers', () => fixture(async ({ alice, bob, project, root }) => {

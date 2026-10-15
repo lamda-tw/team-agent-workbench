@@ -33,10 +33,12 @@ import { checkedSessionFile, listSessionFiles, previewSessionFile } from '../cor
 import { ServerIdentityStore } from '../core/server-identities';
 import { EgressClientProxy } from '../core/egress';
 import { decodeEgressInvite, userEgressInputSchema } from '../core/egress-config';
+import { taskbarAttention, taskbarShouldAlert, type TaskbarAttention } from '../shared/taskbar-attention';
 type DataContext = { workbench: Workbench; egress: EgressClientProxy; egressSecretFile: string; broadcast: () => void; notice: (message: string) => void };
 type SidebarPanes = { workgroups?: number; files?: number; sessions?: number };
 type WindowContext = DataContext & { slot: number; sidebarProjectHeight?: number; sidebarPanes?: SidebarPanes; release: () => Promise<void> };
 const windows = new Set<BrowserWindow>(), contexts = new Map<BrowserWindow, WindowContext>(), activeSlots = new Set<number>(), closingWindows = new Set<BrowserWindow>();
+const taskbarSeen = new WeakMap<BrowserWindow, TaskbarAttention>();
 const switchingWindows = new Set<BrowserWindow>();
 let accountRouting: Promise<unknown> = Promise.resolve();
 function routeAccount<T>(operation: () => Promise<T>): Promise<T> { const next = accountRouting.catch(() => {}).then(operation); accountRouting = next; return next; }
@@ -221,6 +223,7 @@ async function dispatch(action: string, raw: unknown, owner: BrowserWindow): Pro
     case 'question.import': { const p = z.object({ projectId: z.string(), id, sessionId: id, answerId: id }).parse(raw); return workbench.questions.importReply(p.projectId, p.id, p.sessionId, p.answerId); }
     case 'question.auto': { const p = z.object({ projectId: z.string(), id, sessionId: id, peer: z.string().trim().min(1).max(160) }).parse(raw); return workbench.questions.startAuto(p.projectId, p.id, p.peer, p.sessionId); }
     case 'question.auto.stop': { const p = z.object({ projectId: z.string(), id, peer: z.string().trim().min(1).max(160) }).parse(raw); return workbench.questions.stopAuto(p.projectId, p.id, p.peer); }
+    case 'question.fill': { const p = z.object({ projectId: z.string(), id, peer: z.string().trim().min(1).max(160) }).parse(raw); return workbench.questions.fillDraft(p.projectId, p.id, p.peer); }
     case 'assignment.list': return workbench.remote.assignmentList(workbench.remote.binding(z.object({ projectId: z.string() }).parse(raw).projectId));
     case 'assignment.members': return workbench.remote.assignmentMembers(workbench.remote.binding(z.object({ projectId: z.string() }).parse(raw).projectId));
     case 'assignment.create': { const p = z.object({ projectId: z.string(), task: assignmentCreateSchema }).parse(raw); return workbench.createAssignment(p.projectId, p.task); }
@@ -517,11 +520,20 @@ async function storedDatasetSlots() {
   }
   return datasets.filter(dataset => (dataset.username || dataset.records) && (!dataset.username || preferredByAccount.get(dataset.username)?.slot === dataset.slot)).map(dataset => dataset.slot);
 }
+function syncTaskbar(window: BrowserWindow, workbench: Workbench) {
+  try {
+    if (window.isDestroyed()) return;
+    const next = taskbarAttention(workbench.questions.view(), workbench.contentUpdates(), workbench.store.sessions);
+    const previous = taskbarSeen.get(window);
+    taskbarSeen.set(window, next);
+    if (taskbarShouldAlert(previous, next) && !window.isFocused()) window.flashFrame(true);
+  } catch (error) { console.error('任务栏提醒未更新', errorMessage(error)); }
+}
 async function createDataContext(root: string): Promise<DataContext> {
   let workbench: Workbench;
   const emit = (event: WorkbenchEvent) => { for (const [window, context] of contexts) if (context.workbench === workbench && !window.isDestroyed()) window.webContents.send('workbench:event', event); };
   let emitTimer: NodeJS.Timeout | undefined;
-  const broadcast = () => { egress?.sharedServerConnectionChanged(!!workbench?.remote.connected); if (!emitTimer) emitTimer = setTimeout(() => { emitTimer = undefined; emit({ type: 'state' }); }, 80); };
+  const broadcast = () => { egress?.sharedServerConnectionChanged(!!workbench?.remote.connected); if (!emitTimer) emitTimer = setTimeout(() => { emitTimer = undefined; emit({ type: 'state' }); for (const [window, context] of contexts) if (context.workbench === workbench && !window.isDestroyed()) syncTaskbar(window, workbench); }, 80); };
   const notice = (message: string) => { emit({ type: 'notice', message });
     if (/^(收到提问|收到问题答复|问题已关闭)：/.test(message) && Notification.isSupported()) {
       const notification = new Notification({ title: '团队工作台 · 提问', body: message });
@@ -578,6 +590,8 @@ async function createWindow(preferredSlot?: number, fresh = false) {
   window.webContents.on('will-navigate', event => event.preventDefault());
   window.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
   await window.loadFile(entry);
+  const ready = contexts.get(window);
+  if (ready) syncTaskbar(window, ready.workbench);
   return window;
 }
 function openAdditionalWindow(reuseStored: boolean) {

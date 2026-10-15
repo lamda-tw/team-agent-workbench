@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { accountIdentity } from '../shared/account-data';
 import type { AgentSession, ConnectionProfile } from '../shared/types';
 import { questionCommandSchema, type QuestionCommand, type QuestionInbox, type QuestionJob, type TeamQuestion } from '../shared/questions';
-import { autoDialogueNotice, incomingFollowNotice, incomingQuestionNotice, incomingReplyNotice, questionControl } from '../shared/session-context-text';
+import { autoDialogueNotice, fillFollowNotice, incomingFollowNotice, incomingQuestionNotice, incomingReplyNotice, questionControl, withoutQuestionControl } from '../shared/session-context-text';
 import { atomicJson, type Store } from './store';
 import type { SharedFiles } from './shared-files';
 import { freezeFile } from './artifacts';
@@ -21,7 +21,7 @@ export class Questions {
   private stopped = false;
   constructor(private store: Store, private remote: SharedFiles, private hooks: {
     profile: () => ConnectionProfile | undefined; session: (id: string) => AgentSession;
-    send: (sessionId: string, text: string, runId: string, agentNotice: string) => Promise<boolean>;
+    send: (sessionId: string, text: string, runId: string, agentNotice: string, draft?: boolean) => Promise<boolean>;
     changed: () => void; notice: (text: string) => void;
   }) {}
   private get file() { return path.join(this.store.root, 'questions.json'); }
@@ -115,6 +115,23 @@ export class Questions {
     if (recipient.endSuggestedAt) await this.request(projectId, { kind: 'resume', id, username: peer });
     await this.save(); this.hooks.changed(); void this.sync().catch(() => {});
     return this.inbox()?.items.find(item => item.id === id) || question;
+  }
+  async fillDraft(projectId: string, id: string, peer: string) {
+    const inbox = this.inbox(), profile = this.hooks.profile();
+    if (!inbox || !profile) throw new Error('请先连接团队账号');
+    const question = inbox.items.find(item => item.id === id && item.projectId === projectId);
+    if (!question || question.author !== profile.username) throw new Error('只有发问人可以起草继续提问');
+    if (question.closedAt) throw new Error('问题已关闭');
+    const recipient = question.recipients.find(item => item.username === peer);
+    if (!recipient) throw new Error('对话成员不存在');
+    const session = this.hooks.session(question.sessionId);
+    if (session.cursorNative) throw new Error('此 Session 暂不能起草继续提问，请换一个工作 Session');
+    this.assertWorkSession(question.sessionId, projectId);
+    const dialogue = inbox.dialogues?.find(item => item.sessionId === question.sessionId);
+    if (dialogue && !dialogue.suggested) throw new Error('这个 Session 正在自动对话，请先停止后再自动填入');
+    if (['running', 'starting', 'approval'].includes(session.status) || inbox.jobs.some(job => job.sessionId === question.sessionId && ['queued', 'running', 'ready'].includes(job.phase))) throw new Error('这条提问的 Session 正在处理，请稍后再自动填入');
+    inbox.jobs.push({ questionId: id, projectId, sessionId: question.sessionId, runId: randomUUID(), phase: 'queued', mode: 'fill', peer });
+    await this.save(); this.hooks.changed(); void this.sync().catch(() => {});
   }
   async stopAuto(projectId: string, id: string, peer: string) {
     const inbox = this.inbox(); if (!inbox) return;
@@ -254,7 +271,7 @@ export class Questions {
     }
     const own = q.recipients.find(recipient => recipient.username === username), sessionId = own?.sessionId;
     if (!sessionId || !open(sessionId) || own?.endSuggestedAt || inbox.replyModes?.[q.id] === 'manual') return;
-    const pending = inbox.jobs.find(job => job.questionId === q.id && job.mode !== 'import' && job.mode !== 'auto' && job.mode !== 'ingest' && job.phase === 'queued');
+    const pending = inbox.jobs.find(job => job.questionId === q.id && job.mode !== 'import' && job.mode !== 'auto' && job.mode !== 'ingest' && job.mode !== 'fill' && job.phase === 'queued');
     for (const follow of (q.followUps || []).filter(item => !item.target || item.target === username)) {
       if (known.has(follow.id)) continue;
       if (pending) { pending.covered = [...new Set([...(pending.covered || []), follow.id])]; known.add(follow.id); continue; }
@@ -265,6 +282,16 @@ export class Questions {
   private async start(job: QuestionJob, q: TeamQuestion, owner: string) {
     try {
       const incoming = job.mode === 'import' || job.mode === 'auto' || job.mode === 'ingest';
+      if (job.mode === 'fill') {
+        if (owner !== this.owner() || this.stopped) return;
+        job.phase = 'running'; await this.save(); this.hooks.changed();
+        const peer = q.recipients.find(item => item.username === job.peer);
+        const lines = [...(q.followUps || []).filter(item => !item.target || item.target === job.peer).map(item => ({ at: item.createdAt, text: `发问人：${item.body}` })), ...(peer?.answers || []).map(item => ({ at: item.createdAt, text: `${peer?.name || '对方'}：${item.body}` }))].sort((a, b) => a.at.localeCompare(b.at));
+        const text = `问题：${q.title}\n${q.body}${q.context ? `\n\n附带资料：\n${q.context}` : ''}${lines.length ? `\n\n已有往来：\n${lines.map(item => item.text).join('\n\n')}` : ''}`;
+        const sent = await this.hooks.send(job.sessionId, text, job.runId, fillFollowNotice(peer?.name || job.peer || '对方'), true);
+        if (!sent && job.phase === 'running') throw new Error('没有起草出继续提问，请检查 Session');
+        return;
+      }
       if (!incoming) await this.request(job.projectId, { kind: 'run', id: job.questionId, sessionId: job.sessionId, runId: job.runId });
       if (owner !== this.owner() || this.stopped) return;
       job.phase = 'running'; await this.save(); this.hooks.changed();
@@ -291,6 +318,12 @@ export class Questions {
     if (!job) return;
     const answer = session.messages.slice(lastUser + 1).filter(m => m.role === 'assistant' && !m.kind).at(-1)?.text.trim();
     const failed = session.closedAt || session.error || session.stoppedAt;
+    if (job.mode === 'fill') {
+      const body = withoutQuestionControl(answer || '').trim();
+      if (failed || !body) { job.phase = 'error'; job.error = session.error || '没有起草出继续提问'; }
+      else { job.answer = body.slice(0, 12000); job.phase = 'tracked'; }
+      await this.save(); this.hooks.changed(); void this.sync().catch(() => {}); return;
+    }
     if (job.mode === 'import' || job.mode === 'ingest') {
       job.phase = failed ? 'error' : 'tracked';
       if (job.phase === 'error') job.error = session.error || '回复引入已停止';
