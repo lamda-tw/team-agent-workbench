@@ -22,7 +22,7 @@ import { randomUUID } from 'node:crypto';
 import { inspectPermissions, setCursorManualReview } from './permissions';
 import type { PermissionMode } from '../shared/types';
 import { projectBriefSchema, projectSetupIdentity, type ProjectBrief } from '../shared/project-brief';
-import type { AgentCapabilitySelection, AgentSession, BetaFeature, ConclusionFile, ConclusionOrganization, ConclusionSource, ContentMergeSource, ContentSeenState, ContentUpdate, Draft, PreparationScope, ProjectConclusion, Provider, ProviderInfo, RemoteBinding, Snapshot, Transfer, SourceFile, ConnectionProfile, SessionInput, SessionNetworkRoute, SubsessionReport, SubsessionReportPreview } from '../shared/types';
+import type { AgentCapabilitySelection, AgentSession, BetaFeature, ConclusionFile, ConclusionOrganization, ConclusionSource, ContentMergeSource, ContentSeenState, ContentUpdate, Draft, Message, PreparationScope, ProjectConclusion, Provider, ProviderInfo, RemoteBinding, Snapshot, Transfer, SourceFile, ConnectionProfile, SessionInput, SessionNetworkRoute, SubsessionReport, SubsessionReportPreview } from '../shared/types';
 import { Store, atomicJson } from './store';
 import { preparationSnapshot, prepareReadableInputs } from './preparation-snapshot';
 import { preparationPrompt } from './preparation-prompt';
@@ -133,7 +133,7 @@ export class Workbench {
   async runAccountOperation<T>(action: string, operation: () => Promise<T>): Promise<T> {
     const independent = ['snapshot', 'remote.connect', 'window.new'].includes(action);
     if (!independent) this.assertAccountReady();
-    const readOnly = ['remote.list', 'remote.preview', 'remote.manifest', 'content.list', 'content.history', 'content.sync', 'content.updates', 'account.sync', 'project.brief', 'question.members', 'question.sync', 'assignment.list', 'assignment.members', 'conclusion.list', 'conclusion.match', 'content.deletion.conclusions', 'session.history', 'session.files', 'session.file.preview', 'handoff.read', 'handoff.list', 'subsession.report.preview', 'draft.attachment.preview', 'content.attachment.preview', 'conclusion.file.preview', 'choose.directory', 'choose.executable', 'copy', 'open.link', 'open.data'].includes(action);
+    const readOnly = ['remote.list', 'remote.preview', 'remote.manifest', 'content.list', 'content.history', 'content.sync', 'content.updates', 'account.sync', 'project.brief', 'question.members', 'question.sync', 'assignment.list', 'assignment.members', 'conclusion.list', 'conclusion.match', 'content.deletion.conclusions', 'session.history', 'session.files', 'session.file.preview', 'handoff.read', 'handoff.list', 'subsession.report.preview', 'draft.attachment.preview', 'content.attachment.preview', 'conclusion.file.preview', 'question.file.preview', 'choose.directory', 'choose.executable', 'copy', 'open.link', 'open.data'].includes(action);
     const epoch = this.accountRevision, token = Symbol(action);
     if (!independent && !readOnly) this.accountMutations.add(token);
     try {
@@ -155,6 +155,7 @@ export class Workbench {
     this.questions = new Questions(this.store, this.remote, {
       profile: () => this.configuring ? undefined : this.localProfile(), session: id => this.session(id),
       send: (id, text, runId, agentNotice, draft) => this.runAccountOperation('question.answer', () => this.send(id, text, [], [], undefined, runId, agentNotice, draft)),
+      steer: (id, text, agentNotice, runId) => this.steerQuestion(id, text, agentNotice, runId),
       changed: () => this.broadcast(), notice: text => this.notice(text),
     });
     this.activity = new ActivityAssistant({ store: this.store, prepare: () => this.journal.ready(), owns: s => !this.configuring && this.ownsLocal(s.binding), connected: () => !this.closing && !this.configuring && this.remote.connected,
@@ -1374,8 +1375,11 @@ export class Workbench {
     await this.applyDeferredSettings(s);
     if (this.changingSettings.has(id)) throw new Error('正在切换会话设置，请稍后发送');
     await this.adoptLatestProjectBrief(s);
-    this.sending.add(id); s.stoppedAt = undefined; s.error = undefined; s.status = 'starting'; this.changed();
+    this.sending.add(id); s.stoppedAt = undefined; s.error = undefined; s.status = 'starting';
+    const preview = questionRunId && !draft ? this.questionPreview(s, questionRunId, userText) : undefined;
+    this.changed();
     const canceled = () => this.canceledSends.has(id) || this.closing;
+    let handedOff = false;
     try {
       if (!s.cursorNative && !s.codexDesktop) await this.requireAuth(s.provider, s.cwd, s.networkRoute);
       if (canceled()) return false;
@@ -1401,11 +1405,22 @@ export class Workbench {
       if (canceled()) return false;
       if (s.closedAt) throw new Error('此会话已关闭');
       this.assertReferencesAvailable(s, input.sources);
-      s.status = 'idle'; const started = await runtime.prompt(input.text, { userText, context: input.context, capabilities, submitted });
+      s.status = 'idle'; const started = await runtime.prompt(input.text, { userText, context: input.context, capabilities, submitted, messageId: preview?.id });
+      handedOff = true;
       await this.store.save();
       return started;
     } catch (e: any) { if (canceled()) return false; if (!s.closedAt) { s.status = 'error'; s.error = e.message; this.changed(); if (s.purpose === 'prepare') await this.onDone(id); } throw e; }
-    finally { this.sending.delete(id); if (this.canceledSends.delete(id)) { s.status = 'idle'; s.error = undefined; this.changed(); } }
+    finally {
+      if (!handedOff && preview && s.messages.includes(preview)) { s.messages.splice(s.messages.indexOf(preview), 1); void this.store.save().catch(() => {}); this.changed(); }
+      this.sending.delete(id); if (this.canceledSends.delete(id)) { s.status = 'idle'; s.error = undefined; this.changed(); }
+    }
+  }
+  private questionPreview(session: AgentSession, questionRunId: string, userText: string) {
+    const existing = [...session.messages].reverse().find(message => message.role === 'user' && message.context?.questionRunId === questionRunId && message.context.accepted === false);
+    if (existing) return existing;
+    const preview: Message = { id: randomUUID(), role: 'user', text: userText, userText, createdAt: new Date().toISOString(), context: { questionRunId, nativeId: session.nativeId || '', accepted: false, workRecord: false, sourceHashes: {} } };
+    session.messages.push(preview);
+    return preview;
   }
   async steer(id: string, expectedTurnId: string, userText: string, sourceIds: string[] = [], capabilitySelections: AgentCapabilitySelection[] = []) {
     this.assertWorkspace();
@@ -1432,6 +1447,23 @@ export class Workbench {
       catch (error: any) { this.notice('引导已送达，但本地记录保存失败：' + error.message); }
       return true;
     } finally { this.steering.delete(id); }
+  }
+  private async steerQuestion(id: string, userText: string, agentNotice: string, runId: string) {
+    const s = this.store.sessions.find(session => session.id === id);
+    const runtime = this.runtimes.get(id);
+    if (!s || !(runtime instanceof AgentRuntime) || !runtime.activeTurnId || s.provider !== 'codex') return false;
+    if (s.closedAt || this.stoppingSessions.has(id) || this.closing || this.steering.has(id) || !['running', 'approval'].includes(s.status)) return false;
+    this.steering.add(id);
+    try {
+      const input = await this.availableSessionContext(s, userText, []);
+      input.context.questionRunId = runId;
+      input.text = agentNotice + input.text;
+      await runtime.steer(runtime.activeTurnId, input.text, { userText, context: input.context });
+      try { await this.store.save(); }
+      catch (error: any) { this.notice('引导已送达，但本地记录保存失败：' + error.message); }
+      return true;
+    } catch { return false; }
+    finally { this.steering.delete(id); }
   }
   private async onDone(id: string) {
     // Completion may arrive during a same-account reconnect. Preserve the result
@@ -1480,26 +1512,32 @@ export class Workbench {
     if (this.stoppingSessions.has(id)) return;
     if(isCursorFileSession(s)){
       this.stoppingSessions.add(id);
-      try{const runtime=await this.runtime(s);await runtime.ensureStarted();await runtime.cancel();s.stoppedAt=new Date().toISOString();await this.store.save();this.broadcast();}
+      s.stoppedAt = new Date().toISOString(); this.broadcast();
+      try{const runtime=await this.runtime(s);await runtime.ensureStarted();await runtime.cancel();await this.store.save();this.broadcast();}
+      catch (error) { s.stoppedAt = undefined; this.broadcast(); throw error; }
       finally{this.stoppingSessions.delete(id);}return;
     }
     if (!this.sending.has(id) && !['starting', 'running', 'approval'].includes(s.status) && !s.cursorQueue?.requests.some(request=>request.state==='queued')) return;
     this.stoppingSessions.add(id); if (this.sending.has(id)) this.canceledSends.add(id);
-    s.stoppedAt = new Date().toISOString();
+    s.stoppedAt = new Date().toISOString(); this.broadcast();
     try {
       const runtime = this.runtimes.get(id); this.runtimes.delete(id);
       if (runtime) { if(isCursorFileSession(s)) {try{await runtime.cancel();}finally{await runtime.close();}}else {void runtime.cancel().catch(() => {});await runtime.close();} }
       this.deferredSettings.delete(id); s.settingsPending = undefined; s.permissions = undefined;
       s.status = 'idle'; s.error = undefined; s.approvals = []; await this.questions.sessionStopped(s); await this.store.save(); this.broadcast();
-    } finally { this.stoppingSessions.delete(id); }
+    } catch (error) { s.stoppedAt = undefined; this.broadcast(); throw error; }
+    finally { this.stoppingSessions.delete(id); }
   }
   async closeSession(id: string) {
     const s = this.session(id); if (s.purpose !== 'work') throw new Error('请在整理结果页停止整理');
     s.closedAt = new Date().toISOString();
     const runtime = this.runtimes.get(id); this.runtimes.delete(id);
-    if (runtime) await runtime.close();
-    if (s.cursorNative?.managed) await this.cursorDesktop.release(id);
     this.deferredSettings.delete(id); s.settingsPending = undefined; s.permissions = undefined;
+    s.approvals = []; this.broadcast();
+    try {
+      if (runtime) await runtime.close();
+      if (s.cursorNative?.managed) await this.cursorDesktop.release(id);
+    } catch (error: any) { this.notice(`“${s.title}”已关闭。停止后台进程时出现问题：${error?.message || error}`); }
     s.status = 'idle'; s.approvals = []; await this.questions.sessionStopped(s); await this.store.save(); this.broadcast();
     this.ensureNativeTranscriptSync();
   }

@@ -145,6 +145,11 @@ test('composer renders steer and stop together only for a ready Codex turn, with
   assert.doesNotMatch(render({ ...s, provider: 'cursor' }, 'turn'), /引导当前任务|发送任务/);
   assert.equal(render({ ...s, closedAt: 'closed' }, 'turn'), '');
   assert.match(render({ ...s, status: 'idle' }), /aria-label="发送任务"/);
+  assert.doesNotMatch(render({ ...s, status: 'idle' }), /继续对话/);
+  const paused = renderToStaticMarkup(createElement(ComposerActions, { session: { ...s, status: 'idle', stoppedAt: '2026-10-15T00:00:00Z' }, text: '', busy: false, send: () => {}, stop: () => {}, resume: () => {} }));
+  assert.match(paused, /aria-label="继续对话"/);
+  assert.match(paused, /从停下的地方继续这次对话/);
+  assert.doesNotMatch(renderToStaticMarkup(createElement(ComposerActions, { session: { ...s, status: 'running', stoppedAt: '2026-10-15T00:00:00Z' }, activeTurnId: 'turn', text: '要求', busy: false, send: () => {}, stop: () => {}, resume: () => {} })), /继续对话/);
 });
 
 test('composer waits for acceptance, retains failures/new edits, and clears only the originating session draft', async () => {

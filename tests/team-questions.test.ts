@@ -11,7 +11,7 @@ import { Workbench } from '../src/core/workbench';
 import { Questions } from '../src/core/questions';
 import { memberProfile } from './fixtures/member-profile';
 import { changeQuestion, questionView, type TeamQuestion, type QuestionCommand, type QuestionMember } from '../src/shared/questions';
-import { fillFollowNotice, incomingQuestionNotice, incomingReplyNotice, sessionMessageText } from '../src/shared/session-context-text';
+import { autoDialogueNotice, fillFollowNotice, incomingQuestionNotice, incomingReplyNotice, questionSuggestsEnd, sessionMessageText, withoutQuestionFields } from '../src/shared/session-context-text';
 import { historyMarkdown } from '../src/core/artifacts';
 import { QuestionDetail, QuestionCard, QuestionPanel, questionUnread } from '../src/renderer/team-questions';
 import type { AgentSession } from '../src/shared/types';
@@ -46,6 +46,14 @@ test('incoming question notice is hidden from the visible transcript and does no
   ] });
   assert.doesNotMatch(hidden, /请补充样本|起草继续提问/);
   assert.match(hidden, /继续看结果/);
+  assert.equal(questionSuggestsEnd('请补充样本\n[[建议结束]]'), true);
+  assert.equal(questionSuggestsEnd('请补充样本'), false);
+  assert.equal(withoutQuestionFields('[[继续提问]]\n请改成 v3'), '请改成 v3');
+  assert.equal(withoutQuestionFields('正文\n[[建议结束]]\n说明'), '正文\n说明');
+  const oldAuto = '[自动对话]\n这个 Session 只和团队成员「周祺智」自动对话，不能加入其他人的回答。请只根据下面这条回复决定下一步，并在回复第一行单独写一个标记：还要向对方提问时写 [[继续提问]]，从第二行写要发给对方的内容；认为提问可以结束时写 [[建议结束]]，后面可以写给当前用户看的简短说明。结束标记只停止自动对话，不会直接关闭提问。不要提及其他成员，也不要覆盖当前会话已有约定。\n\n回复人：周祺智\n用 v2';
+  assert.equal(sessionMessageText(session, { id: '7', role: 'user', text: oldAuto, createdAt: '' }), '回复人：周祺智\n用 v2');
+  assert.match(autoDialogueNotice('周祺智'), /检索这一固定字段/);
+  assert.doesNotMatch(sessionMessageText(session, { id: '8', role: 'user', text: autoDialogueNotice('周祺智') + '请改成 v3', createdAt: '' }), /自动对话/);
 });
 
 test('question permissions, append-only replies, retry deduplication, explicit closure and recipient privacy', () => {
@@ -148,6 +156,36 @@ test('manual recipient replies are independent, idempotent and do not take over 
   assert.throws(() => mutate(items, 'bob', { ...manual, answerId: randomUUID() }), /已关闭/);
 });
 
+test('question and follow-up attachments stay with their audience', () => {
+  const items: TeamQuestion[] = [], file = { name: 'note.txt', sha256: 'ab'.repeat(32), size: 18, owner: 'alice' };
+  const input = { ...create(), files: [file] }, q = mutate(items, 'alice', input);
+  assert.equal(q.files?.[0].name, 'note.txt');
+  assert.equal(mutate(items, 'alice', input).revision, q.revision);
+  assert.throws(() => mutate(items, 'alice', { ...input, files: [{ ...file, name: 'other.txt' }] }), /编号/);
+  assert.equal(questionView(q, 'bob')!.files?.[0].name, 'note.txt');
+  const follow = { kind: 'follow' as const, id: q.id, followId: randomUUID(), body: '请看附件', target: 'bob', files: [{ ...file, name: 'more.txt' }] };
+  mutate(items, 'alice', follow);
+  assert.equal(questionView(q, 'bob')!.followUps?.[0].files?.[0].name, 'more.txt');
+  assert.equal(questionView(q, 'carol')!.followUps?.some(item => item.files?.some(entry => entry.name === 'more.txt')), false);
+  assert.equal(mutate(items, 'alice', follow).revision, q.revision);
+  const detail = (username: string) => renderToStaticMarkup(React.createElement(QuestionDetail, { question: questionView(q, username)!, username, inbox: { items, jobs: [], read: {} }, sessions: [], changed: async () => {} }));
+  assert.match(detail('alice'), /note\.txt[\s\S]*下载[\s\S]*>附件</);
+  assert.match(detail('bob'), /note\.txt[\s\S]*下载/);
+  assert.match(detail('bob'), /more\.txt/);
+  assert.doesNotMatch(detail('bob'), />附件</);
+  assert.doesNotMatch(detail('carol'), /more\.txt/);
+  const runId = randomUUID(), sessionId = randomUUID();
+  mutate(items, 'bob', { kind: 'link', id: q.id, sessionId });
+  mutate(items, 'bob', { kind: 'run', id: q.id, sessionId, runId });
+  mutate(items, 'bob', { kind: 'reply', id: q.id, runId, body: '结果在附件', files: [{ ...file, name: 'result.txt', owner: 'bob' }] });
+  assert.match(detail('alice'), /result\.txt[\s\S]*下载/);
+  assert.match(detail('bob'), /result\.txt/);
+  assert.equal(mutate(items, 'bob', { kind: 'reply', id: q.id, runId, body: '结果在附件', files: [{ ...file, name: 'result.txt', owner: 'bob' }] }).revision, q.revision);
+  const session = { id: randomUUID(), purpose: 'work', binding: { project: { id: projectId } } } as AgentSession;
+  const panel = renderToStaticMarkup(React.createElement(QuestionPanel, { inbox: { items: [], jobs: [], read: {} }, selectedId: '', session, username: 'alice', sessions: [session], connected: true, select: () => {}, close: () => {}, changed: async () => {} }));
+  assert.match(panel, /添加附件/);
+});
+
 test('both sides share the conversation composer; recipient can type before linking a Session', () => {
   const items: TeamQuestion[] = [], q = mutate(items, 'alice', create());
   const render = (username: string, replyModes?: Record<string, 'manual' | 'auto'>, sessions: AgentSession[] = []) => renderToStaticMarkup(React.createElement(QuestionDetail, { question: questionView(q, username)!, username, inbox: { items, jobs: [], read: {}, replyModes }, sessions, changed: async () => {} }));
@@ -159,9 +197,10 @@ test('both sides share the conversation composer; recipient can type before link
   assert.match(render('bob'), /aria-label="回复alice"/);
   const sid = randomUUID(); mutate(items, 'bob', { kind: 'link', id: q.id, sessionId: sid });
   const linked = { id: sid, purpose: 'work', binding: { project: { id: q.projectId } } } as AgentSession;
-  assert.match(render('bob', { [q.id]: 'auto' }, [linked]), /正在与alice自动往返/);
-  assert.match(render('bob', { [q.id]: 'auto' }, [linked]), />停止自动</);
-  assert.doesNotMatch(render('bob', { [q.id]: 'auto' }, [linked]), /<textarea/);
+  const automatic = render('bob', { [q.id]: 'auto' }, [linked]);
+  assert.match(automatic, /team-question-composer is-auto[\s\S]*readOnly[\s\S]*正在与alice自动往返/);
+  assert.match(automatic, />停止自动</);
+  assert.doesNotMatch(automatic, /team-question-send/);
   assert.match(render('bob', { [q.id]: 'manual' }, [linked]), /<textarea/);
   assert.match(render('bob', { [q.id]: 'auto' }), /<textarea/, 'a Session on another client must not hide direct replies');
   assert.match(render('bob', { [q.id]: 'auto' }, [{ ...linked, closedAt: new Date().toISOString() }]), /<textarea/, 'a closed Session cannot continue automatically');
@@ -280,6 +319,12 @@ test('closed question UI retains link and answers, removes answer and closure ac
   const answerSide = renderToStaticMarkup(React.createElement(QuestionDetail, { question: questionView(openQuestion, 'bob')!, inbox: { items: openItems, jobs: [], read: {} }, username: 'bob', sessions: [], changed: async () => {} }));
   assert.match(answerSide, />AI填入</);
   assert.match(answerSide, /还没有 AI 生成的回答/);
+  const autoMarkup = renderToStaticMarkup(React.createElement(QuestionDetail, { question: openQuestion, inbox: { items: openItems, jobs: [], read: {}, dialogues: [{ questionId: openQuestion.id, projectId, peer: 'bob', sessionId: openQuestion.sessionId, mode: 'auto' }] }, username: 'alice', sessions: [], changed: async () => {} }));
+  const autoLane = autoMarkup.split('team-question-composer is-auto')[1].split('team-question-replies')[0];
+  assert.match(autoLane, /boxed[\s\S]*>结束</);
+  assert.match(autoLane, /boxed[\s\S]*>停止自动</);
+  assert.match(autoLane, /正在与bob自动往返/);
+  assert.doesNotMatch(autoLane, />AI填入</);
   const otherSession = randomUUID();
   const sessionA = { id: openQuestion.sessionId, purpose: 'work', binding: { project: { id: projectId } } } as AgentSession;
   const sessionB = { id: otherSession, purpose: 'work', binding: { project: { id: projectId } } } as AgentSession;
@@ -326,7 +371,7 @@ test('replies stay manual until one auto session tracks a single person', () => 
       send: async (id, text, runId, notice) => {
         prompts.push({ who, text, notice });
         const mine = prompts.filter(item => item.who === who).length;
-        const script = ['看到了', '[[继续提问]]\n请改成 v3', '[[建议结束]]\n可以收尾'];
+        const script = ['看到了', '请改成 v3', '最新判断如下\n[[建议结束]]\n可以收尾'];
         const s = wb.session(id); s.status = 'running';
         s.messages.push({ id: randomUUID(), role: 'user', text: notice + text, userText: text, createdAt: new Date().toISOString(), context: { nativeId: 'test', accepted: true, workRecord: false, sourceHashes: {}, questionRunId: runId } });
         s.messages.push({ id: randomUUID(), role: 'assistant', text: who === 'alice' ? script[mine - 1] || '不再继续' : '答复 ' + mine, createdAt: new Date().toISOString() });
@@ -352,7 +397,9 @@ test('replies stay manual until one auto session tracks a single person', () => 
   const settle = async (check: () => boolean) => { for (let n = 0; !check(); n++) { if (n > 40) throw new Error('timed out'); await bobQ.sync(); await aliceQ.sync(); await new Promise(r => setTimeout(r, 20)); } };
   await aliceQ.startAuto(project, q.id, 'bob', autoSession.id);
   await settle(() => prompts.filter(item => item.who === 'bob').length >= 2);
+  assert.match(prompts.filter(item => item.who === 'bob')[0].text, /问题：验收口径/);
   assert.match(prompts.filter(item => item.who === 'bob')[1].text, /请改成 v3/);
+  assert.doesNotMatch(prompts.filter(item => item.who === 'bob')[1].text, /问题：/);
   assert.match(prompts.filter(item => item.who === 'bob')[1].notice, /继续发来的信息/);
   await settle(() => !!aliceQ.view().items[0].recipients.find(item => item.username === 'bob')?.endSuggestedAt);
   assert.equal(prompts.filter(item => item.who === 'bob').length, 2);
@@ -395,9 +442,172 @@ test('a previous reply is stored locally for fill and is not sent', () => fixtur
   ask.messages.push({ id: randomUUID(), role: 'assistant', text: '[[继续提问]]\n请补充样本', createdAt: new Date().toISOString() });
   await questions.completed(ask);
   assert.equal(questions.view().fills?.[q.id]?.bob, '请补充样本');
+  const summaryRun = randomUUID();
+  ask.messages.push({ id: randomUUID(), role: 'user', text: '继续', createdAt: new Date().toISOString(), context: { nativeId: 'test', accepted: true, workRecord: false, sourceHashes: {}, questionRunId: summaryRun } });
+  ask.messages.push({ id: randomUUID(), role: 'assistant', text: '我需要你提供代码目录，并确认是否授权覆盖。', createdAt: new Date().toISOString() });
+  inbox.jobs.push({ questionId: q.id, projectId: project, sessionId: ask.id, runId: summaryRun, phase: 'running', mode: 'import', sourceId: 'later', peer: 'bob' });
+  await questions.completed(ask);
+  assert.equal(questions.view().fills?.[q.id]?.bob, '我需要你提供代码目录，并确认是否授权覆盖。');
+  const endRun = randomUUID();
+  ask.messages.push({ id: randomUUID(), role: 'user', text: '继续', createdAt: new Date().toISOString(), context: { nativeId: 'test', accepted: true, workRecord: false, sourceHashes: {}, questionRunId: endRun } });
+  ask.messages.push({ id: randomUUID(), role: 'assistant', text: '[[建议结束]]\n先确认授权再继续。', createdAt: new Date().toISOString() });
+  inbox.jobs.push({ questionId: q.id, projectId: project, sessionId: ask.id, runId: endRun, phase: 'running', mode: 'import', sourceId: 'end', peer: 'bob' });
+  await questions.completed(ask);
+  assert.equal(questions.view().fills?.[q.id]?.bob, '先确认授权再继续。');
   assert.equal(questions.view().items.find(item => item.id === q.id)?.followUps?.length || 0, 0);
   assert.equal(sent, false);
   assert.doesNotMatch(historyMarkdown(ask), /起草继续提问/);
+}));
+
+test('automatic dialogue attaches files created during that turn', () => fixture(async ({ alice, bob, project, root }) => {
+  const ask = newSession(alice, project), responder = newSession(bob, project), autoSession = newSession(alice, project);
+  const q = await alice.questions.create(ask.id, { ...create(), recipients: ['bob'] });
+  await alice.questions.close(); await bob.questions.close();
+  const outside = path.join(root, 'outside.txt'), earlier = path.join(responder.cwd, 'already.txt');
+  await fs.writeFile(outside, 'do-not-attach'); await fs.writeFile(earlier, 'old');
+  responder.outputFiles = [earlier];
+  const prompts: { who: string; text: string }[] = [];
+  const wire = (wb: Workbench, who: string) => {
+    const questions = new Questions(wb.store, wb.remote, {
+      profile: () => wb.remote.profile, session: id => wb.session(id), changed: () => {}, notice: () => {},
+      send: async (id, text, runId) => {
+        prompts.push({ who, text });
+        const s = wb.session(id);
+        const mine = prompts.filter(item => item.who === who).length;
+        if (who === 'bob' && mine === 1) {
+          const produced = path.join(s.cwd, 'bob-result.txt');
+          await fs.writeFile(produced, 'bob file');
+          s.outputFiles = [...(s.outputFiles || []), produced, outside];
+        }
+        if (who === 'alice' && mine === 1) {
+          const produced = path.join(s.cwd, 'alice-follow.txt');
+          await fs.writeFile(produced, 'alice file');
+          s.outputFiles = [...(s.outputFiles || []), produced];
+        }
+        s.status = 'idle';
+        s.messages.push({ id: randomUUID(), role: 'user', text, createdAt: new Date().toISOString(), context: { nativeId: 'test', accepted: true, workRecord: false, sourceHashes: {}, questionRunId: runId } });
+        s.messages.push({ id: randomUUID(), role: 'assistant', text: who === 'alice' ? '[[继续提问]]\n请看我附的文件' : '结果见附件', createdAt: new Date().toISOString() });
+        await questions.completed(s); return true;
+      },
+    });
+    wb.questions = questions; return questions;
+  };
+  const aliceQ = wire(alice, 'alice'), bobQ = wire(bob, 'bob');
+  await aliceQ.init(); await bobQ.init();
+  const settle = async (check: () => boolean) => { for (let n = 0; !check(); n++) { if (n > 40) throw new Error('timed out'); await bobQ.sync(); await aliceQ.sync(); await new Promise(r => setTimeout(r, 20)); } };
+  await bobQ.link(project, q.id, responder.id);
+  await settle(() => !!aliceQ.view().items.find(item => item.id === q.id)?.recipients[0].answers[0]?.files?.some(file => file.name === 'bob-result.txt'));
+  const answer = aliceQ.view().items.find(item => item.id === q.id)!.recipients[0].answers[0];
+  assert.equal(answer.body, '结果见附件');
+  assert.deepEqual(answer.files?.map(file => file.name), ['bob-result.txt']);
+  const answerCopy = ask.sources.find(source => source.name === 'bob-result.txt');
+  assert.equal(await fs.readFile(answerCopy!.localPath, 'utf8'), 'bob file');
+  assert.equal(ask.sources.some(source => source.name === 'already.txt' || source.name === 'outside.txt'), false);
+  await aliceQ.startAuto(project, q.id, 'bob', autoSession.id);
+  await settle(() => prompts.some(item => item.who === 'alice' && item.text.includes('附件：bob-result.txt')));
+  await settle(() => !!aliceQ.view().items.find(item => item.id === q.id)?.followUps?.some(item => item.files?.some(file => file.name === 'alice-follow.txt')));
+  const follow = aliceQ.view().items.find(item => item.id === q.id)!.followUps!.find(item => item.body === '请看我附的文件')!;
+  assert.equal(follow.target, 'bob');
+  assert.deepEqual(follow.files?.map(file => file.name), ['alice-follow.txt']);
+  await settle(() => prompts.some(item => item.who === 'bob' && item.text.includes('附件：alice-follow.txt')));
+  const followCopy = responder.sources.find(source => source.name === 'alice-follow.txt');
+  assert.equal(await fs.readFile(followCopy!.localPath, 'utf8'), 'alice file');
+}));
+
+test('question and follow-up files reach the recipient and the answering session', () => fixture(async ({ alice, bob, carol, project, root }) => {
+  const note = path.join(root, 'note.txt');
+  await fs.writeFile(note, 'sample-attachment');
+  const staged = await alice.questions.stage([note]);
+  const ask = newSession(alice, project);
+  const q = await alice.questions.create(ask.id, { ...create(), fileIds: staged.map(item => item.id) });
+  assert.equal(q.files?.[0].name, 'note.txt');
+  await bob.questions.sync(); await carol.questions.sync();
+  assert.equal(bob.questions.view().items.find(item => item.id === q.id)?.files?.[0].sha256, q.files?.[0].sha256);
+  const responder = newSession(bob, project), prompts: string[] = [];
+  await bob.questions.close();
+  const questions = new Questions(bob.store, bob.remote, {
+    profile: () => bob.remote.profile, session: id => bob.session(id), changed: () => {}, notice: () => {},
+    send: async (_id, text) => { prompts.push(text); return true; },
+  });
+  bob.questions = questions;
+  await questions.init();
+  await questions.link(project, q.id, responder.id);
+  const copied = responder.sources.find(source => source.name === 'note.txt' && source.sourcePath.startsWith('question:'));
+  assert.equal(await fs.readFile(copied!.localPath, 'utf8'), 'sample-attachment');
+  await questions.sync();
+  await until(() => prompts.some(text => text.includes('附件：note.txt')));
+  const more = path.join(root, 'more.txt');
+  await fs.writeFile(more, 'follow-attachment');
+  const extra = await alice.questions.stage([more]);
+  await alice.questions.follow(project, q.id, randomUUID(), '请看补充', 'bob', extra.map(item => item.id));
+  await carol.questions.sync();
+  assert.equal(carol.questions.view().items.find(item => item.id === q.id)?.followUps?.some(item => item.body === '请看补充'), false);
+  await questions.sync();
+  const followCopy = responder.sources.find(source => source.name === 'more.txt');
+  assert.equal(await fs.readFile(followCopy!.localPath, 'utf8'), 'follow-attachment');
+  assert.equal(questions.view().items.find(item => item.id === q.id)?.followUps?.[0].files?.[0].name, 'more.txt');
+}));
+
+test('a finished session summary becomes the local fill and is not sent', () => fixture(async ({ alice, bob, project }) => {
+  const ask = newSession(alice, project), responder = newSession(bob, project);
+  const q = await alice.questions.create(ask.id, { ...create(), recipients: ['bob'] });
+  const turn = (session: AgentSession, text: string) => {
+    session.messages.push({ id: randomUUID(), role: 'user', text: '继续', createdAt: new Date().toISOString() });
+    session.messages.push({ id: randomUUID(), role: 'assistant', text, createdAt: new Date().toISOString() });
+  };
+  turn(ask, '我需要你提供与黄区 schema 匹配的代码目录，并确认是否授权仅覆盖 E2E-01。');
+  await alice.questions.completed(ask);
+  assert.equal(alice.questions.view().fills?.[q.id]?.bob, '我需要你提供与黄区 schema 匹配的代码目录，并确认是否授权仅覆盖 E2E-01。');
+  assert.equal(alice.questions.view().items[0].followUps?.length || 0, 0);
+  turn(ask, '[[建议结束]]\n先确认授权再继续。');
+  await alice.questions.completed(ask);
+  assert.equal(alice.questions.view().fills?.[q.id]?.bob, '先确认授权再继续。');
+  ask.stoppedAt = new Date().toISOString();
+  turn(ask, '停在半路的输出');
+  await alice.questions.completed(ask);
+  assert.equal(alice.questions.view().fills?.[q.id]?.bob, '先确认授权再继续。');
+  await bob.questions.sync();
+  const runId = randomUUID();
+  responder.messages.push({ id: randomUUID(), role: 'user', text: '问题', createdAt: new Date().toISOString(), context: { nativeId: 'test', accepted: true, workRecord: false, sourceHashes: {}, questionRunId: runId } });
+  responder.messages.push({ id: randomUUID(), role: 'assistant', text: '请使用已发布的 v2 数据。', createdAt: new Date().toISOString() });
+  (bob.questions as unknown as { inbox: () => { jobs: object[] } }).inbox().jobs.push({ questionId: q.id, projectId: project, sessionId: responder.id, runId, phase: 'running', mode: 'answer', sourceId: 'origin', peer: 'bob' });
+  await bob.questions.completed(responder);
+  assert.equal(bob.questions.view().fills?.[q.id]?.['answer:bob'], '请使用已发布的 v2 数据。');
+}));
+
+test('unseen replies enter one turn, and later ones steer into the running turn', () => fixture(async ({ alice, bob, project }) => {
+  const ask = newSession(alice, project);
+  const q = await alice.questions.create(ask.id, { ...create(), recipients: ['bob'] });
+  await bob.questions.answer(project, q.id, randomUUID(), '第一条回复');
+  await bob.questions.answer(project, q.id, randomUUID(), '第二条回复');
+  await alice.questions.close();
+  const sent: string[] = [], steered: string[] = [];
+  const questions = new Questions(alice.store, alice.remote, {
+    profile: () => alice.remote.profile, session: id => alice.session(id), changed: () => {}, notice: () => {},
+    send: async (_id, text, runId) => {
+      sent.push(text);
+      ask.status = 'running';
+      ask.messages.push({ id: randomUUID(), role: 'user', text, createdAt: new Date().toISOString(), context: { nativeId: 'test', accepted: true, workRecord: false, sourceHashes: {}, questionRunId: runId } });
+      return true;
+    },
+    steer: async (_id, text) => { steered.push(text); return true; },
+  });
+  alice.questions = questions;
+  await questions.init();
+  await questions.sync();
+  await questions.startAuto(project, q.id, 'bob', ask.id);
+  await until(() => sent.length === 1);
+  await questions.sync();
+  assert.match(sent[0], /第一条回复/);
+  assert.match(sent[0], /第二条回复/);
+  assert.equal(questions.view().jobs.filter(job => job.mode === 'auto').length, 1);
+  await bob.questions.answer(project, q.id, randomUUID(), '第三条回复');
+  await questions.sync();
+  assert.equal(steered.length, 1);
+  assert.match(steered[0], /第三条回复/);
+  assert.doesNotMatch(steered[0], /第一条回复/);
+  assert.equal(questions.view().jobs.filter(job => job.mode === 'auto' && job.phase === 'queued').length, 0);
+  assert.equal(questions.view().jobs.filter(job => job.mode === 'auto').length, 1);
 }));
 
 test('Codex and Cursor protocol runtimes preserve question context and return completed answers', () => fixture(async ({ alice, bob, project, root }) => {
