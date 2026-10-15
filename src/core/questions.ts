@@ -30,7 +30,7 @@ export class Questions {
     const owner = this.owner();
     return owner ? this.buckets[owner] ||= { items: [], read: {}, notified: {}, jobs: [] } : undefined;
   }
-  view(): QuestionInbox { const inbox = this.inbox(); return inbox ? { items: inbox.items, read: inbox.read, jobs: inbox.jobs, dialogues: inbox.dialogues, error: inbox.error } : { items: [], read: {}, jobs: [] }; }
+  view(): QuestionInbox { const inbox = this.inbox(); return inbox ? { items: inbox.items, read: inbox.read, jobs: inbox.jobs, dialogues: inbox.dialogues, replyModes: inbox.replyModes, error: inbox.error } : { items: [], read: {}, jobs: [] }; }
   private save() { const value = JSON.stringify(this.buckets); const job = this.saving.catch(() => {}).then(() => atomicJson(this.file, JSON.parse(value))); this.saving = job; return job; }
   async init() {
     try { this.buckets = JSON.parse(await fs.readFile(this.file, 'utf8')); } catch (e: any) { if (e.code !== 'ENOENT') throw e; }
@@ -62,9 +62,10 @@ export class Questions {
   }
   async closeQuestion(projectId: string, id: string) { return this.request(projectId, { kind: 'close', id }); }
   async follow(projectId: string, id: string, followId: string, body: string, target?: string) { return this.request(projectId, { kind: 'follow', id, followId, body, ...(target ? { target } : {}) }); }
+  async answer(projectId: string, id: string, answerId: string, body: string) { return this.request(projectId, { kind: 'answer', id, answerId, body }); }
   lockedPeer(sessionId: string) {
     const inbox = this.inbox(), dialogue = inbox?.dialogues?.find(item => item.sessionId === sessionId);
-    if (!dialogue) return;
+    if (!dialogue) return inbox?.items.find(q => !q.closedAt && q.author !== this.hooks.profile()?.username && inbox.replyModes?.[q.id] === 'auto' && q.recipients.some(r => r.sessionId === sessionId))?.authorName;
     return inbox?.items.find(item => item.id === dialogue.questionId)?.recipients.find(item => item.username === dialogue.peer)?.name || dialogue.peer;
   }
   private assertWorkSession(sessionId: string, projectId: string) {
@@ -93,12 +94,20 @@ export class Questions {
     const inbox = this.inbox(), profile = this.hooks.profile();
     if (!inbox || !profile) throw new Error('请先连接团队账号');
     const question = inbox.items.find(item => item.id === id && item.projectId === projectId);
-    if (!question || question.author !== profile.username) throw new Error('只有发问人可以开始自动对话');
+    if (!question) throw new Error('问题不存在');
+    if (question.author !== profile.username) {
+      if (peer !== question.author || !question.recipients.some(r => r.username === profile.username)) throw new Error('只能与这条问题的发问人自动对话');
+      this.assertWorkSession(sessionId, projectId);
+      const locked = inbox.dialogues?.some(d => d.sessionId === sessionId) || inbox.items.some(q => q.author !== question.author && !q.closedAt && inbox.replyModes?.[q.id] === 'auto' && q.recipients.some(r => r.sessionId === sessionId));
+      if (locked) throw new Error('这个 Session 已在进行另一条自动对话');
+      return this.link(projectId, id, sessionId);
+    }
     if (question.closedAt) throw new Error('问题已关闭');
     const recipient = question.recipients.find(item => item.username === peer);
     if (!recipient?.answers.length) throw new Error('对方第一次回答后才能开始自动对话');
     this.assertWorkSession(sessionId, projectId);
     const dialogues = inbox.dialogues ||= [];
+    if (inbox.items.some(q => !q.closedAt && inbox.replyModes?.[q.id] === 'auto' && q.recipients.some(r => r.sessionId === sessionId))) throw new Error('这个 Session 已经在回答其他成员的提问');
     if (dialogues.some(item => item.sessionId === sessionId && !(item.questionId === id && item.peer === peer))) throw new Error('这个 Session 已经在和另一个人自动对话');
     const existing = dialogues.find(item => item.questionId === id && item.peer === peer);
     if (existing) { existing.sessionId = sessionId; existing.suggested = false; }
@@ -109,6 +118,12 @@ export class Questions {
   }
   async stopAuto(projectId: string, id: string, peer: string) {
     const inbox = this.inbox(); if (!inbox) return;
+    const question = inbox.items.find(q => q.id === id && q.projectId === projectId);
+    if (question && question.author !== this.hooks.profile()?.username && question.author === peer) {
+      (inbox.replyModes ||= {})[id] = 'manual';
+      for (const job of inbox.jobs) if (job.questionId === id && (!job.mode || job.mode === 'answer') && ['queued', 'running', 'ready'].includes(job.phase)) { job.phase = 'error'; job.error = '已停止自动回传，生成结果保留在 Session'; }
+      await this.save(); this.hooks.changed(); void this.sync().catch(() => {}); return;
+    }
     inbox.dialogues = inbox.dialogues?.filter(item => !(item.projectId === projectId && item.questionId === id && item.peer === peer));
     for (const job of inbox.jobs) if (job.projectId === projectId && job.questionId === id && job.peer === peer && job.mode === 'auto' && job.phase === 'queued') job.phase = 'closed';
     await this.save(); this.hooks.changed();
@@ -119,9 +134,11 @@ export class Questions {
     if (!s.binding || s.binding.project.id !== projectId || s.closedAt || s.purpose !== 'work') throw new Error('只能关联同项目中自己的打开的工作 Session');
     if (s.cursorNative) throw new Error('此 Cursor 桌面接入暂不支持自动回答，请选择其他工作 Session');
     const inbox = this.inbox()!;
+    if (inbox.dialogues?.some(d => d.sessionId === sessionId)) throw new Error('这个 Session 已经在进行另一条自动对话');
     if (inbox.jobs.some(j => j.questionId === id && ['queued', 'running', 'ready'].includes(j.phase))) throw new Error('这条问题正在处理');
     const q = await this.request(projectId, { kind: 'link', id, sessionId });
     await this.reference(s, q);
+    (inbox.replyModes ||= {})[id] = 'auto';
     inbox.jobs.push({ questionId: id, projectId, sessionId, runId: randomUUID(), phase: 'queued', mode: 'answer', sourceId: 'origin', peer: this.hooks.profile()?.username, covered: (q.followUps || []).filter(item => !item.target || item.target === this.hooks.profile()?.username).map(item => item.id) });
     await this.save(); this.hooks.changed(); void this.sync().catch(() => {}); return q;
   }
@@ -236,7 +253,7 @@ export class Questions {
       return;
     }
     const own = q.recipients.find(recipient => recipient.username === username), sessionId = own?.sessionId;
-    if (!sessionId || !open(sessionId) || own?.endSuggestedAt) return;
+    if (!sessionId || !open(sessionId) || own?.endSuggestedAt || inbox.replyModes?.[q.id] === 'manual') return;
     const pending = inbox.jobs.find(job => job.questionId === q.id && job.mode !== 'import' && job.mode !== 'auto' && job.mode !== 'ingest' && job.phase === 'queued');
     for (const follow of (q.followUps || []).filter(item => !item.target || item.target === username)) {
       if (known.has(follow.id)) continue;

@@ -46,7 +46,11 @@ function QuestionComposer({ session, sent }: { session: AgentSession; sent: (q: 
 
 export function questionAutoLock(inbox: QuestionInbox | undefined, sessionId: string) {
   const dialogue = inbox?.dialogues?.find(item => item.sessionId === sessionId);
-  if (!dialogue) return;
+  if (!dialogue) {
+    const received = inbox?.items.find(q => !q.closedAt && inbox.replyModes?.[q.id] === 'auto' && q.recipients.some(r => r.sessionId === sessionId));
+    if (received) return { name: received.authorName, title: received.title, suggested: received.recipients.some(r => !!r.endSuggestedAt) };
+    return;
+  }
   const question = inbox?.items.find(item => item.id === dialogue.questionId);
   const peer = question?.recipients.find(item => item.username === dialogue.peer);
   return { name: peer?.name || dialogue.peer, title: question?.title || '提问', suggested: !!dialogue.suggested || !!peer?.endSuggestedAt };
@@ -65,35 +69,46 @@ export function QuestionDetail({ question: q, inbox, username, sessions, changed
   const run = async (action: string, payload: object) => { if (working.current) return false; working.current = true; setBusy(true); setError(''); try { await window.workbench.call(action, payload); await changed(); return true; } catch (e: any) { setError(e.message); return false; } finally { working.current = false; setBusy(false); } };
   return <section className="team-question-detail"><div className="row"><h3>{q.title}</h3><span className="spacer"/><span className="badge">{q.closedAt ? '已关闭' : '开放'}</span></div><p className="muted small">{q.authorName} · {time(q.createdAt)}</p><div className="team-question-text">{q.body}</div>{q.context && <details><summary>补充资料</summary><div className="team-question-text">{q.context}</div></details>}
     {q.closedAt && <p className="callout">提问已于 {time(q.closedAt)} 结束，不再接收答复。已关联的 Session 保留，需要结束时请在 Session 中手动关闭。</p>}
-    {!author && <div className="row">{linked && <button className="secondary compact" onClick={() => openSession(linked)}>打开关联 Session{linked.closedAt ? '（已关闭）' : ''}</button>}{inDialogue && !q.closedAt && <button className="secondary compact" disabled={busy} onClick={() => void run('question.close', { projectId: q.projectId, id: q.id })}>结束提问</button>}</div>}
-    {!author && own && !q.closedAt && <div className="team-question-answer"><label>选择回答问题的 Session<select aria-label="回答 Session" value={selected?.id || ''} disabled={busy || active || own.state === 'running'} onChange={e => setSessionId(e.target.value)}><option value="">请选择同项目的 Session</option>{choices.map(s => <option key={s.id} value={s.id}>{s.title}{['running', 'starting', 'approval'].includes(s.status) ? ' · 忙碌，排队回答' : ''}</option>)}</select></label>
-      <p className="muted small">关联后，AI 会在该 Session 空闲时回答。你可以随时结束这条提问，包括问到一半。结束会轻量通知发问人，并刷新提问工作区。</p>
-      <button className="primary" disabled={!selected || busy || active || own.state === 'running'} onClick={() => void run('question.link', { projectId: q.projectId, id: q.id, sessionId })}>{active ? ({ queued: '等待 Session 空闲', running: '回答中…', ready: '答复待送达' } as Record<string, string>)[job!.phase] : own.state === 'running' ? '回答中…' : own.answers.length ? '关联并补充回答' : '关联并回答'}</button>
-      {!choices.length && <p className="muted small">请先在这个项目中新建或打开一个工作 Session。</p>}
-      {job?.phase === 'error' && <p className="inline-error">{job.error}</p>}{job?.phase === 'ready' && job.error && <p className="muted small">答复已保留，连接恢复后自动送达。</p>}
-    </div>}
     {author && <p className="muted small">{q.recipients.filter(r => r.answers.length).length}/{q.recipientCount} 人已回复 · 每人一条对话</p>}
     {q.recipients.map(r => {
-      const dialogue = inbox.dialogues?.find(item => item.questionId === q.id && item.peer === r.username);
-      const suggested = !!r.endSuggestedAt || !!dialogue?.suggested;
-      const otherAuto = inbox.dialogues?.find(item => item.questionId === q.id && item.sessionId === linked?.id && item.peer !== r.username);
-      const autoOn = !!dialogue && !suggested;
-      const turns = [...(q.followUps || []).filter(item => !item.target || item.target === r.username).map(item => ({ id: item.id, at: item.createdAt, mine: author, who: author ? '我' : q.authorName, body: item.body })), ...r.answers.map(item => ({ id: item.id, at: item.createdAt, mine: !author, who: author ? r.name : '我', body: item.body, answerId: item.id }))].sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id));
-      const sendFollow = () => { const body = (laneText[r.username] || '').trim(); if (!body) return; const key = r.username + ':' + body; if (followDraft.current[key]?.payload !== body) followDraft.current[key] = { payload: body, id: crypto.randomUUID() }; const draft = followDraft.current[key]; void run('question.follow', { projectId: q.projectId, id: q.id, followId: draft.id, body, target: r.username }).then(ok => { if (ok) setLaneText(current => ({ ...current, [r.username]: '' })); }); };
-      const status = dialogue ? (suggested ? '建议结束' : '自动对话中') : r.answers.length ? `${r.answers.length} 条答复` : q.closedAt ? '关闭前未回复' : ({ pending: '待关联', linked: '已关联', running: '回答中', replied: '已回复' })[r.state];
+      const peer = author ? r.username : q.author, peerName = author ? r.name : q.authorName;
+      const dialogue = author ? inbox.dialogues?.find(item => item.questionId === q.id && item.peer === r.username) : undefined;
+      const receiverAuto = !author && !!linked && !linked.closedAt && inbox.replyModes?.[q.id] !== 'manual';
+      const automatic = !!dialogue || receiverAuto, suggested = !!r.endSuggestedAt || !!dialogue?.suggested;
+      const otherAuto = inbox.dialogues?.find(item => item.sessionId === (selected || linked)?.id && !(item.questionId === q.id && item.peer === peer));
+      const autoOn = automatic && !suggested;
+      const targetSession = author ? linked : selected || (linked && !linked.closedAt ? linked : undefined);
+      const turns = [...(q.followUps || []).filter(item => !item.target || item.target === r.username).map(item => ({ id: item.id, at: item.createdAt, mine: author, who: author ? '我' : q.authorName, body: item.body, answerId: undefined as string | undefined })), ...r.answers.map(item => ({ id: item.id, at: item.createdAt, mine: !author, who: author ? r.name : '我', body: item.body, answerId: item.id }))].sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id));
+      const sendMessage = () => {
+        const body = (laneText[r.username] || '').trim(); if (!body || busy || autoOn || q.closedAt) return;
+        const key = r.username;
+        if (followDraft.current[key]?.payload !== body) followDraft.current[key] = { payload: body, id: crypto.randomUUID() };
+        const draft = followDraft.current[key];
+        const action = author ? 'question.follow' : 'question.answer';
+        const payload = author ? { followId: draft.id, target: r.username } : { answerId: draft.id };
+        void run(action, { projectId: q.projectId, id: q.id, body, ...payload }).then(ok => {
+          if (!ok) return;
+          if (followDraft.current[key] === draft) delete followDraft.current[key];
+          setLaneText(current => current[key]?.trim() === body ? { ...current, [key]: '' } : current);
+        });
+      };
+      const status = q.closedAt ? '已结束' : automatic ? (suggested ? '建议结束' : '自动对话中') : r.answers.length ? `${r.answers.length} 条答复` : ({ pending: '待回复', linked: '已关联', running: '回答中', replied: '已回复' })[r.state];
       return <section className="team-question-replies" key={r.username}>
-        <div className="team-question-lane-head"><b>{r.name}</b><small className="muted">{status}</small>{author && !!q.closedAt && linked && <button className="secondary compact" onClick={() => openSession(linked)}>打开关联 Session{linked.closedAt ? '（已关闭）' : ''}</button>}</div>
+        <div className="team-question-lane-head"><b>{peerName}</b><small className="muted">{status}</small>{!!q.closedAt && linked && <button className="secondary compact" onClick={() => openSession(linked)}>打开关联 Session{linked.closedAt ? '（已关闭）' : ''}</button>}</div>
         {suggested && !q.closedAt && <p className="callout">自动对话认为可以结束。上面的往来保留，确认后才会真正结束提问。</p>}
         <div className="team-question-thread">{turns.map(turn => <article key={turn.id} className={'team-question-turn' + (turn.mine ? ' mine' : '')}><span className="who">{turn.who} · {time(turn.at)}</span><div className="team-question-text">{turn.body}</div>{author && !q.closedAt && !dialogue && turn.answerId && linked && !linked.closedAt && <button className="secondary compact" disabled={busy} onClick={() => void run('question.import', { projectId: q.projectId, id: q.id, sessionId: linked.id, answerId: turn.answerId! })}>引入到 Session</button>}</article>)}{!turns.length && <p className="muted small">还没有往来。</p>}</div>
-        {author && !q.closedAt && <div className="team-question-composer">
-          {autoOn ? <p className="team-question-composer-status">正在与{r.name}自动对话。新的提问会出现在上面的对话里。</p> : <textarea rows={3} maxLength={12000} aria-label={`回复${r.name}`} value={laneText[r.username] || ''} placeholder="继续提问" onChange={e => setLaneText(current => ({ ...current, [r.username]: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && e.nativeEvent.keyCode !== 229) { e.preventDefault(); if (!e.repeat) sendFollow(); } }}/>}
+        {!q.closedAt && <div className="team-question-composer">
+          {autoOn ? <p className="team-question-composer-status">正在与{peerName}自动对话。新的消息会出现在上面的对话里。</p> : <textarea rows={3} maxLength={12000} aria-label={`回复${peerName}`} value={laneText[r.username] || ''} placeholder={author ? '继续提问' : '回复对方'} onChange={e => setLaneText(current => ({ ...current, [r.username]: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && e.nativeEvent.keyCode !== 229) { e.preventDefault(); if (!e.repeat) sendMessage(); } }}/>}
           <div className="team-question-composer-bar">
             {linked && <button type="button" className="secondary compact" onClick={() => openSession(linked)}>打开关联 Session{linked.closedAt ? '（已关闭）' : ''}</button>}
-            {suggested ? <button type="button" className="secondary compact" disabled={busy} onClick={() => void run('question.close', { projectId: q.projectId, id: q.id })}>确认结束</button> : <button type="button" className="secondary compact" disabled={busy} onClick={() => void run('question.close', { projectId: q.projectId, id: q.id })}>结束提问</button>}
-            {!!r.answers.length && !dialogue && <button type="button" className="secondary compact" disabled={!linked || !!linked.closedAt || !!otherAuto || busy} title={otherAuto ? '这条提问的 Session 正在与另一个人自动对话' : '使用这条提问已关联的 Session'} onClick={() => linked && void run('question.auto', { projectId: q.projectId, id: q.id, sessionId: linked.id, peer: r.username })}>自动对话</button>}
-            {dialogue && <button type="button" className="secondary compact" disabled={busy} onClick={() => void run('question.auto.stop', { projectId: q.projectId, id: q.id, peer: r.username })}>停止自动</button>}
-            {!autoOn && <button type="button" className="primary compact team-question-send" disabled={!laneText[r.username]?.trim() || busy} onClick={sendFollow}>{busy ? '发送中…' : '发送'}</button>}
+            {!author && !autoOn && <details className="team-question-session-choice"><summary>选择 Session</summary><label>用于自动对话<select aria-label="回答 Session" value={selected?.id || ''} disabled={busy || active || own?.state === 'running'} onChange={e => setSessionId(e.target.value)}><option value="">请选择同项目的 Session</option>{choices.map(s => <option key={s.id} value={s.id}>{s.title}{['running', 'starting', 'approval'].includes(s.status) ? ' · 忙碌，排队回答' : ''}</option>)}</select></label>{!choices.length && <p className="muted small">请先在这个项目中新建或打开一个工作 Session。</p>}</details>}
+            <button type="button" className="secondary compact" disabled={busy || (!author && !inDialogue)} onClick={() => void run('question.close', { projectId: q.projectId, id: q.id })}>{suggested ? '确认结束' : '结束提问'}</button>
+            {!automatic && (author ? !!r.answers.length : true) && <button type="button" className="secondary compact" disabled={!targetSession || !!targetSession.closedAt || !!otherAuto || busy || (!author && (active || own?.state === 'running'))} title={!targetSession ? '先选择用于自动对话的 Session' : otherAuto ? '这条 Session 正在与另一个人自动对话' : '使用关联的 Session 自动对话'} onClick={() => targetSession && void run('question.auto', { projectId: q.projectId, id: q.id, sessionId: targetSession.id, peer })}>自动对话</button>}
+            {automatic && <button type="button" className="secondary compact" disabled={busy} onClick={() => void run('question.auto.stop', { projectId: q.projectId, id: q.id, peer })}>停止自动</button>}
+            {!autoOn && <button type="button" className="primary compact team-question-send" disabled={!laneText[r.username]?.trim() || busy} onClick={sendMessage}>{busy ? '发送中…' : '发送'}</button>}
           </div>
+          {!author && job?.phase === 'error' && <p className="muted small team-question-composer-status">{job.error}</p>}
+          {!author && job?.phase === 'ready' && job.error && <p className="muted small team-question-composer-status">答复已保留，连接恢复后自动送达。</p>}
         </div>}
       </section>;
     })}

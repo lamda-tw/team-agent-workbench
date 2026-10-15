@@ -1,3 +1,4 @@
+import { clientWindowTitle } from '../shared/client-version';
 import { preparationCategoriesSchema } from '../shared/result-rules';
 import { resultStatusSchema } from '../shared/result-model';
 import { ownDataDirectory } from '../shared/single-instance';
@@ -215,6 +216,7 @@ async function dispatch(action: string, raw: unknown, owner: BrowserWindow): Pro
     case 'question.close': { const p = z.object({ projectId: z.string(), id }).parse(raw); return workbench.questions.closeQuestion(p.projectId, p.id); }
     case 'question.read': { const p = z.object({ id, revision: z.number().int().positive() }).parse(raw); return workbench.questions.read(p.id, p.revision); }
     case 'question.link': { const p = z.object({ projectId: z.string(), id, sessionId: id }).parse(raw); return workbench.questions.link(p.projectId, p.id, p.sessionId); }
+    case 'question.answer': { const p = z.object({ projectId: z.string(), id, answerId: id, body: z.string().trim().min(1).max(12000) }).parse(raw); return workbench.questions.answer(p.projectId, p.id, p.answerId, p.body); }
     case 'question.follow': { const p = z.object({ projectId: z.string(), id, followId: id, body: z.string(), target: z.string().trim().min(1).max(160).optional() }).parse(raw); return workbench.questions.follow(p.projectId, p.id, p.followId, p.body, p.target); }
     case 'question.import': { const p = z.object({ projectId: z.string(), id, sessionId: id, answerId: id }).parse(raw); return workbench.questions.importReply(p.projectId, p.id, p.sessionId, p.answerId); }
     case 'question.auto': { const p = z.object({ projectId: z.string(), id, sessionId: id, peer: z.string().trim().min(1).max(160) }).parse(raw); return workbench.questions.startAuto(p.projectId, p.id, p.peer, p.sessionId); }
@@ -546,7 +548,7 @@ async function createDataContext(root: string): Promise<DataContext> {
 }
 async function createWindow(preferredSlot?: number, fresh = false) {
   const slot = claimSlot(preferredSlot);
-  const window = new BrowserWindow({ width: 1520, height: 980, minWidth: 1100, minHeight: 720, backgroundColor: '#f5f6f8', show: process.env.WORKBENCH_TEST !== '1', title: '团队工作台 · 用户版', webPreferences: { preload: path.join(__dirname, runtimeAssets, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true } });
+  const window = new BrowserWindow({ width: 1520, height: 980, minWidth: 1100, minHeight: 720, backgroundColor: '#f5f6f8', show: process.env.WORKBENCH_TEST !== '1', title: clientWindowTitle('用户版'), webPreferences: { preload: path.join(__dirname, runtimeAssets, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true } });
   windows.add(window);
   try {
     const { profile, sidebarProjectHeight, sidebarPanes } = fresh ? {} : await storedWindowState(slot);

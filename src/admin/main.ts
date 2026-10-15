@@ -1,3 +1,4 @@
+import { clientWindowTitle } from '../shared/client-version';
 import { ownDataDirectory } from '../shared/single-instance';
 import { runtimeAssets } from '../shared/runtime-assets';
 import { app, BrowserWindow, ipcMain, dialog, clipboard, safeStorage, utilityProcess } from 'electron';
@@ -51,7 +52,7 @@ if (ownDataDirectory(() => window)) app.whenReady().then(async () => {
       catch (error) { remote.snapshot.connectionError = errorMessage(error); }
     }
   } catch {}
-  window = new BrowserWindow({ width: 1320, height: 900, minWidth: 1040, minHeight: 720, show: process.env.WORKBENCH_TEST !== '1', title: '团队工作台 · 管理员版', backgroundColor: '#f6f7f9', webPreferences: { preload: path.join(__dirname, runtimeAssets, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false } });
+  window = new BrowserWindow({ width: 1320, height: 900, minWidth: 1040, minHeight: 720, show: process.env.WORKBENCH_TEST !== '1', title: clientWindowTitle('管理员版'), backgroundColor: '#f6f7f9', webPreferences: { preload: path.join(__dirname, runtimeAssets, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false } });
   window.setMenuBarVisibility(false); window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', e => e.preventDefault()); window.webContents.session.setPermissionRequestHandler((_c, _p, cb) => cb(false));
   ipcMain.handle('admin', async (event, action: string, payload: unknown) => {

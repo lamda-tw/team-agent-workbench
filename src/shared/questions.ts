@@ -18,6 +18,7 @@ export const questionCommandSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('link'), id: uuid, sessionId: uuid }),
   z.object({ kind: z.literal('run'), id: uuid, sessionId: uuid, runId: uuid }),
   z.object({ kind: z.literal('reply'), id: uuid, runId: uuid, body: z.string().trim().min(1).max(48000) }),
+  z.object({ kind: z.literal('answer'), id: uuid, answerId: uuid, body: z.string().trim().min(1).max(12000) }),
   z.object({ kind: z.literal('fail'), id: uuid, runId: uuid }),
   z.object({ kind: z.literal('follow'), id: uuid, followId: uuid, body: z.string().trim().min(1).max(12000), target: z.string().trim().min(1).max(160).optional() }),
   z.object({ kind: z.literal('suggest'), id: uuid, username: z.string().trim().min(1).max(160) }),
@@ -86,11 +87,17 @@ export function changeQuestion(items: TeamQuestion[], projectId: string, actor: 
   } else {
     const recipient = existing.recipients.find(r => r.username === actor.username);
     if (!recipient) throw new Error('只有指定接收人可以回答');
+    if (command.kind === 'answer') { const prior = recipient.answers.find(a => a.id === command.answerId); if (prior) { if (prior.body !== command.body) throw new Error('答复编号已使用'); return existing; } }
     if (command.kind === 'reply') { const prior = recipient.answers.find(a => a.id === command.runId); if (prior) { if (prior.body !== command.body) throw new Error('答复编号已使用'); return existing; } }
     if (existing.closedAt) throw new Error('问题已关闭，答案保留在自己的 Session 中，不再回传');
-    if (command.kind === 'link') {
+    if (command.kind === 'answer') {
+      recipient.answers.push({ id: command.answerId, body: command.body, createdAt: at });
+      delete recipient.endSuggestedAt;
+      if (recipient.state !== 'running') recipient.state = 'replied';
+    } else if (command.kind === 'link') {
       if (recipient.state === 'running') throw new Error('此问题正在回答，不能更换关联');
-      if (recipient.sessionId === command.sessionId) return existing;
+      if (recipient.sessionId === command.sessionId && !recipient.endSuggestedAt) return existing;
+      delete recipient.endSuggestedAt;
       recipient.sessionId = command.sessionId; recipient.state = 'linked';
     } else if (command.kind === 'run') {
       if (recipient.sessionId !== command.sessionId) throw new Error('Session 关联已改变');
@@ -105,11 +112,11 @@ export function changeQuestion(items: TeamQuestion[], projectId: string, actor: 
     }
   }
   existing.revision++;
-  if (command.kind === 'reply' || command.kind === 'close' || command.kind === 'follow' || command.kind === 'suggest' || command.kind === 'resume') {
+  if (command.kind === 'reply' || command.kind === 'answer' || command.kind === 'close' || command.kind === 'follow' || command.kind === 'suggest' || command.kind === 'resume') {
     existing.activityRevision = existing.revision;
     for (const recipient of existing.recipients) {
       const dialogue = !!recipient.sessionId || recipient.answers.length > 0 || recipient.state !== 'pending';
-      const include = command.kind === 'close' ? dialogue : command.kind === 'follow' ? !command.target || recipient.username === command.target : command.kind === 'reply' ? recipient.username === actor.username : recipient.username === command.username;
+      const include = command.kind === 'close' ? dialogue : command.kind === 'follow' ? !command.target || recipient.username === command.target : command.kind === 'reply' || command.kind === 'answer' ? recipient.username === actor.username : recipient.username === command.username;
       if (include) recipient.activityRevision = existing.revision;
     }
   }
@@ -117,4 +124,4 @@ export function changeQuestion(items: TeamQuestion[], projectId: string, actor: 
 }
 export interface QuestionJob { questionId: string; projectId: string; sessionId: string; runId: string; phase: 'queued' | 'running' | 'ready' | 'sent' | 'error' | 'closed' | 'tracked'; mode?: 'answer' | 'import' | 'auto' | 'ingest'; sourceId?: string; covered?: string[]; peer?: string; answer?: string; error?: string; released?: boolean }
 export interface QuestionDialogue { questionId: string; projectId: string; peer: string; sessionId: string; mode: 'auto'; suggested?: boolean }
-export interface QuestionInbox { items: TeamQuestion[]; read: Record<string, number>; jobs: QuestionJob[]; dialogues?: QuestionDialogue[]; error?: string }
+export interface QuestionInbox { items: TeamQuestion[]; read: Record<string, number>; jobs: QuestionJob[]; dialogues?: QuestionDialogue[]; replyModes?: Record<string, 'manual' | 'auto'>; error?: string }

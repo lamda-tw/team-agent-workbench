@@ -116,6 +116,72 @@ function newSession(wb: Workbench, project: string) {
 }
 const until = async (check: () => boolean) => { for (let n = 0; !check(); n++) { if (n > 300) throw new Error('timed out'); await new Promise(r => setTimeout(r, 10)); } };
 
+test('manual recipient replies are independent, idempotent and do not take over a model run', () => {
+  const items: TeamQuestion[] = [], q = mutate(items, 'alice', create()), answerId = randomUUID();
+  const manual = { kind: 'answer' as const, id: q.id, answerId, body: '直接回复，不需要 Session' };
+  mutate(items, 'bob', manual); const revision = q.revision;
+  mutate(items, 'bob', manual); assert.equal(q.revision, revision);
+  assert.equal(q.recipients[0].answers.length, 1);
+  assert.equal(q.recipients[0].sessionId, undefined);
+  assert.equal(questionView(q, 'carol')!.activityRevision, 1);
+  assert.throws(() => mutate(items, 'alice', manual), /指定接收人/);
+  assert.throws(() => mutate(items, 'dave', manual), /无权/);
+  const sessionId = randomUUID(), runId = randomUUID();
+  mutate(items, 'bob', { kind: 'link', id: q.id, sessionId });
+  mutate(items, 'bob', { kind: 'run', id: q.id, sessionId, runId });
+  mutate(items, 'bob', { ...manual, answerId: randomUUID(), body: '补充' });
+  assert.equal(q.recipients[0].state, 'running'); assert.equal(q.recipients[0].runId, runId);
+  mutate(items, 'bob', { kind: 'reply', id: q.id, runId, body: '模型回复' });
+  assert.equal(q.recipients[0].answers.length, 3);
+  mutate(items, 'alice', { kind: 'close', id: q.id });
+  mutate(items, 'bob', manual);
+  assert.throws(() => mutate(items, 'bob', { ...manual, answerId: randomUUID() }), /已关闭/);
+});
+
+test('both sides share the conversation composer; recipient can type before linking a Session', () => {
+  const items: TeamQuestion[] = [], q = mutate(items, 'alice', create());
+  const render = (username: string, replyModes?: Record<string, 'manual' | 'auto'>, sessions: AgentSession[] = []) => renderToStaticMarkup(React.createElement(QuestionDetail, { question: questionView(q, username)!, username, inbox: { items, jobs: [], read: {}, replyModes }, sessions, changed: async () => {}, openSession: () => {} }));
+  for (const markup of [render('alice'), render('bob')]) {
+    assert.match(markup, /team-question-thread/);
+    assert.match(markup, /team-question-composer[\s\S]*<textarea[\s\S]*team-question-composer-bar[\s\S]*结束提问[\s\S]*team-question-send[\s\S]*发送/);
+    assert.doesNotMatch(markup, /team-question-answer|关联并回答|选择回答问题的 Session/);
+  }
+  assert.match(render('bob'), /aria-label="回复alice"/);
+  const sid = randomUUID(); mutate(items, 'bob', { kind: 'link', id: q.id, sessionId: sid });
+  const linked = { id: sid, purpose: 'work', binding: { project: { id: q.projectId } } } as AgentSession;
+  assert.match(render('bob', { [q.id]: 'auto' }, [linked]), /正在与alice自动对话/);
+  assert.doesNotMatch(render('bob', { [q.id]: 'auto' }, [linked]), /<textarea/);
+  assert.match(render('bob', { [q.id]: 'manual' }, [linked]), /<textarea/);
+  assert.match(render('bob', { [q.id]: 'auto' }), /<textarea/, 'a Session on another client must not hide direct replies');
+  assert.match(render('bob', { [q.id]: 'auto' }, [{ ...linked, closedAt: new Date().toISOString() }]), /<textarea/, 'a closed Session cannot continue automatically');
+});
+
+test('recipient can switch between direct replies and automatic replies without returning a stopped run', () => fixture(async ({ alice, bob, project }) => {
+  const ask = newSession(alice, project), responder = newSession(bob, project);
+  const q = await alice.questions.create(ask.id, create()); let sends = 0;
+  bob.questions = new Questions(bob.store, bob.remote, { profile: () => bob.remote.profile, session: id => bob.session(id), notice: () => {}, changed: () => {}, send: async (_id, text, runId) => {
+    sends++; responder.status = 'running'; responder.messages.push({ id: randomUUID(), role: 'user', text, createdAt: '', context: { nativeId: 'test', accepted: true, workRecord: false, sourceHashes: {}, questionRunId: runId } }); return true;
+  } });
+  await bob.questions.sync();
+  const answerId = randomUUID();
+  await bob.questions.answer(project, q.id, answerId, '我先确认一下');
+  await bob.questions.answer(project, q.id, answerId, '我先确认一下');
+  await bob.questions.startAuto(project, q.id, 'alice', responder.id); await until(() => sends === 1);
+  assert.equal(bob.questions.lockedPeer(responder.id), 'alice');
+  await bob.questions.stopAuto(project, q.id, 'alice'); await bob.questions.sync();
+  assert.equal(bob.questions.lockedPeer(responder.id), undefined);
+  assert.equal(bob.questions.view().replyModes?.[q.id], 'manual');
+  assert.equal(responder.status, 'running'); assert.equal(responder.closedAt, undefined);
+  responder.messages.push({ id: randomUUID(), role: 'assistant', text: '停止后完成的结果', createdAt: '' }); responder.status = 'idle';
+  await bob.questions.completed(responder); await bob.questions.sync();
+  await alice.questions.follow(project, q.id, randomUUID(), '现在有新问题', 'bob'); await bob.questions.sync();
+  assert.equal(sends, 1, 'manual mode must not queue new model work');
+  await bob.questions.answer(project, q.id, randomUUID(), '手动补充'); await alice.questions.sync();
+  assert.deepEqual(alice.questions.view().items[0].recipients[0].answers.map(a => a.body), ['我先确认一下', '手动补充']);
+  await bob.questions.startAuto(project, q.id, 'alice', responder.id); await until(() => sends === 2);
+  assert.equal(bob.questions.view().replyModes?.[q.id], 'auto');
+}));
+
 test('real local storage serializes simultaneous recipients and enforces fresh membership', () => fixture(async ({ alice, bob, carol, dave, project, admin }) => {
   const ask = newSession(alice, project), q = await alice.questions.create(ask.id, create());
   const request = (wb: Workbench, command?: QuestionCommand) => wb.remote.questionRequest(wb.remote.binding(project), command);

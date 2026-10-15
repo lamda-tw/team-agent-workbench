@@ -495,9 +495,9 @@ def question_operation(root, state, username, request, project, group_name):
             recipient = next((r for r in q['recipients'] if r['username'] == username), None)
             if not recipient:
                 raise PermissionError('只有指定接收人可以回答')
-            run_id = identifier('runId') if kind in ('run', 'reply', 'fail') else None
-            if kind == 'reply':
-                body = field('body', 48000)
+            run_id = identifier('answerId') if kind == 'answer' else identifier('runId') if kind in ('run', 'reply', 'fail') else None
+            if kind in ('reply', 'answer'):
+                body = field('body', 12000 if kind == 'answer' else 48000)
                 previous = next((a for a in recipient['answers'] if a['id'] == run_id), None)
                 if previous:
                     if previous['body'] != body:
@@ -505,12 +505,18 @@ def question_operation(root, state, username, request, project, group_name):
                     return view(q)
             if q.get('closedAt'):
                 raise ValueError('问题已关闭，答案保留在自己的 Session 中，不再回传')
-            if kind == 'link':
+            if kind == 'answer':
+                recipient['answers'].append(dict(id=run_id, body=body, createdAt=stamp))
+                recipient.pop('endSuggestedAt', None)
+                if recipient['state'] != 'running':
+                    recipient['state'] = 'replied'
+            elif kind == 'link':
                 session_id = identifier('sessionId')
                 if recipient['state'] == 'running':
                     raise ValueError('此问题正在回答，不能更换关联')
-                if recipient.get('sessionId') == session_id:
+                if recipient.get('sessionId') == session_id and not recipient.get('endSuggestedAt'):
                     return view(q)
+                recipient.pop('endSuggestedAt', None)
                 recipient.update(sessionId=session_id, state='linked')
             elif kind == 'run':
                 if recipient.get('sessionId') != identifier('sessionId'):
@@ -533,12 +539,12 @@ def question_operation(root, state, username, request, project, group_name):
             else:
                 raise ValueError('不支持的问题操作')
         q['revision'] += 1
-        if kind in ('reply', 'close', 'follow', 'suggest', 'resume'):
+        if kind in ('reply', 'answer', 'close', 'follow', 'suggest', 'resume'):
             q['activityRevision'] = q['revision']
             for recipient in q['recipients']:
                 dialogue = bool(recipient.get('sessionId') or recipient.get('answers') or recipient.get('state') != 'pending')
                 target = command.get('target') or command.get('username') or ''
-                if ((kind == 'close' and dialogue) or (kind == 'follow' and (not command.get('target') or recipient['username'] == command.get('target'))) or (kind == 'reply' and recipient['username'] == username) or (kind in ('suggest', 'resume') and recipient['username'] == target)):
+                if ((kind == 'close' and dialogue) or (kind == 'follow' and (not command.get('target') or recipient['username'] == command.get('target'))) or (kind in ('reply', 'answer') and recipient['username'] == username) or (kind in ('suggest', 'resume') and recipient['username'] == target)):
                     recipient['activityRevision'] = q['revision']
         q['updatedAt'] = stamp
     file.parent.mkdir(parents=True, exist_ok=True)

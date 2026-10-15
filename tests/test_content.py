@@ -44,6 +44,26 @@ class ContentRules(unittest.TestCase):
     def publish(self, actor='bob', name='result.zip', kind='contribution'):
         return self.call(actor, op='publish', target='/projects/relation/实体抽取/submissions/' + actor + '/' + name, sha256=content.digest(self.incoming), metadata={'title': '方案结论', 'description': '已验证内容', 'kind': kind})
 
+    def test_manual_question_answers_are_private_and_idempotent_without_session(self):
+        q = self.call('alice', op='question', command=dict(kind='create', id=str(uuid.uuid4()), sessionId=str(uuid.uuid4()), title='版本', body='哪个版本？', recipients=['bob']))
+        command = dict(kind='answer', id=q['id'], answerId=str(uuid.uuid4()), body='使用 v3')
+        reply = self.call('bob', op='question', command=command)
+        self.assertEqual(reply['recipients'][0]['answers'][0]['body'], '使用 v3')
+        self.assertNotIn('sessionId', reply['recipients'][0])
+        self.assertEqual(self.call('bob', op='question', command=command)['revision'], reply['revision'])
+        with self.assertRaises(PermissionError):
+            self.call('alice', op='question', command=command)
+        sid, run_id = str(uuid.uuid4()), str(uuid.uuid4())
+        self.call('bob', op='question', command=dict(kind='link', id=q['id'], sessionId=sid))
+        self.call('bob', op='question', command=dict(kind='run', id=q['id'], sessionId=sid, runId=run_id))
+        mixed = self.call('bob', op='question', command=dict(command, answerId=str(uuid.uuid4()), body='人工补充'))
+        self.assertEqual(mixed['recipients'][0]['state'], 'running')
+        self.assertEqual(mixed['recipients'][0]['runId'], run_id)
+        self.call('alice', op='question', command=dict(kind='close', id=q['id']))
+        self.call('bob', op='question', command=command)
+        with self.assertRaises(ValueError):
+            self.call('bob', op='question', command=dict(command, answerId=str(uuid.uuid4())))
+
     def test_questions_member_scope_privacy_append_dedup_and_manual_close(self):
         # All API calls still go through handle's live account/project ACL checks.
         self.state['users']['carol']['groups'].append('relation')
