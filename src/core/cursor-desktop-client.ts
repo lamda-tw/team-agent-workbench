@@ -2,6 +2,8 @@ import WebSocket from 'ws';
 import { randomUUID } from 'node:crypto';
 import { cursorAgentsPage } from './cursor-agents-page';
 import { cursorIdePage } from './cursor-ide-page';
+import { cursorIdeSettings } from './cursor-ide-settings';
+import type { CursorNativeSettings, CursorSettingKind } from '../shared/cursor-native-settings';
 import { fileURLToPath } from 'node:url';
 import { sameNativePath } from './native-transcript';
 import type { CursorNativeSnapshot } from './cursor-native-rpc';
@@ -16,6 +18,8 @@ export interface CursorDesktopClient {
   send(id: string, cwd: string, text: string): Promise<{ submitted: true; sessionId?: string; nativeMessageId?: string }>;
   focus(id: string, cwd: string): Promise<void>;
   stop(id: string, cwd: string): Promise<void>;
+  settings?(id: string, cwd: string, kind?: CursorSettingKind): Promise<CursorNativeSettings>;
+  changeSetting?(id: string, cwd: string, kind: CursorSettingKind, value: string, revision: string): Promise<void>;
   close(): void;
 }
 
@@ -95,7 +99,25 @@ export class CursorDesktopCdp implements CursorDesktopClient {
     }
     return result;
   }
-  private read(page:CursorCdpConnection,operation:string,details:Record<string,unknown>={}):Promise<any>{return page.evaluate<any>(this.surface === 'ide' ? cursorIdePage : cursorAgentsPage,{operation,...details});}
+  private read(page:CursorCdpConnection,operation:string,details:Record<string,unknown>={}):Promise<any>{
+    const adapter = this.surface === 'ide' ? new Function('arg', `return (${cursorIdePage.toString()})(arg, ${cursorIdeSettings.toString()});`) as (arg:any)=>any : cursorAgentsPage;
+    return page.evaluate<any>(adapter,{operation,...details});
+  }
+  settings(id:string,cwd:string,kind?:CursorSettingKind){return this.serial(async()=>{
+    const page=await this.target(id,cwd);
+    if(kind!=='mode')return this.read(page,'settings',{id,cwd}) as Promise<CursorNativeSettings>;
+    const opened=await this.read(page,'settingsOpenMode',{id,cwd});
+    try{for(let attempt=0;attempt<20;attempt++){const result=await this.read(page,'settings',{id,cwd});if(result.mode?.options.length)return result as CursorNativeSettings;await pause(100);}throw new Error('Cursor 模式列表暂不可用');}
+    finally{if(opened.modeMenuOpened)await this.read(page,'settingsCloseMode',{id,cwd}).catch(()=>{});}
+  });}
+  changeSetting(id:string,cwd:string,kind:CursorSettingKind,value:string,revision:string){return this.serial(async()=>{
+    const page=await this.target(id,cwd);
+    if(kind==='mode'){
+      const opened=await this.read(page,'settingsOpenMode',{id,cwd});
+      try{for(let attempt=0;attempt<20;attempt++){const state=await this.read(page,'settings',{id,cwd});if(state.mode?.options.length){await this.read(page,'settingsChange',{id,cwd,kind,value,revision});return;}await pause(100);}throw Error('Cursor 模式列表暂不可用');}
+      finally{if(opened.modeMenuOpened)await this.read(page,'settingsCloseMode',{id,cwd}).catch(()=>{});}
+    } else await this.read(page,'settingsChange',{id,cwd,kind,value,revision});
+  });}
   async list(){
     const chats:CursorDesktopChat[]=[];
     for(const page of await this.windows())chats.push(...(await this.read(page,'catalog')).chats);

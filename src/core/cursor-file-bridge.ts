@@ -3,6 +3,7 @@ import path from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
 import type { CursorDesktopClient } from './cursor-desktop-client';
 import { readCursorDesktopHistory, type CursorDesktopHistory } from './cursor-desktop-history';
+import type { CursorNativeSettings, CursorSettingKind, CursorSettingsChange } from '../shared/cursor-native-settings';
 
 interface Binding { nativeId: string; cwd: string }
 export interface CursorFileRequest { version: 1; id: string; nativeId: string; cwd: string; text: string; createdAt: string; sequence?: number; state: 'queued' | 'sending' | 'accepted' | 'completed' | 'aborted' | 'error' | 'uncertain' | 'cancelled'; nativeMessageId?: string; beforeCheckpoint?: string; beforeMessageIds?: string[]; beforeBoundary?: string; beforeWasEmpty?: boolean; checkpoint?: string; error?: string }
@@ -28,6 +29,10 @@ export class CursorFileBridge {
   private lastError?: string;
   private current?: string;
   private nativeStatus = 'unknown';
+  private settings?: CursorNativeSettings;
+  private modeCatalog?: CursorNativeSettings;
+  private settingsChange?: CursorSettingsChange;
+  private settingsAttemptAt = 0;
   private stopRequestId?: string;
   private mutation: Promise<unknown> = Promise.resolve();
   private pendingRefresh?: Promise<void>;
@@ -36,7 +41,28 @@ export class CursorFileBridge {
   private sawNativeRunning = false;
   constructor(readonly directory: string, readonly binding: Binding, private database: string, private client: CursorDesktopClient, private options: { readHistory?: typeof readCursorDesktopHistory; pollMs?: number; now?: () => number } = {}) {}
   private serial<T>(work: () => Promise<T>): Promise<T> { const job = this.mutation.then(work, work); this.mutation = job.catch(() => {}); return job; }
-  private async pause(value: boolean) { this.paused = value; await this.atomic(path.join(this.directory, 'control.json'), { version: 1, ...this.binding, paused: value, stopRequestId: this.stopRequestId }); }
+  private async pause(value: boolean) { this.paused = value; await this.atomic(path.join(this.directory, 'control.json'), { version: 1, ...this.binding, paused: value, stopRequestId: this.stopRequestId, settingsChange: this.settingsChange }); }
+  async configure(kind?: CursorSettingKind, value?: string, revision?: string, cancel = false) {
+    return this.serial(async () => {
+      if (this.closed || !this.owned || !this.client.settings || !this.client.changeSetting) throw Error('当前 Cursor 设置接口不可用');
+      if (cancel) { this.settingsChange = undefined; await this.pause(this.paused); return this.settings; }
+      const actual = await this.client.settings(this.binding.nativeId, this.binding.cwd, value ? undefined : kind);
+      this.settings = actual;
+      if (!value && kind === 'mode') this.modeCatalog = actual;
+      if (!value) return { ...actual, pending: this.settingsChange };
+      if (this.settingsChange) throw Error('请先完成或取消上一次设置更改');
+      if (!kind || actual.state !== 'ready' || actual.revision !== revision) throw Error('Cursor 设置已经变化，请刷新后重新选择');
+      // Mode choices come from the native menu again at application time. A busy
+      // turn is never interrupted merely to open that menu.
+      let option = actual[kind]?.options.find(option => option.id === value);
+      if (kind === 'mode' && !option && this.modeCatalog?.revision === actual.revision) option = this.modeCatalog.mode?.options.find(option => option.id === value);
+      if (!option || option.disabled) throw Error('Cursor 当前不支持这个选项');
+      if (actual[kind]?.id === value) return actual;
+      this.settingsChange = { id: randomUUID(), kind, value, label: option.label, revision, state: 'waiting' };
+      await this.pause(this.paused);
+      return { ...actual, pending: this.settingsChange };
+    });
+  }
   async pauseQueue(stopCurrent = false) {
     this.paused = true;
     await this.serial(async () => { if(this.closed||!this.owned)throw new Error('中介尚未连接');if(stopCurrent)this.stopRequestId=(await this.requests()).find(request=>['sending','accepted'].includes(request.state))?.id;await this.pause(true); });
@@ -89,6 +115,11 @@ export class CursorFileBridge {
         if (control.version !== 1 || control.nativeId !== this.binding.nativeId || !samePath(control.cwd, this.binding.cwd) || typeof control.paused !== 'boolean') throw new Error('等待队列状态与会话不匹配');
         this.paused = control.paused;
         this.stopRequestId = typeof control.stopRequestId === 'string' && uuid.test(control.stopRequestId) ? control.stopRequestId : undefined;
+        if (control.settingsChange) {
+          const change = control.settingsChange;
+          if (!uuid.test(change.id) || !['model','mode','permission'].includes(change.kind) || typeof change.value !== 'string' || typeof change.revision !== 'string') throw Error('原生设置更改记录无效');
+          this.settingsChange = { ...change, state: 'error', error: '上次设置更改尚未确认，请核对 Cursor 后重新选择，或沿用当前设置' };
+        }
       }
       for (const request of await this.requests()) {
         if (request.state === 'sending') { request.state = 'uncertain'; request.error = '上次发送结果未确认，请核对原生窗口；不会重复发送'; await this.save(request); }
@@ -137,7 +168,7 @@ export class CursorFileBridge {
       await this.save(request);
     });
   }
-  async view() { return { nativeId: this.binding.nativeId, nativeStatus: this.nativeStatus, paused: this.paused, current: this.current, error: this.lastError, history: this.state, requests: await this.requests() }; }
+  async view() { return { nativeId: this.binding.nativeId, nativeStatus: this.nativeStatus, paused: this.paused, current: this.current, error: this.lastError, history: this.state, settings: this.settings ? { ...this.settings, pending: this.settingsChange } : undefined, requests: await this.requests() }; }
   refresh(): Promise<void> {
     if (this.closed || !this.owned) return Promise.resolve();
     if (this.pendingRefresh) return this.pendingRefresh;
@@ -153,6 +184,7 @@ export class CursorFileBridge {
       if (this.closed) return;
       if (observation.sessionId !== this.binding.nativeId) throw new Error('原生窗口会话已改变');
       this.nativeStatus = observation.status;
+      this.settings = observation.settings;
       const stable = this.stableCheckpoint === this.state.checkpointSha256;
       this.stableCheckpoint = this.state.checkpointSha256;
       const terminalKey = [observation.status, this.state.status, this.state.checkpointSha256, this.state.bubbles.length].join(':');
@@ -185,9 +217,30 @@ export class CursorFileBridge {
       }
       if (observation.status === 'generating') this.sawNativeRunning = true;
       else if (this.sawNativeRunning && terminalStable) { this.sawNativeRunning = false; if (['aborted', 'error'].includes(this.state.status)) await this.pause(true); }
-      if (this.paused || requests.some(request => ['sending', 'uncertain'].includes(request.state)) || !['completed', 'none', 'aborted', 'error', 'cancelled'].includes(observation.status)) return;
+      if (requests.some(request => ['sending', 'uncertain'].includes(request.state)) || !['completed', 'none', 'aborted', 'error', 'cancelled'].includes(observation.status)) return;
+      // Observe every change from either surface. Never apply a cached selection
+      // over a newer native edit, and never retry an unacknowledged setting write.
+      if (this.settingsChange) {
+        await this.serial(async () => {
+          const change = this.settingsChange, actual = this.settings;
+          if (!change || actual?.state !== 'ready') return;
+          if (actual[change.kind]?.id === change.value) { this.settingsChange = undefined; await this.pause(this.paused); return; }
+          if (change.state === 'error') return;
+          if (change.state === 'confirming') {
+            if (now - this.settingsAttemptAt > 3000) { change.state = 'error'; change.error = 'Cursor 未确认此更改，请在原生窗口完成确认，或沿用当前设置'; await this.pause(this.paused); }
+            return;
+          }
+          if (!stable || !terminalStable || !this.state || !this.state.settled && !['aborted','error'].includes(this.state.status)) return;
+          if (actual.revision !== change.revision) { change.state = 'error'; change.error = 'Cursor 设置已在另一端改变，请重新选择，或沿用当前设置'; await this.pause(this.paused); return; }
+          change.state = 'confirming'; this.settingsAttemptAt = now; await this.pause(this.paused);
+          try { await this.client.changeSetting!(this.binding.nativeId, this.binding.cwd, change.kind, change.value, change.revision); }
+          catch (error: any) { change.state = 'error'; change.error = error.message || '设置更改结果尚未确认'; await this.pause(this.paused); }
+        });
+        return;
+      }
+      if (observation.settings && observation.settings.state !== 'ready') return;
       const next = await this.serial(async () => {
-        if (this.closed || this.paused) return;
+        if (this.closed || this.paused || this.settingsChange) return;
         const queued = (await this.requests()).find(request => request.state === 'queued'); if (!queued) return;
         queued.state = 'sending'; queued.beforeCheckpoint = this.state!.checkpointSha256; queued.beforeBoundary = this.state!.bubbles.at(-1)?.bubbleId; queued.beforeWasEmpty = this.state!.bubbles.length===0;this.current = queued.id; await this.save(queued); return queued;
       });

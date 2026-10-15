@@ -21,7 +21,7 @@ async function fixture(){
   const options={parent:path.join(root,'service'),privateDirectory:async(parent:string)=>{const directory=path.join(parent,'private');await fs.mkdir(directory,{recursive:true});return directory;},database:'unused',readHistory:()=>structuredClone(history),running:async()=>false,launch:async()=>{calls.push('launch');},connect:()=>client,discover:async()=>'ws://127.0.0.1:1234/devtools/browser/test'};
   const service=new CursorFileService(options);
   const session:AgentSession={id:randomUUID(),provider:'cursor',title:'Native conversation',nativeId,cwd:root,purpose:'work',networkRoute:'direct',createdAt:new Date().toISOString(),status:'idle',messages:[],approvals:[],sources:[],autoUpload:false,handoffPath:path.join(root,'handoff.md'),cursorNative:{managed:true,descriptorFile:''}};
-  return{root,history,calls,service,session,fail:()=>{failSend=true;},delaySnapshot:(count:number)=>{snapshotFailures=count;},snapshotAttempts:()=>snapshotAttempts,clean:async()=>{await service.close();await fs.rm(root,{recursive:true,force:true});}};
+  return{root,history,calls,service,session,client,fail:()=>{failSend=true;},delaySnapshot:(count:number)=>{snapshotFailures=count;},snapshotAttempts:()=>snapshotAttempts,clean:async()=>{await service.close();await fs.rm(root,{recursive:true,force:true});}};
 }
 
 test('display projection retains native order, IDs, archived tool results, original tool blobs and thinking without exposing system prompts',async()=>{
@@ -103,6 +103,7 @@ test('Workbench imports full native history, bypasses CLI auth and context injec
     assert.equal(session.cursorPendingSubmission,undefined);
     await assert.rejects(wb.send(session.id,'/summarize'),/原生窗口/);assert.equal(session.cursorPendingSubmission,undefined);
     await assert.rejects(wb.send(session.id,'explicit refs',['reference-id']),/原生窗口/);
+    await assert.rejects(wb.send(session.id,'explicit skill',[],[{id:'skill-id',kind:'skill',name:'independent-skill'}]),/原生窗口/);
     await wb.stop(session.id);assert.ok(f.calls.includes('stop'));
     assert.equal((wb as any).runtimes.has(session.id),true,'Stop must not detach the observer and strand later native messages');
     await wb.closeSession(session.id);
@@ -110,4 +111,23 @@ test('Workbench imports full native history, bypasses CLI auth and context injec
     const requests=await Promise.all(files.filter(file=>/^[0-9a-f-]{36}\.json$/.test(file)).map(file=>fs.readFile(path.join(f.root,'service','queues',queues[0],file),'utf8').then(JSON.parse)));
     assert.equal(requests.find(request=>request.text==='queue the next request').state,'cancelled');
   }finally{await wb.close();await f.clean();}
+});
+
+test('native settings RPC preserves the exact session scope and loopback authentication',async()=>{
+  const f=await fixture();let rpc:CursorNativeRpc|undefined;try{
+    const settings={state:'ready' as const,revision:'native-revision',model:{id:'auto',label:'Auto',options:[{id:'auto',label:'Auto'},{id:'next',label:'Next'}]}};
+    f.client.settings=async(id,cwd)=>{assert.equal(id,f.session.nativeId);assert.equal(cwd,f.root);return structuredClone(settings);};
+    f.client.changeSetting=async()=>{throw Error('not supposed to apply before idle verification');};
+    await f.service.prepare(f.session);rpc=new CursorNativeRpc(f.session);await rpc.request('initialize');
+    assert.equal((await rpc.request('cursor/nativeSettings',{sessionId:f.session.nativeId})).model.id,'auto');
+    await assert.rejects(rpc.request('cursor/nativeSettings',{sessionId:randomUUID(),kind:'model',value:'next',revision:'native-revision'}),/不属于/);
+    const result=await rpc.request('cursor/nativeSettings',{sessionId:f.session.nativeId,kind:'model',value:'next',revision:'native-revision'});assert.equal(result.pending.state,'waiting');assert.equal(result.model.id,'auto');
+    await rpc.request('cursor/nativeSettings',{cancel:true});
+    const descriptor=JSON.parse(await fs.readFile(f.session.cursorNative!.descriptorFile,'utf8'));
+    assert.equal((await fetch(descriptor.endpoint+'/settings',{method:'POST',headers:{Origin:'https://example.org'},body:'{}'})).status,403);
+    assert.equal((await fetch(descriptor.endpoint+'/settings')).status,405);
+    assert.equal((await fetch(descriptor.endpoint+'/settings',{method:'POST',body:JSON.stringify({kind:'execute-any-command'})})).status,409);
+    assert.equal((await fetch(descriptor.endpoint+'/settings',{method:'POST',body:JSON.stringify({kind:'model',value:{arbitrary:true}})})).status,409);
+    await f.service.release(f.session.id);assert.equal((await fetch(descriptor.endpoint+'/settings',{method:'POST',body:'{}'})).status,403);
+  }finally{await rpc?.close();await f.clean();}
 });

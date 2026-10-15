@@ -4,9 +4,10 @@ import type { AgentRpc } from './rpc';
 import type { AgentSession, Message } from '../shared/types';
 import { sameNativePath } from './native-transcript';
 import { assertCursorSharedSessionAvailable, isCursorFileSession } from '../shared/cursor-session-consistency';
+import type { CursorNativeSettings } from '../shared/cursor-native-settings';
 
 export interface CursorNativeDescriptor { version: 1 | 2; transport?: 'ide-files-v1'; endpoint: string; sessionId: string; workspace: string; expiresAt: string }
-export interface CursorNativeSnapshot { sessionId: string; status: string; messages: Array<{ id: string; role: 'user' | 'assistant'; text: string }>; title?: string; nativeHistory?: { nativeId: string; messages: Message[]; checkpointSha256: string; issues: Array<{ kind: string }> }; queue?: NonNullable<AgentSession['cursorQueue']>; connectionError?: string }
+export interface CursorNativeSnapshot { sessionId: string; status: string; messages: Array<{ id: string; role: 'user' | 'assistant'; text: string }>; settings?: CursorNativeSettings; title?: string; nativeHistory?: { nativeId: string; messages: Message[]; checkpointSha256: string; issues: Array<{ kind: string }> }; queue?: NonNullable<AgentSession['cursorQueue']>; connectionError?: string }
 
 export async function cursorNativeDescriptor(session: AgentSession): Promise<CursorNativeDescriptor> {
   if (session.provider !== 'cursor' || session.purpose !== 'work' || session.networkRoute === 'management' || !session.cursorNative || !session.nativeId) throw new Error('此会话不能接入 Cursor 原生窗口');
@@ -117,6 +118,11 @@ export class CursorNativeRpc extends EventEmitter implements AgentRpc {
     if (method === 'session/new' || method === 'session/prompt') assertCursorSharedSessionAvailable();
     if (method === 'session/cancel') return this.invoke('stop', {});
     if (method === 'cursor/nativeFocus') return this.invoke('focus', {});
+    if (method === 'cursor/nativeSettings') {
+      assertCursorSharedSessionAvailable(this.session);
+      const result = await this.invoke('settings', params);
+      await this.snapshot(); return result;
+    }
     throw new Error('请在 Cursor 原生窗口设置模型、模式、权限及工具');
   }
   notify(method: string, params?: unknown) {
