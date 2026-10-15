@@ -1,0 +1,19 @@
+.tool-execution-group{max-width:950px;margin:4px auto 16px;color:#6d7f73;font-size:12px}
+.tool-execution-summary{display:flex;align-items:center;gap:8px;min-height:34px;padding:6px 8px;border-radius:7px;cursor:pointer;list-style:none}
+.tool-execution-summary::-webkit-details-marker,.tool-execution-output>summary::-webkit-details-marker{display:none}
+.tool-execution-summary:hover{background:#f0f5f2;color:#355b45}
+.tool-execution-summary:focus-visible,.tool-execution-output>summary:focus-visible{outline:2px solid #638d72;outline-offset:2px}
+.tool-execution-summary>svg{flex:none}
+.tool-execution-label,.tool-execution-activity{flex:none}
+.tool-execution-activity{font-size:11px;color:#527a61}
+.tool-execution-preview{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#84958a;font-family:Consolas,"Microsoft YaHei",monospace;font-size:11px}
+.tool-execution-chevron,.tool-execution-output>summary>svg{transition:transform .15s ease}
+.tool-execution-group[open]>.tool-execution-summary>.tool-execution-chevron,.tool-execution-output[open]>summary>svg{transform:rotate(90deg)}
+.tool-execution-list{margin:4px 8px 0 14px;padding-left:16px;border-left:1px solid #dce6df}
+.tool-execution-item{min-width:0;padding:4px 0}
+.tool-execution-output>summary{display:flex;align-items:baseline;gap:8px;padding:6px 0;cursor:pointer;list-style:none}
+.tool-execution-output>summary>svg{flex:none;align-self:center}
+.tool-execution-output>summary>span{min-width:0;overflow-wrap:anywhere;font-family:Consolas,"Microsoft YaHei",monospace}
+.tool-execution-output time{margin-left:auto;white-space:nowrap;color:#91a096;font-size:10px}
+.tool-execution-output pre{margin:4px 0 8px;padding:12px;max-height:360px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;border:1px solid #e0e8e2;border-radius:7px;background:#f7faf8;color:#40584a;font-size:11px;line-height:1.7}
+@media(prefers-reduced-motion:reduce){.tool-execution-summary .spin{animation:none}.tool-execution-chevron,.tool-execution-output>summary>svg{transition:none}}
