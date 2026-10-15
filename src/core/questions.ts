@@ -30,7 +30,25 @@ export class Questions {
     const owner = this.owner();
     return owner ? this.buckets[owner] ||= { items: [], read: {}, notified: {}, jobs: [] } : undefined;
   }
-  view(): QuestionInbox { const inbox = this.inbox(); return inbox ? { items: inbox.items, read: inbox.read, jobs: inbox.jobs, dialogues: inbox.dialogues, replyModes: inbox.replyModes, error: inbox.error } : { items: [], read: {}, jobs: [] }; }
+  view(): QuestionInbox { const inbox = this.inbox(); return inbox ? { items: inbox.items, read: inbox.read, jobs: inbox.jobs, dialogues: inbox.dialogues, replyModes: inbox.replyModes, fills: inbox.fills, error: inbox.error } : { items: [], read: {}, jobs: [] }; }
+  private rememberFill(inbox: SavedInbox, questionId: string, peer: string | undefined, text: string) {
+    const body = text.trim().slice(0, 12000);
+    if (!peer || !body) return false;
+    ((inbox.fills ||= {})[questionId] ||= {})[peer] = body;
+    return true;
+  }
+  private rememberSessionFill(inbox: SavedInbox, session: AgentSession, answer: string) {
+    const control = questionControl(answer);
+    if (control.kind !== 'continue' || !control.body) return false;
+    let wrote = false;
+    for (const q of inbox.items) {
+      if (q.closedAt || q.sessionId !== session.id) continue;
+      const dialogue = inbox.dialogues?.find(item => item.questionId === q.id && item.sessionId === session.id);
+      const peer = dialogue?.peer || (q.recipients.length === 1 ? q.recipients[0].username : '');
+      if (this.rememberFill(inbox, q.id, peer, control.body)) wrote = true;
+    }
+    return wrote;
+  }
   private save() { const value = JSON.stringify(this.buckets); const job = this.saving.catch(() => {}).then(() => atomicJson(this.file, JSON.parse(value))); this.saving = job; return job; }
   async init() {
     try { this.buckets = JSON.parse(await fs.readFile(this.file, 'utf8')); } catch (e: any) { if (e.code !== 'ENOENT') throw e; }
@@ -315,18 +333,22 @@ export class Questions {
     while (lastUser >= 0 && (session.messages[lastUser].role !== 'user' || session.messages[lastUser].steering)) lastUser--;
     const runId = session.messages[lastUser]?.context?.questionRunId;
     const job = inbox.jobs.find(j => j.sessionId === session.id && j.runId === runId && j.phase === 'running');
-    if (!job) return;
     const answer = session.messages.slice(lastUser + 1).filter(m => m.role === 'assistant' && !m.kind).at(-1)?.text.trim();
     const failed = session.closedAt || session.error || session.stoppedAt;
+    if (!job) {
+      if (!failed && this.rememberSessionFill(inbox, session, answer || '')) { await this.save(); this.hooks.changed(); }
+      return;
+    }
     if (job.mode === 'fill') {
       const body = withoutQuestionControl(answer || '').trim();
       if (failed || !body) { job.phase = 'error'; job.error = session.error || '没有起草出继续提问'; }
-      else { job.answer = body.slice(0, 12000); job.phase = 'tracked'; }
+      else { job.answer = body.slice(0, 12000); job.phase = 'tracked'; this.rememberFill(inbox, job.questionId, job.peer, job.answer); }
       await this.save(); this.hooks.changed(); void this.sync().catch(() => {}); return;
     }
     if (job.mode === 'import' || job.mode === 'ingest') {
       job.phase = failed ? 'error' : 'tracked';
       if (job.phase === 'error') job.error = session.error || '回复引入已停止';
+      else { const control = questionControl(answer || ''); if (control.kind === 'continue') this.rememberFill(inbox, job.questionId, job.peer, control.body); }
       await this.save(); this.hooks.changed(); void this.sync().catch(() => {}); return;
     }
     if (job.mode === 'auto') {
@@ -340,6 +362,7 @@ export class Questions {
         if (job.peer) await this.request(job.projectId, { kind: 'suggest', id: job.questionId, username: job.peer }).catch((error: any) => { job.error = error.message; });
       } else if (control.kind === 'continue' && control.body && dialogue && !dialogue.suggested) {
         job.phase = 'tracked';
+        this.rememberFill(inbox, job.questionId, job.peer, control.body);
         await this.follow(job.projectId, job.questionId, randomUUID(), control.body, job.peer).catch((error: any) => { job.phase = 'error'; job.error = error.message; });
       } else job.phase = 'tracked';
       await this.save(); this.hooks.changed(); void this.sync().catch(() => {}); return;

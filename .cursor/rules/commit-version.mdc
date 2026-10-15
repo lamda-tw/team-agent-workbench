@@ -1,0 +1,16 @@
+---
+description: 每次 GitHub 提交都带上并递增客户端版本号
+alwaysApply: true
+---
+
+# 提交必须带版本号
+
+客户端版本只写在 `package.json` 的 `version`。`src/shared/client-version.ts` 从这里读取，界面上的版本随之更新。
+
+用户要求提交或推送到 GitHub、并且这次会新建 commit 时：
+
+1. 读取当前 `package.json` 版本。用户指定了版本就用指定值；否则把 patch 加一，例如 `0.7.0` → `0.7.1`。
+2. 把新版本写进 `package.json`，和本次功能改动放在同一个 commit。
+3. 提交说明第一行以 `vX.Y.Z` 开头，后面写这次改动的原因。例如：`v0.7.1 Draft the next question into the composer only when asked.`
+4. 用户没有要求提交时，不改版本，也不要为了升版本单独提交。
+5. 快进、拉取这类没有新建 commit 的操作不升版本。由我们创建的 merge commit 同样升一次 patch，并在说明里写上 `vX.Y.Z`。

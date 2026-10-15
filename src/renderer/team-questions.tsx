@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { MessageSquare, X } from 'lucide-react';
 import type { AgentSession, Project } from '../shared/types';
 import type { QuestionInbox, QuestionMember, TeamQuestion } from '../shared/questions';
@@ -67,33 +67,26 @@ export function questionAutoLock(inbox: QuestionInbox | undefined, sessionId: st
   const peer = question?.recipients.find(item => item.username === dialogue.peer);
   return { name: peer?.name || dialogue.peer, title: question?.title || '提问', suggested: !!dialogue.suggested || !!peer?.endSuggestedAt };
 }
-export function QuestionDetail({ question: q, inbox, username, sessions, changed, openSession }: { question: TeamQuestion; inbox: QuestionInbox; username: string; sessions: AgentSession[]; changed: () => Promise<void>; openSession: (session: AgentSession) => void }) {
+export function QuestionDetail({ question: q, inbox, username, sessions, session, changed }: { question: TeamQuestion; inbox: QuestionInbox; username: string; sessions: AgentSession[]; session?: AgentSession; changed: () => Promise<void> }) {
   const own = q.recipients.find(r => r.username === username), author = q.author === username;
-  const [sessionId, setSessionId] = useState(own?.sessionId || ''), [laneText, setLaneText] = useState<Record<string, string>>({}), [laneHeight, setLaneHeight] = useState(QUESTION_COMPOSER_DEFAULT);
+  const [laneText, setLaneText] = useState<Record<string, string>>({}), [laneHeight, setLaneHeight] = useState(QUESTION_COMPOSER_DEFAULT);
   const [busy, setBusy] = useState(false), [error, setError] = useState('');
   const followDraft = useRef<Record<string, { payload: string; id: string }>>({});
-  const appliedFill = useRef<Record<string, string>>({});
   const working = useRef(false);
-  const choices = sessions.filter(s => s.binding?.project.id === q.projectId && s.purpose === 'work' && !s.closedAt && !s.cursorNative);
-  const selected = choices.find(s => s.id === sessionId), linked = sessions.find(s => s.id === (author ? q.sessionId : own?.sessionId));
+  const scrollPanel = useRef<HTMLElement | null>(null);
+  const committedHeight = useRef(laneHeight);
+  const linked = sessions.find(s => s.id === (author ? q.sessionId : own?.sessionId));
   const job = [...inbox.jobs].reverse().find(j => j.questionId === q.id && j.mode !== 'import' && j.mode !== 'auto' && j.mode !== 'fill'), active = !!job && ['queued', 'running', 'ready'].includes(job.phase);
   const inDialogue = !!own && (!!own.sessionId || own.answers.length > 0 || own.state !== 'pending');
   useEffect(() => { if (questionUnread(q, inbox)) void window.workbench.call('question.read', { id: q.id, revision: q.activityRevision }).then(changed).catch(e => setError(e.message)); }, [q.id, q.activityRevision]);
-  useEffect(() => {
-    const updates: Record<string, string> = {};
-    for (const item of inbox.jobs) {
-      if (item.questionId !== q.id || item.mode !== 'fill' || item.phase !== 'tracked' || !item.answer || !item.peer || appliedFill.current[item.peer] === item.runId) continue;
-      appliedFill.current[item.peer] = item.runId;
-      updates[item.peer] = item.answer;
-    }
-    if (Object.keys(updates).length) setLaneText(current => ({ ...current, ...updates }));
-  }, [inbox.jobs, q.id]);
+  useLayoutEffect(() => {
+    const delta = laneHeight - committedHeight.current;
+    committedHeight.current = laneHeight;
+    if (delta && scrollPanel.current) scrollPanel.current.scrollTop += delta;
+  }, [laneHeight]);
   const resizeLane = (height: number, anchor: HTMLElement) => {
-    const panel = anchor.closest('.team-question-panel-body') as HTMLElement | null;
-    const box = anchor.closest('.team-question-composer');
-    const before = box?.getBoundingClientRect().bottom;
+    scrollPanel.current = anchor.closest('.team-question-panel-body');
     setLaneHeight(height);
-    if (panel && before != null) requestAnimationFrame(() => { const after = box?.getBoundingClientRect().bottom; if (after != null) panel.scrollTop += after - before; });
   };
   const run = async (action: string, payload: object) => { if (working.current) return false; working.current = true; setBusy(true); setError(''); try { await window.workbench.call(action, payload); await changed(); return true; } catch (e: any) { setError(e.message); return false; } finally { working.current = false; setBusy(false); } };
   return <section className="team-question-detail"><div className="row"><h3>{q.title}</h3><span className="spacer"/><span className="badge">{q.closedAt ? '已关闭' : '开放'}</span></div><p className="muted small">{q.authorName} · {time(q.createdAt)}</p><div className="team-question-text">{q.body}</div>{q.context && <details><summary>补充资料</summary><div className="team-question-text">{q.context}</div></details>}
@@ -104,13 +97,13 @@ export function QuestionDetail({ question: q, inbox, username, sessions, changed
       const dialogue = author ? inbox.dialogues?.find(item => item.questionId === q.id && item.peer === r.username) : undefined;
       const receiverAuto = !author && !!linked && !linked.closedAt && inbox.replyModes?.[q.id] !== 'manual';
       const automatic = !!dialogue || receiverAuto, suggested = !!r.endSuggestedAt || !!dialogue?.suggested;
-      const otherAuto = inbox.dialogues?.find(item => item.sessionId === (selected || linked)?.id && !(item.questionId === q.id && item.peer === peer));
+      const current = session && session.binding?.project.id === q.projectId && session.purpose === 'work' && !session.closedAt && !session.cursorNative ? session : undefined;
+      const targetSession = author ? (linked && !linked.closedAt ? linked : undefined) : current || (linked && !linked.closedAt ? linked : undefined);
+      const otherAuto = inbox.dialogues?.find(item => item.sessionId === targetSession?.id && !(item.questionId === q.id && item.peer === peer));
       const autoOn = automatic && !suggested;
-      const targetSession = author ? linked : selected || (linked && !linked.closedAt ? linked : undefined);
       const turns = [...(q.followUps || []).filter(item => !item.target || item.target === r.username).map(item => ({ id: item.id, at: item.createdAt, mine: author, who: author ? '我' : q.authorName, body: item.body, answerId: undefined as string | undefined })), ...r.answers.map(item => ({ id: item.id, at: item.createdAt, mine: !author, who: author ? r.name : '我', body: item.body, answerId: item.id }))].sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id));
-      const laneFill = author ? [...inbox.jobs].reverse().find(item => item.questionId === q.id && item.mode === 'fill' && item.peer === r.username) : undefined;
-      const filling = !!laneFill && ['queued', 'running'].includes(laneFill.phase);
-      const sessionBusy = !!linked && ['running', 'starting', 'approval'].includes(linked.status);
+      const savedFill = (author ? inbox.fills?.[q.id]?.[r.username] : r.username === username ? inbox.fills?.[q.id]?.[`answer:${username}`] : '')?.trim() || '';
+      const fillTitle = savedFill ? (author ? '把 AI 生成的追问填进输入框' : '把 AI 生成的回答填进输入框') : (author ? '还没有 AI 生成的追问' : '还没有 AI 生成的回答');
       const sendMessage = () => {
         const body = (laneText[r.username] || '').trim(); if (!body || busy || autoOn || q.closedAt) return;
         const key = r.username;
@@ -126,23 +119,20 @@ export function QuestionDetail({ question: q, inbox, username, sessions, changed
       };
       const status = q.closedAt ? '已结束' : automatic ? (suggested ? '建议结束' : '自动对话中') : r.answers.length ? `${r.answers.length} 条答复` : ({ pending: '待回复', linked: '已关联', running: '回答中', replied: '已回复' })[r.state];
       return <section className="team-question-replies" key={r.username}>
-        <div className="team-question-lane-head"><b>{peerName}</b><small className="muted">{status}</small>{!!q.closedAt && linked && <button className="secondary compact" onClick={() => openSession(linked)}>打开关联 Session{linked.closedAt ? '（已关闭）' : ''}</button>}</div>
+        <div className="team-question-lane-head"><b>{peerName}</b><small className="muted">{status}</small></div>
         <div className="team-question-thread">{turns.map(turn => <article key={turn.id} className={'team-question-turn' + (turn.mine ? ' mine' : '')}><span className="who">{turn.who} · {time(turn.at)}</span><div className="team-question-text">{turn.body}</div>{author && !q.closedAt && !dialogue && turn.answerId && linked && !linked.closedAt && <button className="secondary compact" disabled={busy} onClick={() => void run('question.import', { projectId: q.projectId, id: q.id, sessionId: linked.id, answerId: turn.answerId! })}>引入到 Session</button>}</article>)}{!turns.length && <p className="muted small">还没有往来。</p>}</div>
         {!q.closedAt && <div className="team-question-composer">
           {!autoOn && <QuestionResizeHandle height={laneHeight} resize={resizeLane}/>}
-          {autoOn ? <p className="team-question-composer-status">正在与{peerName}自动对话。新的消息会出现在上面的对话里。</p> : <textarea style={{ height: laneHeight }} maxLength={12000} aria-label={`回复${peerName}`} value={laneText[r.username] || ''} placeholder={author ? '继续提问' : '回复对方'} onChange={e => setLaneText(current => ({ ...current, [r.username]: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && e.nativeEvent.keyCode !== 229) { e.preventDefault(); if (!e.repeat) sendMessage(); } }}/>}
+          {autoOn ? <p className="team-question-composer-status">正在与{peerName}自动往返。新的回复会出现在上面的对话里，这里暂时不能手动发送。</p> : <textarea style={{ height: laneHeight }} maxLength={12000} aria-label={`回复${peerName}`} value={laneText[r.username] || ''} placeholder={author ? '继续提问' : '回复对方'} onChange={e => setLaneText(current => ({ ...current, [r.username]: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && e.nativeEvent.keyCode !== 229) { e.preventDefault(); if (!e.repeat) sendMessage(); } }}/>}
           <div className="team-question-composer-bar">
-            {linked && <button type="button" className="secondary compact" onClick={() => openSession(linked)}>打开关联 Session{linked.closedAt ? '（已关闭）' : ''}</button>}
-            {!author && !autoOn && <details className="team-question-session-choice"><summary>选择 Session</summary><label>用于自动对话<select aria-label="回答 Session" value={selected?.id || ''} disabled={busy || active || own?.state === 'running'} onChange={e => setSessionId(e.target.value)}><option value="">请选择同项目的 Session</option>{choices.map(s => <option key={s.id} value={s.id}>{s.title}{['running', 'starting', 'approval'].includes(s.status) ? ' · 忙碌，排队回答' : ''}</option>)}</select></label>{!choices.length && <p className="muted small">请先在这个项目中新建或打开一个工作 Session。</p>}</details>}
-            <button type="button" className="secondary compact" disabled={busy || (!author && !inDialogue)} onClick={() => void run('question.close', { projectId: q.projectId, id: q.id })}>{suggested ? '确认结束' : '结束提问'}</button>
-            {!automatic && (author ? !!r.answers.length : true) && <button type="button" className="secondary compact" disabled={!targetSession || !!targetSession.closedAt || !!otherAuto || busy || (!author && (active || own?.state === 'running'))} title={!targetSession ? '先选择用于自动对话的 Session' : otherAuto ? '这条 Session 正在与另一个人自动对话' : '使用关联的 Session 自动对话'} onClick={() => targetSession && void run('question.auto', { projectId: q.projectId, id: q.id, sessionId: targetSession.id, peer })}>自动对话</button>}
-            {automatic && <button type="button" className="secondary compact" disabled={busy} onClick={() => void run('question.auto.stop', { projectId: q.projectId, id: q.id, peer })}>停止自动</button>}
+            <button type="button" className="team-question-tool" disabled={busy || (!author && !inDialogue)} title={suggested ? '确认结束这条提问' : '结束提问'} onClick={() => void run('question.close', { projectId: q.projectId, id: q.id })}>{suggested ? '确认结束' : '结束'}</button>
+            {!automatic && (author ? !!r.answers.length : true) && <button type="button" className="team-question-tool" disabled={!targetSession || !!targetSession.closedAt || !!otherAuto || busy || (!author && (active || own?.state === 'running'))} title={!targetSession ? '当前 Session 不能用来自动往返' : otherAuto ? '这条 Session 正在与另一个人自动往返' : author ? `让当前 Session 和${peerName}自动往返：对方回复后会继续追问，期间不能手动发送` : `让当前 Session 自动回复${peerName}，期间不能手动发送`} onClick={() => targetSession && void run('question.auto', { projectId: q.projectId, id: q.id, sessionId: targetSession.id, peer })}>自动对话</button>}
+            {automatic && <button type="button" className="team-question-tool" disabled={busy} title="停止自动往返，之后可以继续手动发送" onClick={() => void run('question.auto.stop', { projectId: q.projectId, id: q.id, peer })}>停止自动</button>}
             {!autoOn && <span className="team-question-composer-actions">
-              {author && <button type="button" className="secondary compact" disabled={!linked || !!linked.closedAt || !!linked.cursorNative || sessionBusy || filling || busy || !!otherAuto} title={linked?.cursorNative ? '此 Session 暂不能起草继续提问，请换一个工作 Session' : otherAuto ? '这条提问的 Session 正在与另一个人自动对话' : '让这条提问的 Session 起草下一条，只填入输入框'} onClick={() => void run('question.fill', { projectId: q.projectId, id: q.id, peer: r.username })}>{filling ? '填入中…' : '自动填入'}</button>}
+              {(author || r.username === username) && <button type="button" className="team-question-tool" disabled={!savedFill || busy} title={fillTitle} onClick={() => savedFill && setLaneText(current => ({ ...current, [r.username]: savedFill }))}>AI填入</button>}
               <button type="button" className="primary compact team-question-send" disabled={!laneText[r.username]?.trim() || busy} onClick={sendMessage}>{busy ? '发送中…' : '发送'}</button>
             </span>}
           </div>
-          {author && laneFill?.phase === 'error' && <p className="inline-error">{laneFill.error}</p>}
           {!author && job?.phase === 'error' && <p className="muted small team-question-composer-status">{job.error}</p>}
           {!author && job?.phase === 'ready' && job.error && <p className="muted small team-question-composer-status">答复已保留，连接恢复后自动送达。</p>}
         </div>}
@@ -152,11 +142,11 @@ export function QuestionDetail({ question: q, inbox, username, sessions, changed
   </section>;
 }
 
-export function QuestionPanel({ inbox = empty, selectedId, session, username, sessions, connected, select, close, changed, openSession }: { inbox?: QuestionInbox; selectedId: string; session?: AgentSession; username: string; sessions: AgentSession[]; connected: boolean; select: (id: string) => void; close: () => void; changed: () => Promise<void>; openSession: (session: AgentSession) => void }) {
-  const q = inbox.items.find(q => q.id === selectedId);
+export function QuestionPanel({ inbox = empty, selectedId, session, username, sessions, connected, select, close, changed }: { inbox?: QuestionInbox; selectedId: string; session?: AgentSession; username: string; sessions: AgentSession[]; connected: boolean; select: (id: string) => void; close: () => void; changed: () => Promise<void> }) {
   const items = inbox.items.filter(q => session && q.projectId === session.binding?.project.id && (q.sessionId === session.id || q.recipients.some(r => r.username === username && (!r.sessionId || r.sessionId === session.id)))).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  const q = items.find(item => item.id === selectedId);
   return <aside className="team-question-panel" aria-label="成员提问"><header className="row"><MessageSquare size={18}/><h3>提问</h3><span className="spacer"/><button className="icon" aria-label="关闭提问窗口" onClick={close}><X size={18}/></button></header><div className="team-question-panel-body">
     {!connected && <p className="callout">连接团队账号后，可发送问题和答复。</p>}{inbox.error && <p className="inline-error">{inbox.error}</p>}
-    {q ? <><button className="text-button" onClick={() => select('session')}>返回问题列表</button><QuestionDetail key={q.id} question={q} inbox={inbox} username={username} sessions={sessions} changed={changed} openSession={openSession}/></> : <>{session && !session.closedAt && connected && <QuestionComposer key={session.id} session={session} sent={q => { select(q.id); void changed(); }}/>}<h3>与当前 Session 有关的问题</h3>{items.map(q => <QuestionCard key={q.id} question={q} unread={questionUnread(q, inbox)} open={() => select(q.id)}/>)}{!items.length && <p className="muted small">暂无问题。收到的问题也会显示在动态中。</p>}</>}
+    {q ? <><button className="text-button" onClick={() => select('session')}>返回问题列表</button><QuestionDetail key={q.id} question={q} inbox={inbox} username={username} sessions={sessions} session={session} changed={changed}/></> : <>{session && !session.closedAt && connected && <QuestionComposer key={session.id} session={session} sent={item => { select(item.id); void changed(); }}/>}<h3>与当前 Session 有关的问题</h3>{items.map(item => <QuestionCard key={item.id} question={item} unread={questionUnread(item, inbox)} open={() => select(item.id)}/>)}{!items.length && <p className="muted small">暂无问题。收到的问题也会显示在动态中。</p>}</>}
   </div></aside>;
 }

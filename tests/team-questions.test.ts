@@ -13,7 +13,7 @@ import { memberProfile } from './fixtures/member-profile';
 import { changeQuestion, questionView, type TeamQuestion, type QuestionCommand, type QuestionMember } from '../src/shared/questions';
 import { fillFollowNotice, incomingQuestionNotice, incomingReplyNotice, sessionMessageText } from '../src/shared/session-context-text';
 import { historyMarkdown } from '../src/core/artifacts';
-import { QuestionDetail, QuestionCard, questionUnread } from '../src/renderer/team-questions';
+import { QuestionDetail, QuestionCard, QuestionPanel, questionUnread } from '../src/renderer/team-questions';
 import type { AgentSession } from '../src/shared/types';
 // @ts-expect-error Shared background CLI fixture.
 import { authLauncher } from './fixtures/auth-launcher.mjs';
@@ -150,7 +150,7 @@ test('manual recipient replies are independent, idempotent and do not take over 
 
 test('both sides share the conversation composer; recipient can type before linking a Session', () => {
   const items: TeamQuestion[] = [], q = mutate(items, 'alice', create());
-  const render = (username: string, replyModes?: Record<string, 'manual' | 'auto'>, sessions: AgentSession[] = []) => renderToStaticMarkup(React.createElement(QuestionDetail, { question: questionView(q, username)!, username, inbox: { items, jobs: [], read: {}, replyModes }, sessions, changed: async () => {}, openSession: () => {} }));
+  const render = (username: string, replyModes?: Record<string, 'manual' | 'auto'>, sessions: AgentSession[] = []) => renderToStaticMarkup(React.createElement(QuestionDetail, { question: questionView(q, username)!, username, inbox: { items, jobs: [], read: {}, replyModes }, sessions, changed: async () => {} }));
   for (const markup of [render('alice'), render('bob')]) {
     assert.match(markup, /team-question-thread/);
     assert.match(markup, /team-question-composer[\s\S]*<textarea[\s\S]*team-question-composer-bar[\s\S]*结束提问[\s\S]*team-question-send[\s\S]*发送/);
@@ -159,7 +159,8 @@ test('both sides share the conversation composer; recipient can type before link
   assert.match(render('bob'), /aria-label="回复alice"/);
   const sid = randomUUID(); mutate(items, 'bob', { kind: 'link', id: q.id, sessionId: sid });
   const linked = { id: sid, purpose: 'work', binding: { project: { id: q.projectId } } } as AgentSession;
-  assert.match(render('bob', { [q.id]: 'auto' }, [linked]), /正在与alice自动对话/);
+  assert.match(render('bob', { [q.id]: 'auto' }, [linked]), /正在与alice自动往返/);
+  assert.match(render('bob', { [q.id]: 'auto' }, [linked]), />停止自动</);
   assert.doesNotMatch(render('bob', { [q.id]: 'auto' }, [linked]), /<textarea/);
   assert.match(render('bob', { [q.id]: 'manual' }, [linked]), /<textarea/);
   assert.match(render('bob', { [q.id]: 'auto' }), /<textarea/, 'a Session on another client must not hide direct replies');
@@ -256,20 +257,36 @@ test('closed question UI retains link and answers, removes answer and closure ac
   mutate(items, 'bob', { kind: 'link', id: q.id, sessionId }); mutate(items, 'alice', { kind: 'close', id: q.id });
   const session = { id: sessionId, title: '回答 Session', purpose: 'work', binding: { project: { id: projectId } } } as AgentSession;
   const inbox = { items, jobs: [], read: {} };
-  const recipient = renderToStaticMarkup(React.createElement(QuestionDetail, { question: questionView(q, 'bob')!, inbox, username: 'bob', sessions: [session], changed: async () => {}, openSession: () => {} }));
-  assert.match(recipient, /已关闭/); assert.match(recipient, /打开关联 Session/); assert.match(recipient, /手动关闭/);
-  assert.doesNotMatch(recipient, /关联并回答|回答 Session<\/option>|>结束提问<|发送后续信息|引入到 Session/);
-  const author = renderToStaticMarkup(React.createElement(QuestionDetail, { question: q, inbox, username: 'alice', sessions: [{ id: q.sessionId, title: '发问 Session', purpose: 'work', binding: { project: { id: projectId } } } as AgentSession], changed: async () => {}, openSession: () => {} }));
-  assert.match(author, /已关闭/); assert.doesNotMatch(author, /发送后续信息|继续同一问题|引入到 Session|结束提问|与bob自动对话/);
+  const recipient = renderToStaticMarkup(React.createElement(QuestionDetail, { question: questionView(q, 'bob')!, inbox, username: 'bob', sessions: [session], changed: async () => {} }));
+  assert.match(recipient, /已关闭/); assert.match(recipient, /手动关闭/);
+  assert.doesNotMatch(recipient, /打开关联 Session|关联并回答|回答 Session<\/option>|>结束提问<|发送后续信息|引入到 Session/);
+  const author = renderToStaticMarkup(React.createElement(QuestionDetail, { question: q, inbox, username: 'alice', sessions: [{ id: q.sessionId, title: '发问 Session', purpose: 'work', binding: { project: { id: projectId } } } as AgentSession], changed: async () => {} }));
+  assert.match(author, /已关闭/); assert.doesNotMatch(author, /打开关联 Session|发送后续信息|继续同一问题|引入到 Session|结束提问|与bob自动对话/);
   const openItems: TeamQuestion[] = [], openQuestion = mutate(openItems, 'alice', create()), openRun = randomUUID();
   mutate(openItems, 'bob', { kind: 'link', id: openQuestion.id, sessionId: randomUUID() });
   mutate(openItems, 'bob', { kind: 'run', id: openQuestion.id, sessionId: openQuestion.recipients[0].sessionId!, runId: openRun });
   mutate(openItems, 'bob', { kind: 'reply', id: openQuestion.id, runId: openRun, body: '先用 v2' });
   mutate(openItems, 'alice', { kind: 'follow', id: openQuestion.id, followId: randomUUID(), body: '请改成 v3', target: 'bob' });
-  const thread = renderToStaticMarkup(React.createElement(QuestionDetail, { question: openQuestion, inbox: { items: openItems, jobs: [], read: {} }, username: 'alice', sessions: [], changed: async () => {}, openSession: () => {} }));
+  const thread = renderToStaticMarkup(React.createElement(QuestionDetail, { question: openQuestion, inbox: { items: openItems, jobs: [], read: {} }, username: 'alice', sessions: [], changed: async () => {} }));
   assert.match(thread, /我/); assert.match(thread, /请改成 v3/); assert.match(thread, /先用 v2/);
-  assert.match(thread, /team-question-resize[\s\S]*结束提问[\s\S]*自动对话[\s\S]*自动填入[\s\S]*team-question-send[\s\S]*发送/);
-  assert.doesNotMatch(thread, /发给bob|发送给|<select/);
+  assert.match(thread, /team-question-resize[\s\S]*title="结束提问"[\s\S]*>自动对话<[\s\S]*>AI填入<[\s\S]*team-question-send[\s\S]*发送/);
+  assert.match(thread, /disabled=""[^>]*还没有 AI 生成的追问/);
+  assert.doesNotMatch(thread, /team-question-session-choice|打开关联 Session|>关联</);
+  assert.doesNotMatch(thread, /发给bob|发送给|<select|question\.fill/);
+  const filled = renderToStaticMarkup(React.createElement(QuestionDetail, { question: openQuestion, inbox: { items: openItems, jobs: [], read: {}, fills: { [openQuestion.id]: { bob: '请补充样本' } } }, username: 'alice', sessions: [], changed: async () => {} }));
+  assert.match(filled, />AI填入</);
+  assert.match(filled, /把 AI 生成的追问填进输入框/);
+  assert.doesNotMatch(filled, /disabled=""[^>]*把 AI 生成的追问填进输入框/);
+  const answerSide = renderToStaticMarkup(React.createElement(QuestionDetail, { question: questionView(openQuestion, 'bob')!, inbox: { items: openItems, jobs: [], read: {} }, username: 'bob', sessions: [], changed: async () => {} }));
+  assert.match(answerSide, />AI填入</);
+  assert.match(answerSide, /还没有 AI 生成的回答/);
+  const otherSession = randomUUID();
+  const sessionA = { id: openQuestion.sessionId, purpose: 'work', binding: { project: { id: projectId } } } as AgentSession;
+  const sessionB = { id: otherSession, purpose: 'work', binding: { project: { id: projectId } } } as AgentSession;
+  const panel = (current: AgentSession, selectedId: string) => renderToStaticMarkup(React.createElement(QuestionPanel, { inbox: { items: openItems, jobs: [], read: {} }, selectedId, session: current, username: 'alice', sessions: [sessionA, sessionB], connected: false, select: () => {}, close: () => {}, changed: async () => {} }));
+  assert.match(panel(sessionA, openQuestion.id), /team-question-detail/);
+  assert.doesNotMatch(panel(sessionB, openQuestion.id), /team-question-detail/);
+  assert.match(panel(sessionB, openQuestion.id), /与当前 Session 有关的问题/);
   const card = renderToStaticMarkup(React.createElement(QuestionCard, { question: q, unread: true, open: () => {} }));
   assert.match(card, /已关闭/); assert.match(card, /有新动态/);
 });
@@ -357,38 +374,30 @@ test('replies stay manual until one auto session tracks a single person', () => 
   assert.equal(aliceQ.lockedPeer(autoSession.id), undefined);
 }));
 
-test('auto fill writes a draft and does not send it', () => fixture(async ({ alice, project }) => {
+test('a previous reply is stored locally for fill and is not sent', () => fixture(async ({ alice, project }) => {
   const ask = newSession(alice, project);
   const q = await alice.questions.create(ask.id, create());
   await alice.questions.close();
-  let drafted = false;
+  let sent = false;
   const questions = new Questions(alice.store, alice.remote, {
     profile: () => alice.remote.profile, session: id => alice.session(id), changed: () => {}, notice: () => {},
-    send: async (id, text, runId, notice, draft) => {
-      assert.equal(draft, true);
-      assert.match(notice || '', /起草继续提问/);
-      assert.match(text, /需要使用哪一版数据/);
-      const s = alice.session(id); s.status = 'running';
-      s.messages.push({ id: randomUUID(), role: 'user', text: (notice || '') + text, userText: text, createdAt: new Date().toISOString(), context: { nativeId: 'test', accepted: true, workRecord: false, sourceHashes: {}, questionRunId: runId, questionFill: true } });
-      s.messages.push({ id: randomUUID(), role: 'assistant', text: '[[继续提问]]\n请补充样本', createdAt: new Date().toISOString() });
-      s.status = 'idle'; await questions.completed(s); drafted = true; return true;
-    },
+    send: async () => { sent = true; return true; },
   });
   alice.questions = questions;
   await questions.init();
-  await questions.fillDraft(project, q.id, 'bob');
-  await until(() => drafted);
-  const job = questions.view().jobs.find(item => item.mode === 'fill' && item.questionId === q.id);
-  assert.equal(job?.phase, 'tracked');
-  assert.equal(job?.answer, '请补充样本');
-  assert.equal(questions.view().items.find(item => item.id === q.id)?.followUps?.length || 0, 0);
-  assert.doesNotMatch(historyMarkdown(ask), /请补充样本|起草继续提问/);
+  const runId = randomUUID();
+  ask.messages.push({ id: randomUUID(), role: 'user', text: '问题：验收口径', createdAt: new Date().toISOString(), context: { nativeId: 'test', accepted: true, workRecord: false, sourceHashes: {}, questionRunId: runId } });
+  ask.messages.push({ id: randomUUID(), role: 'assistant', text: '先看现有结果', createdAt: new Date().toISOString() });
+  await questions.completed(ask);
+  assert.equal(questions.view().fills?.[q.id]?.bob, undefined);
   const inbox = (questions as any).inbox();
-  inbox.dialogues = [{ questionId: q.id, projectId: project, peer: 'bob', sessionId: ask.id, mode: 'auto' }];
-  await assert.rejects(questions.fillDraft(project, q.id, 'carol'), /正在自动对话/);
-  inbox.dialogues[0].suggested = true;
-  ask.status = 'running';
-  await assert.rejects(questions.fillDraft(project, q.id, 'bob'), /正在处理/);
+  inbox.jobs.push({ questionId: q.id, projectId: project, sessionId: ask.id, runId, phase: 'running', mode: 'import', sourceId: 'answer', peer: 'bob' });
+  ask.messages.push({ id: randomUUID(), role: 'assistant', text: '[[继续提问]]\n请补充样本', createdAt: new Date().toISOString() });
+  await questions.completed(ask);
+  assert.equal(questions.view().fills?.[q.id]?.bob, '请补充样本');
+  assert.equal(questions.view().items.find(item => item.id === q.id)?.followUps?.length || 0, 0);
+  assert.equal(sent, false);
+  assert.doesNotMatch(historyMarkdown(ask), /起草继续提问/);
 }));
 
 test('Codex and Cursor protocol runtimes preserve question context and return completed answers', () => fixture(async ({ alice, bob, project, root }) => {
