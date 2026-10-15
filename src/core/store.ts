@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import { isProjectOrganizationDraft } from '../shared/project-organization';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import type { AgentSession, Draft, ProjectConclusion, Settings, Transfer, SessionInput } from '../shared/types';
@@ -60,6 +61,8 @@ export class Store {
       this.inputs[session.id].capabilities = this.inputs[session.id].capabilities!.filter(item => !item.id.startsWith('plugin:mcp:'));
     }
     this.drafts.forEach(d => {
+      const originalPrompt=this.sessions.find(s=>s.id===d.prepareSessionId)?.messages.find(message=>message.role==='user'&&message.text.includes('preparationContractVersion:4')&&message.text.includes('只返回一个 JSON 对象：{"sentence"'));
+      if(!d.mergeSources?.length&&(isProjectOrganizationDraft(d)||originalPrompt))d.organizationFormat='project-profile-v1';
       if (!d.preparationVersion && !d.submitted) {
         // Preserve the user's previous final explanation when upgrading older drafts.
         d.body = d.body || d.generatedBody || ''; d.supplement ??= '';

@@ -1,9 +1,25 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { organizationEditedMessage, organizationExistsMessage, organizationRefusal, organizationTags, prepareProjectOrganization, type OrganizationDraftRef } from '../src/shared/project-organization';
+import { isProjectOrganizationDraft, organizationEditedMessage, organizationExistsMessage, organizationRefusal, organizationTags, prepareProjectOrganization, type OrganizationDraftRef } from '../src/shared/project-organization';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import os from 'node:os';
+import { Store } from '../src/core/store';
+
+test('legacy category drafts and earlier project profiles with the same contract retain their own format after restart',async()=>{
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'wb-profile-migration-'));
+  try {
+    const store=new Store(root);await store.init();
+    store.drafts=[{id:'legacy',resultRules:{contract:4},generation:'ready',artifacts:[{fields:{statement:'旧分类成果'}}]},{id:'profile',resultRules:{contract:4},generation:'ready',artifacts:[{fields:{sentence:'这是项目。',technologies:'技术',achievements:'成果',criteria:'标准'}}]},{id:'pending-profile',resultRules:{contract:4},generation:'error',prepareSessionId:'prepare'}] as any;
+    store.sessions=[{id:'prepare',title:'整理',provider:'codex',purpose:'prepare',status:'idle',cwd:root,createdAt:'',sources:[],approvals:[],autoUpload:false,handoffPath:'',messages:[{id:'prompt',role:'user',createdAt:'',text:'preparationContractVersion:4。只返回一个 JSON 对象：{"sentence":"说明"}'}]}];
+    await store.save();const reopened=new Store(root);await reopened.init();
+    assert.equal(isProjectOrganizationDraft(reopened.drafts[0]),false);
+    assert.equal(reopened.drafts[1].organizationFormat,'project-profile-v1');assert.equal(reopened.drafts[2].organizationFormat,'project-profile-v1');
+  }finally{await fs.rm(root,{recursive:true,force:true});}
+});
 
 const draft = (patch: Partial<OrganizationDraftRef> = {}): OrganizationDraftRef => ({
-  id: 'draft', binding: { project: { id: 'p' } }, resultRules: { contract: 4 }, generation: 'ready', ...patch,
+  id: 'draft', binding: { project: { id: 'p' } }, organizationFormat: 'project-profile-v1', resultRules: { contract: 4 }, generation: 'ready', ...patch,
 });
 
 test('a project keeps one automatic organization until a person edits it', () => {
@@ -12,7 +28,8 @@ test('a project keeps one automatic organization until a person edits it', () =>
   assert.equal(organizationRefusal([draft({ generation: 'error' })], 'p'), undefined);
   const edited = draft({ organizationEdited: true });
   assert.equal(organizationRefusal([edited], 'p', edited.id), organizationEditedMessage);
-  assert.equal(organizationRefusal([draft({ id: 'other', resultRules: { contract: 2 } })], 'p'), undefined);
+  assert.equal(organizationRefusal([draft({ id: 'other', organizationFormat: undefined, resultRules: { contract: 2 } })], 'p'), undefined);
+  assert.equal(organizationRefusal([draft({ organizationFormat: undefined })], 'p'), undefined,'a legacy category draft must not reserve the project profile');
 });
 
 test('the project sentence stays one sentence and the other fields stay readable', () => {

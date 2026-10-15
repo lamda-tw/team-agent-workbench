@@ -19,7 +19,7 @@ export function ComposerSettings(props: ComposerSettingsProps) {
 }
 function CursorNativeSettings({ session }: { session: AgentSession }) {
   const [error, setError] = useState('');
-  return <><button className="composer-setting" title="模型、模式、权限和工具在 Cursor Agents 内设置" onClick={() => { setError(''); void window.workbench.call('session.cursorNative.focus', { id: session.id }).catch(e => setError(e.message)); }}>在 Cursor Agents 中打开 · Beta<ExternalLink size={12}/></button>{error && <span className="inline-error" role="alert">{error}</span>}</>;
+  return <><button className="composer-setting" title="模型、模式、权限和工具在 Cursor 原生窗口中设置" onClick={() => { setError(''); void window.workbench.call('session.cursorNative.focus', { id: session.id }).catch(e => setError(e.message)); }}>在 Cursor 中打开 · Beta<ExternalLink size={12}/></button>{error && <span className="inline-error" role="alert">{error}</span>}</>;
 }
 function CliComposerSettings({ session, networkEnabled, openConnection, authCheckedAt }: ComposerSettingsProps) {
   networkEnabled = session.networkRoute ? session.networkRoute === 'management' : networkEnabled;

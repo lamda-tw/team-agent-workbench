@@ -1,3 +1,12 @@
+# v0.7.1 · 2026-10-15 Cursor 原生联动 Beta
+
+- `npm test`：647 项后台回归全部通过，无失败、取消或跳过；日志保存在本机 `.test-data/cursor-file-bridge-1015/final-regression.log`。后台保护器保持禁止 Shell、桌面和浏览器启动；Windows 进程身份与精确终止的两项测试另行通过，纳入显式 `test:desktop`。
+- `npm run typecheck`、`npm run build`、`npm run build:check` 通过。源码、锁文件及用户版/管理版构建版本均为 0.7.1。
+- 三项独立界面检查通过：`npx tsx scripts/cursor-ide-page-smoke.ts`、`npx tsx scripts/cursor-file-queue-smoke.ts`、`node scripts/native-session-import-smoke.mjs`。这些使用隔离的合成页面，不替代真实原生验收。
+- 正式 `start-user-dev.cmd` 入口使用独立本地共享桩与账号完成 Beta 开启、普通 IDE 启动、原生会话导入、工作台发送、原生端续聊回显，以及退出工作台后恢复并继续对话。最终 763 条历史的原生 ID、顺序和正文逐条一致，311 次工具结果、四份大内容文件和七份摘要归档可读，工作台请求无重复；Beta 设置在账号目录持久化。验收结果为 `.test-data/formal-cursor-beta-1015/verdict.json`。
+- 此前同一合成会话还通过真实手动摘要、跨自动压缩排队、停止与取消，以及两次完整 Cursor 进程退出重开后的上下文与历史恢复。证据范围和边界见 [Cursor 原生联动说明](docs/cursor-desktop-sync.md)；模型、权限、工具及授权仍在 Cursor 原生窗口操作，独立 Agents Window 不接入此 Beta。
+- 修复账号级 Cursor Beta 开关重启丢失，并区分同用 contract=4 的旧分类草稿和新项目概况。保留旧草稿迁移、重试、空结果确认、上传、合并和权限的回归覆盖。本次没有连接实际共享区服务器，没有打包安装程序；本地完整历史、轨迹、诊断日志和旧版手册附件未纳入提交。
+
 # 2026-09-24 网络测试与成员转发权限分离
 
 - 管理端三个网络测试不再受产品开关和出口启停限制，使用已保存的上游设置测试固定服务地址，不调用本机 CLI。成员请求仍按已保存的产品白名单拦截；测试不修改访问权限、不重启正在使用的出口、不计入成员隧道流量。

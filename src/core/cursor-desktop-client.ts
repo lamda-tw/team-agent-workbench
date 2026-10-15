@@ -1,6 +1,7 @@
 import WebSocket from 'ws';
 import { randomUUID } from 'node:crypto';
 import { cursorAgentsPage } from './cursor-agents-page';
+import { cursorIdePage } from './cursor-ide-page';
 import { fileURLToPath } from 'node:url';
 import { sameNativePath } from './native-transcript';
 import type { CursorNativeSnapshot } from './cursor-native-rpc';
@@ -12,7 +13,7 @@ export interface CursorDesktopClient {
   list(): Promise<CursorDesktopChat[]>;
   create(cwd: string): Promise<CursorDesktopChat>;
   snapshot(id: string, cwd: string): Promise<CursorNativeSnapshot>;
-  send(id: string, cwd: string, text: string): Promise<{ submitted: true; sessionId?: string }>;
+  send(id: string, cwd: string, text: string): Promise<{ submitted: true; sessionId?: string; nativeMessageId?: string }>;
   focus(id: string, cwd: string): Promise<void>;
   stop(id: string, cwd: string): Promise<void>;
   close(): void;
@@ -65,7 +66,7 @@ export function cursorWorkspacePath(workspace: any): string | undefined {
 export class CursorDesktopCdp implements CursorDesktopClient {
   private pages = new Map<string, CursorCdpConnection>();
   private mutation: Promise<unknown> = Promise.resolve();
-  constructor(private browserEndpoint: string) {
+  constructor(private browserEndpoint: string, private surface: 'agents' | 'ide' = 'agents') {
     const url = new URL(browserEndpoint);
     if (url.protocol !== 'ws:' || url.hostname !== '127.0.0.1' || !url.port || url.username || url.password || url.search || url.hash || !/^\/devtools\/browser\/[\w-]+$/.test(url.pathname)) throw new Error('Cursor 连接记录无效');
   }
@@ -78,17 +79,23 @@ export class CursorDesktopCdp implements CursorDesktopClient {
     const allowed=targets.filter(target=>target.type==='page' && typeof target.url==='string' && /\/workbench(?:\.html|\/)/.test(target.url) && typeof target.webSocketDebuggerUrl==='string');
     for(const [id,page] of this.pages)if(!allowed.some(target=>target.id===id)){page.close();this.pages.delete(id);}
     const result:CursorCdpConnection[]=[];
+    const workspaces=new Set<string>();
     for(const target of allowed){
       const endpoint=new URL(target.webSocketDebuggerUrl);
       if(endpoint.protocol!=='ws:'||endpoint.host!==new URL(this.browserEndpoint).host||endpoint.username||endpoint.password||endpoint.search||endpoint.hash||!endpoint.pathname.startsWith('/devtools/page/'))throw new Error('Cursor 窗口连接地址无效');
       let page=this.pages.get(target.id);
       if(!page||page.closed){page=new CursorCdpConnection(endpoint.href);this.pages.set(target.id,page);}
-      const glass=await page.evaluate(async()=> (await (window as any).vscode?.context?.resolveConfiguration())?.glass === true);
-      if(glass)result.push(page);
+      const configuration=await page.evaluate(async()=> { const c=await (window as any).vscode?.context?.resolveConfiguration();return {glass:c?.glass===true,workspace:c?.workspace}; });
+      if(this.surface==='ide'&&configuration.glass)throw new Error('请先关闭独立的 Cursor Agents 窗口，联动会话使用普通 IDE 窗口，避免两个后台各自执行');
+      if(this.surface==='ide'){
+        const directory=cursorWorkspacePath(configuration.workspace);
+        if(directory){const key=directory.replace(/\\/g,'/').replace(/\/$/,'').toLowerCase();if(workspaces.has(key))throw new Error('同一 Cursor 工作目录打开了多个 IDE 窗口，请保留一个后继续联动');workspaces.add(key);}
+      }
+      if(this.surface === 'ide' ? !configuration.glass && !!cursorWorkspacePath(configuration.workspace) && !configuration.workspace?.configPath : configuration.glass)result.push(page);
     }
     return result;
   }
-  private read(page:CursorCdpConnection,operation:string,details:Record<string,unknown>={}):Promise<any>{return page.evaluate(cursorAgentsPage,{operation,...details});}
+  private read(page:CursorCdpConnection,operation:string,details:Record<string,unknown>={}):Promise<any>{return page.evaluate<any>(this.surface === 'ide' ? cursorIdePage : cursorAgentsPage,{operation,...details});}
   async list(){
     const chats:CursorDesktopChat[]=[];
     for(const page of await this.windows())chats.push(...(await this.read(page,'catalog')).chats);
@@ -102,7 +109,7 @@ export class CursorDesktopCdp implements CursorDesktopClient {
   private async target(id:string,cwd:string){
     const matches:CursorCdpConnection[]=[];
     for(const page of await this.windows())if((await this.read(page,'catalog')).chats.some((chat:CursorDesktopChat)=>chat.nativeId===id&&sameNativePath(chat.cwd,cwd)))matches.push(page);
-    if(matches.length!==1)throw new Error('请在 Cursor Agents 中打开关联会话，并保持原工作目录；不能关联重复窗口');
+    if(matches.length!==1)throw new Error(this.surface === 'ide' ? '请在 Cursor 普通 IDE 中打开关联会话，并保持原工作目录；不能关联重复窗口' : '请在 Cursor Agents 中打开关联会话，并保持原工作目录；不能关联重复窗口');
     return matches[0];
   }
   private serial<T>(work:()=>Promise<T>):Promise<T>{const job=this.mutation.then(work,work);this.mutation=job.catch(()=>{});return job;}
@@ -110,7 +117,7 @@ export class CursorDesktopCdp implements CursorDesktopClient {
   focus(id:string,cwd:string){return this.serial(async()=>{
     const page=await this.target(id,cwd);await this.read(page,'reveal',{id,cwd});await page.call('Page.bringToFront');
     for(let i=0;i<30;i++){try{await this.read(page,'focus',{id,cwd});return;}catch{await pause(100);}}
-    throw new Error('请在 Cursor Agents 中打开关联会话');
+    throw new Error(this.surface === 'ide' ? '请在 Cursor 普通 IDE 中打开关联会话' : '请在 Cursor Agents 中打开关联会话');
   });}
   create(cwd:string){return this.serial(async()=>{
     const matches:CursorCdpConnection[]=[];
@@ -134,20 +141,26 @@ export class CursorDesktopCdp implements CursorDesktopClient {
     await this.read(page,'prepareSend',{id,cwd,token});
     try{
       await page.call('Input.insertText',{text});
-      await this.read(page,'checkSend',{id,cwd,text});
+      await this.read(page,'checkSend',{id,cwd,text,token});
       try{
         // The native button is scoped and clicked in the same renderer task as identity validation.
         // A global Enter could reach a different panel if the user changes focus between CDP calls.
-        await this.read(page,'submit',{id,cwd,text});
+        await this.read(page,'submit',{id,cwd,text,token});
         for(let i=0;i<50;i++){
           await pause(150);
-          const receipt=await this.read(page,'receipt',{token,cwd,text});
-          if(receipt.received)return {submitted:true as const,sessionId:receipt.state.sessionId as string};
+          const receipt=await this.read(page,'receipt',{id,token,cwd,text});
+          if(receipt.received)return {submitted:true as const,sessionId:receipt.state.sessionId as string,...(receipt.nativeMessageId ? { nativeMessageId: receipt.nativeMessageId as string } : {})};
         }
       }catch{/* A lost acknowledgement must never cause another click or a repeat send. */}
-      throw new Error('Cursor Agents 送达状态未确认，请核对原生窗口；不会自动重复发送');
+      throw new Error('Cursor 送达状态未确认，请核对原生窗口；不会自动重复发送');
     }finally{await this.read(page,'release',{token}).catch(()=>{});}
   });}
-  stop(id:string,cwd:string){return this.serial(async()=>{await this.read(await this.target(id,cwd),'stop',{id,cwd});});}
+  stop(id:string,cwd:string){return this.serial(async()=>{
+    const page=await this.target(id,cwd);await this.read(page,'stop',{id,cwd});
+    if(this.surface==='ide'){
+      for(let i=0;i<30;i++){const state=await this.read(page,'snapshot',{id,cwd});if(state.status!=='generating')return;await pause(150);}
+      throw new Error('停止结果尚未确认，请在 Cursor 原生窗口查看；等待队列已暂停');
+    }
+  });}
   close(){for(const page of this.pages.values())page.close();this.pages.clear();}
 }

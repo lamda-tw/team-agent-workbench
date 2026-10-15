@@ -7,7 +7,7 @@ import { JsonRpc, type AgentRpc, type RpcMessage } from './rpc';
 import { WebSocketRpc } from './websocket-rpc';
 import { mergeSharedThread } from './codex-live-thread';
 import { CursorNativeRpc, mergeCursorNativeMessages, type CursorNativeSnapshot } from './cursor-native-rpc';
-import { assertCursorSharedSessionAvailable } from '../shared/cursor-session-consistency';
+import { assertCursorSharedSessionAvailable, isCursorFileSession } from '../shared/cursor-session-consistency';
 import { codexPermissionParams, codexTurnPermissionParams, codexPermissions, cursorPermissionArgs, cursorPermissions, permissionIssue, probeCodexCommand } from './permissions';
 import { refreshCodexConfiguration, validateCodexStorage, type CodexStorage } from './codex-storage';
 import { CodexMcp } from './codex-mcp';
@@ -422,7 +422,11 @@ export class AgentRuntime {
     if (this.session.cursorNative && m.method === 'cursor/nativeSnapshot') {
       if (m.params?.sessionId !== this.session.nativeId) return;
       const snapshot = m.params.snapshot as CursorNativeSnapshot;
-      this.session.messages = mergeCursorNativeMessages(this.session.messages, snapshot.messages);
+      if (snapshot.nativeHistory) {
+        if (!snapshot.nativeHistory.issues.some(issue => issue.kind !== 'empty-native-checkpoint')) this.session.messages = snapshot.nativeHistory.messages;
+        this.session.cursorQueue = snapshot.queue;
+        if(this.session.cursorPendingSubmission&&snapshot.queue?.requests.some(request=>request.id===this.session.cursorPendingSubmission!.id))delete this.session.cursorPendingSubmission;
+      } else this.session.messages = mergeCursorNativeMessages(this.session.messages, snapshot.messages);
       if (snapshot.status === 'error') { this.finish('Cursor 原生会话出现错误，请在原生窗口查看并处理。'); return; }
       if (snapshot.status === 'generating') {
         if (!this.turnActive) this.sharedTurnOwned = false;
@@ -612,7 +616,7 @@ export class AgentRuntime {
   }
   async cancel() {
     if (this.session.provider === 'codex' && this.turnId) await this.rpc.request('turn/interrupt', { threadId: this.session.nativeId, turnId: this.turnId });
-    else if (this.session.provider === 'cursor' && this.session.nativeId) this.rpc.notify('session/cancel', { sessionId: this.session.nativeId });
+    else if (this.session.provider === 'cursor' && this.session.nativeId) { if(isCursorFileSession(this.session))await this.rpc.request('session/cancel',{sessionId:this.session.nativeId});else this.rpc.notify('session/cancel', { sessionId: this.session.nativeId }); }
     else this.close();
   }
   async close() { this.closing = true; this.turnActive = false; clearTimeout(this.sharedRefresh); this.sharedRefresh = undefined; this.session.desktopSyncPending = false; this.session.desktopWaitingApproval = false; this.session.desktopSyncState = undefined; this.session.desktopSyncError = undefined; this.connection.stop(); for (const done of this.cursorCommandWaiters) done(); this.cursorCommandWaiters.clear(); this.session.status = 'idle'; this.session.approvals = []; this.hooks.changed(); await Promise.all([this.rpc.close(), this.authBridge?.close()]); }

@@ -125,14 +125,16 @@ test('a hanging quota lookup cannot hold a usable Codex model list until the ful
   } finally { await cleanup(root); }
 });
 
-test('Cursor MCP discovery requires no native session and an explicitly empty command list does not repeatedly wait', async () => {
+test('Cursor plugins stay separate from MCP, require no native session, and empty commands do not repeatedly wait', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'wb-query-cursor-'));
   const fixture = await authLauncher(root, { status: 'ready', cursorCommands: [] });
   await fs.mkdir(path.join(root, '.cursor'));
   await fs.writeFile(path.join(root, '.cursor', 'mcp.json'), JSON.stringify({ mcpServers: { 'fixture-database': { type: 'http', url: 'https://example.invalid/mcp' } } }));
+  await fs.mkdir(path.join(root,'.cursor','plugins','fixture-plugin'),{recursive:true});
+  await fs.writeFile(path.join(root,'.cursor','plugins','fixture-plugin','plugin.json'),JSON.stringify({name:'fixture-plugin',description:'Isolated local plugin'}));
   const runtime = new AgentRuntime(session(root, 'cursor'), fixture.launcher, hooks);
   try {
-    const plugins = await runtime.capabilities(false, 'plugin'); assert(plugins.plugins.some(item => item.name === 'fixture-database'));
+    const plugins = await runtime.capabilities(false, 'plugin'); assert(plugins.plugins.some(item => item.name === 'fixture-plugin'));assert(!plugins.plugins.some(item=>item.name==='fixture-database'));
     assert(!(await calls(root)).some(item => item.method === 'initialize'));
     assert.deepEqual((await runtime.capabilities(false, 'skill')).skills, []);
     const start = performance.now(); assert.deepEqual((await runtime.capabilities(true, 'skill')).skills, []);

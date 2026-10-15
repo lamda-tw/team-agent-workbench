@@ -73,6 +73,7 @@ test('merge uses the same boundaries, at most one result, and supports an empty 
 
 test('automatic preparation writes one project profile and rejects a second result', () => {
   const value = draft();
+  value.organizationFormat = 'project-profile-v1';
   value.resultRules = { contract: 4, categories: ['capability', 'exploration', 'todo'] };
   const prompt = preparationPrompt(value, []);
   assert.match(prompt, /每个项目只整理一条/);

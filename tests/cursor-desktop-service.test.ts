@@ -76,7 +76,7 @@ test('local observer denies the send endpoint even when its native descriptor an
     assert.equal((await fetch(descriptor.endpoint+'/snapshot',{headers:{Origin:'http://example.com'}})).status,403);
     assert.equal((await fetch(descriptor.endpoint+'/send')).status,405);
     const before=JSON.stringify(f.state);const response=await fetch(descriptor.endpoint+'/send',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text:'blocked'})});
-    assert.equal(response.status,409);assert.match((await response.json()).message,/共用完整历史和上下文/);assert.equal(JSON.stringify(f.state),before);assert.equal(f.calls.filter(x=>x==='send').length,0);
+    assert.equal(response.status,409);assert.match((await response.json()).message,/一致性验证/);assert.equal(JSON.stringify(f.state),before);assert.equal(f.calls.filter(x=>x==='send').length,0);
     service.release(f.session.id);assert.equal((await fetch(descriptor.endpoint+'/snapshot')).status,403);
   }finally{await service.close();await f.clean();}
 });

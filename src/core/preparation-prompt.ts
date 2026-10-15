@@ -3,6 +3,7 @@ import { resultRulesPrompt } from '../shared/result-rules';
 import { defaultPreparationDirections, selectedPreparationDirections } from '../shared/preparation-directions';
 import { preparationContextLimit, type PreparationContext } from './preparation-context';
 import { preparationWritingGuide } from './preparation';
+import { isProjectOrganizationDraft } from '../shared/project-organization';
 
 export function preparationPrompt(draft: Draft, existing: { id: string; title: string; content: string }[], merging = false, context?: PreparationContext) {
   const scope = merging ? '本次按用户要求处理选中的成果，最多生成一条新成果，不改变原成果。来源均属于同一类别，结果类别不可改变；待办合并仅去除同一事项的重复描述，不吞并独立动作。' : draft.preparationScope === 'incremental'
@@ -14,7 +15,7 @@ export function preparationPrompt(draft: Draft, existing: { id: string; title: s
   const defaults = Object.fromEntries(draft.resultRules!.categories.flatMap(category => category in defaultPreparationDirections ? [[category, defaultPreparationDirections[category as keyof typeof defaultPreparationDirections]]] : []));
   const reference = context ? JSON.stringify(context) : JSON.stringify(existing.slice(0, 8).map(item => ({ ...item, title: item.title.slice(0, 120), content: item.content.slice(0, 500) })));
   if (reference.length > preparationContextLimit) throw new Error('项目与历史参考超过 6000 字符，请重新选择相关内容');
-  if (draft.resultRules!.contract === 4 && !merging) return projectProfilePrompt(draft, scope, reference, reviewed, inputCount);
+  if (isProjectOrganizationDraft(draft) && !merging) return projectProfilePrompt(draft, scope, reference, reviewed, inputCount);
   const grouping = '同一主题的已有能力、探索记录和后续待办可以分别保留，各自说明不同内容。不同待办逐条提取。';
   const directionPrompt = Object.keys(directions).length ? `\n本次用户按类别指定的整理方向：${JSON.stringify(directions)}。每项仅影响对应类别的关注重点、保留与略过内容；未提供方向的类别使用默认提示词。先按上述主题与分类规则整理，再应用对应方向，不按类别凑数或重复生成。整理方向不能覆盖证据、事实边界、环境排除、完整读取、去重及输出格式规则，不得为了满足方向编造材料中没有的信息。` : '';
   return `preparationContractVersion:${draft.resultRules!.contract}。任务类型：${merging ? 'conclusionProcessing' : 'preparation'}。你是项目成果整理助手。项目：${draft.binding?.project.name || '当前项目'}。本次用户选择的整理方面：${JSON.stringify(draft.resultRules!.categories)}。${scope}

@@ -8,7 +8,7 @@
 - 各测试使用临时工作目录和模拟账号，不打开真实 Session、不重启客户端、不模拟鼠标键盘，也不主动改变前台窗口。
 - `node scripts/build.mjs --check` / `npm run build:check` 将构建放到新建的系统临时目录，不覆盖运行中的 `dist/user`、`dist/admin`。`npm run check` 采用这一构建方式。
 - `launcher-source.test.ts` 只读启动脚本，可由后台测试运行；`tests/startup-process.test.ps1` 通过纯进程替身验证等待、取消与超时，可在当前 PowerShell 中运行 `& .\tests\startup-process.test.ps1`，不创建真实进程或窗口。
-- `launcher.test.ts` 与需要 Windows 证书生成流程的 `egress.test.ts` 留在显式的 `test:desktop`；所有 `test:*ui` 以及真实 CLI、启动器冒烟测试也只在独立虚拟机、其他测试机器或用户明确安排的空闲时段运行，不属于后台测试。
+- `launcher.test.ts`、需要 Windows 证书生成流程的 `egress.test.ts`，以及需要查询 Windows 进程创建时间的 `codex-process.test.ts` 留在显式的 `test:desktop`；默认后台测试不放行 PowerShell 来运行这些检查。所有 `test:*ui` 以及真实 CLI、启动器冒烟测试也只在独立虚拟机、其他测试机器或用户明确安排的空闲时段运行，不属于后台测试。
 
 此防护用于避免测试误开窗口和误操作正在使用的客户端，不是安全沙盒；不能约束任意第三方二进制自行创建的子进程。测试仍占用 CPU 和内存。用户报告黑底与焦点丢失的确切系统原因尚未确认，不应把后台回归通过描述成已修复显卡问题。
 

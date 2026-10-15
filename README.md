@@ -4,7 +4,7 @@
 
 [快速安装](#install) · [完整前置条件](#requirements) · [启动排障](#troubleshooting) · [使用指南](docs/user-guide.md) · [服务器部署](docs/deployment-guide.md) · [开发与验证](#development)
 
-当前源码版本 **0.7.0**。截至 2026-09-23，[GitHub Releases](https://github.com/njuprimarynlper-lgtm/team-agent-workbench/releases) 尚未发布安装包；使用当前功能请按下面的源码方式启动。部署人员已有的 0.6.3 安装包不包含当前全部修改。
+当前源码版本 **0.7.1**。使用当前功能请按下面的源码方式启动；部署人员已有的旧安装包不包含当前全部修改。
 
 <a id="install"></a>
 
@@ -132,7 +132,7 @@ npm.cmd run start:admin
 
 Codex 桌面联动从用户版的 **Beta 功能** 开启，新建会话时选择联动，首次发送自动准备共享后台；需要原生窗口时点击 **在 Codex 中打开**。无需额外的启动或停止脚本，详见[桌面联动说明](docs/codex-desktop-sync.md)。
 
-Cursor CLI 会话可独立创建或导入并继续使用。CLI 与 Agents 的强一致关联暂不可用：当前原生接口不能证明完整历史和执行上下文共享，工作台已禁止新建这类关联、续聊及伪造桌面登记。旧关联记录保留，仅能查看面板已加载消息并在原生 Agents 中继续。详见 [Cursor 会话一致性与当前边界](docs/cursor-desktop-sync.md)。
+Cursor CLI 会话可独立创建或导入。开启 **Beta → Cursor 原生联动** 后，可从 **接入 Cursor 会话 → 原生会话** 关联普通 IDE 当前打开的聊天：工作台通过本地持久化队列提交消息，由同一原生 Cursor 执行，并读取完整原生历史、工具结果和压缩状态。请保留关联会话打开；模型、权限、工具和授权在 Cursor 中设置。独立 Agents 窗口和已有 CLI 会话不转换为这条原生会话。详见 [Cursor 联动使用与验证边界](docs/cursor-desktop-sync.md)。
 
 `scripts/` 中的文件用于内部构建、开发验证和手册维护，不是额外的应用启动入口。用途和执行方式见[开发脚本说明](scripts/README.md)。
 

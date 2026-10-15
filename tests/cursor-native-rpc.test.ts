@@ -18,6 +18,8 @@ async function fixture() {
   const state: CursorNativeSnapshot = { sessionId: session.nativeId!, status: 'completed', messages: [] };
   const calls: string[] = [];
   let lostAck = false, unavailable = false;
+  let heldSnapshot: { received(): void; released: Promise<void> } | undefined;
+  const releases: Array<() => void> = [];
   const server = http.createServer(async (req,res) => {
     const op=req.url?.split('/').at(-1)!; calls.push(op);
     let body='';for await(const chunk of req)body+=chunk;
@@ -28,14 +30,59 @@ async function fixture() {
       if(lostAck){res.destroy();return;}
     }
     if(op==='stop')state.status='aborted';
+    const result = JSON.stringify(op==='snapshot'?state:op==='send'?{submitted:true}:{});
+    if (op === 'snapshot' && heldSnapshot) {
+      const held = heldSnapshot; heldSnapshot = undefined; held.received(); await held.released;
+      if (res.destroyed) return;
+    }
     res.setHeader('content-type','application/json');
-    res.end(JSON.stringify(op==='snapshot'?state:op==='send'?{submitted:true}:{}));
+    res.end(result);
   });
   await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
   const descriptor={version:1,endpoint:'http://127.0.0.1:'+(server.address() as any).port+'/native/'+'a'.repeat(64),sessionId:session.nativeId,workspace:root,expiresAt:new Date(Date.now()+60000).toISOString()};
   await fs.writeFile(session.cursorNative!.descriptorFile,JSON.stringify(descriptor));
-  return {root,session,state,calls,descriptor,lostAck:()=>{lostAck=true;},unavailable:(value:boolean)=>{unavailable=value;},async close(){server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));await fs.rm(root,{recursive:true,force:true});}};
+  return {root,session,state,calls,descriptor,lostAck:()=>{lostAck=true;},unavailable:(value:boolean)=>{unavailable=value;},
+    holdNextSnapshot() {
+      assert.equal(heldSnapshot, undefined);
+      let received!: () => void, release!: () => void;
+      const arrived = new Promise<void>(resolve => { received = resolve; });
+      const released = new Promise<void>(resolve => { release = resolve; });
+      heldSnapshot = { received, released }; releases.push(release);
+      return { received: arrived, release };
+    },
+    async close(){releases.forEach(release=>release());server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));await fs.rm(root,{recursive:true,force:true});}};
 }
+
+test('overlapping snapshot reads cannot publish an older running state after completion',async()=>{
+  const f=await fixture(),rpc=new CursorNativeRpc(f.session),statuses:string[]=[];
+  rpc.on('message',event=>{if(event.method==='cursor/nativeSnapshot')statuses.push(event.params.snapshot.status);});
+  try{
+    f.state.status='generating';
+    const held=f.holdNextSnapshot(),first=rpc.snapshot();await held.received;
+    f.state.status='completed';f.state.messages.push({id:'reply',role:'assistant',text:'finished'});
+    const overlapping=rpc.snapshot();
+    // A separate newer read would finish before the held old response; sharing
+    // the pending observation prevents that ordering from reaching the runtime.
+    await Promise.race([overlapping,new Promise(resolve=>setTimeout(resolve,100))]);held.release();
+    await Promise.all([first,overlapping]);await rpc.snapshot();
+    assert.deepEqual(statuses,['generating','completed']);
+    assert.equal(f.calls.filter(call=>call==='snapshot').length,2);
+    assert.equal(f.calls.filter(call=>['send','stop'].includes(call)).length,0);
+  }finally{await rpc.close();await f.close();}
+});
+
+test('closing during initial observation cannot revive polling or publish a late connection',async()=>{
+  const f=await fixture(),rpc=new CursorNativeRpc(f.session),messages:unknown[]=[];
+  rpc.on('message',event=>messages.push(event));
+  try{
+    const held=f.holdNextSnapshot(),initializing=rpc.request('initialize');await held.received;
+    await rpc.close();held.release();
+    await assert.rejects(initializing,/已关闭/);
+    await assert.rejects(rpc.snapshot(),/已关闭/);
+    assert.equal(messages.length,0);assert.deepEqual(f.calls,['snapshot']);
+    assert.equal((rpc as any).polling,undefined);
+  }finally{await rpc.close();await f.close();}
+});
 
 test('an externally started turn loses its connection visibly and resumes the same native conversation without resending',async()=>{
   const f=await fixture();let done=0,authFailures=0;

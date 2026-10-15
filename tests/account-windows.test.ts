@@ -31,7 +31,7 @@ test('production window routing restores the account in any window, isolates fai
   await fs.writeFile(path.join(slot2, 'settings.json'), JSON.stringify(oldSettings)); await fs.writeFile(path.join(base, 'sessions.json'), '[]');
   const opened: FakeWindow[] = [], dialogs: string[] = [], app = new EventEmitter() as any, ipc = new Map<string, Function>(), appPaths: Record<string, string> = { appData: root, home: root };
   let didQuit = false;
-  Object.assign(app, { setName() {}, setPath(name: string, value: string) { appPaths[name] = value; }, getPath(name: string) { return appPaths[name]; }, requestSingleInstanceLock: () => true, whenReady: async () => {}, quit() { didQuit = true; } });
+  Object.assign(app, { setName() {}, setAppUserModelId() {}, setPath(name: string, value: string) { appPaths[name] = value; }, getPath(name: string) { return appPaths[name]; }, requestSingleInstanceLock: () => true, whenReady: async () => {}, quit() { didQuit = true; } });
   class FakeWindow extends EventEmitter {
     destroyed = false; entry = ''; notices: unknown[] = [];
     webContents = Object.assign(new EventEmitter(), { send: (_name: string, value: unknown) => this.notices.push(value), setWindowOpenHandler() {}, session: { setPermissionRequestHandler() {} } });

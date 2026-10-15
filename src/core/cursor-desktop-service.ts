@@ -12,13 +12,15 @@ import { assertCursorSharedSessionAvailable } from '../shared/cursor-session-con
 
 const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 export interface CursorDesktopIntegration {
+  readonly fileBridge?: boolean;
   prepare(session: AgentSession, launch?: boolean, persist?: () => Promise<void>): Promise<void>;
   list(cwd: string, launch?: boolean): Promise<CursorDesktopChat[]>;
   open(session: AgentSession, persist?: () => Promise<void>): Promise<void>;
-  release(sessionId: string): void;
+  release(sessionId: string): void | Promise<void>;
   close(): Promise<void>;
 }
-interface Options {
+export interface CursorDesktopOptions {
+  surface?: 'ide' | 'agents';
   parent?: string;
   privateDirectory?: (parent: string) => Promise<string>;
   running?: () => Promise<boolean>;
@@ -33,14 +35,15 @@ async function freePort() {
 export function cursorAgentsLaunchArgs(cwd: string, port: number) {
   return ['--glass', '--remote-debugging-address=127.0.0.1', `--remote-debugging-port=${port}`, cwd];
 }
-async function launchCursor(cwd: string, port: number) {
+async function launchCursor(cwd: string, port: number, surface: 'ide' | 'agents' = 'agents') {
   if (process.platform !== 'win32') throw new Error('Cursor 桌面联动暂仅支持 Windows');
   const candidates = [path.join(process.env.LOCALAPPDATA || '', 'Programs', 'cursor', 'Cursor.exe'), path.join(process.env.ProgramFiles || '', 'Cursor', 'Cursor.exe')];
   let executable: string | undefined;
   for (const file of candidates) if (await fs.stat(file).then(s => s.isFile()).catch(() => false)) { executable = file; break; }
   if (!executable) throw new Error('未找到 Cursor 桌面版，请先安装 Cursor');
   await new Promise<void>((resolve, reject) => {
-    const child = spawn(executable!, cursorAgentsLaunchArgs(cwd,port), { stdio: 'ignore', detached: true, windowsHide: true });
+    const args = cursorAgentsLaunchArgs(cwd,port).filter(value => surface !== 'ide' || value !== '--glass');
+    const child = spawn(executable!, args, { stdio: 'ignore', detached: true, windowsHide: surface !== 'ide' });
     child.once('error', reject); child.once('spawn', () => { child.unref(); resolve(); });
   });
 }
@@ -64,7 +67,10 @@ export class CursorDesktopService implements CursorDesktopIntegration {
   private publication: Promise<unknown> = Promise.resolve();
   private closed = false;
   readonly parent: string;
-  constructor(private options: Options = {}) { this.parent = options.parent || path.join(process.env.LOCALAPPDATA || os.tmpdir(), 'TeamAgentWorkbench', 'cursor-desktop'); }
+  constructor(private options: CursorDesktopOptions = {}) { this.parent = options.parent || path.join(process.env.LOCALAPPDATA || os.tmpdir(), 'TeamAgentWorkbench', options.surface === 'ide' ? 'cursor-ide' : 'cursor-desktop'); }
+  clientFor(cwd: string, launch = false) { return this.ensure(launch, cwd); }
+  private connect(endpoint: string) { return (this.options.connect || (value => new CursorDesktopCdp(value, this.options.surface || 'agents')))(endpoint); }
+  private launch(cwd: string, port: number) { return (this.options.launch || ((directory, value) => launchCursor(directory, value, this.options.surface || 'agents')))(cwd, port); }
   private async ensure(launch: boolean, cwd: string) {
     if (this.closed) throw new Error('Cursor 联动已关闭');
     if (this.connecting) return this.connecting;
@@ -85,11 +91,11 @@ export class CursorDesktopService implements CursorDesktopIntegration {
       let saved: { endpoint: string } | undefined;
       try { saved = JSON.parse(await fs.readFile(registry.file, 'utf8')); } catch (error: any) { if (error.code !== 'ENOENT') throw new Error('Cursor 联动记录不可用'); }
       if (saved) {
-        try { const client = (this.options.connect || (endpoint => new CursorDesktopCdp(endpoint)))(saved.endpoint); this.client = client; await client.list(); this.port = Number(new URL(saved.endpoint).port); return client; }
+        try { const client = this.connect(saved.endpoint); this.client = client; await client.list(); this.port = Number(new URL(saved.endpoint).port); return client; }
         catch { this.client?.close(); this.client = undefined; }
       }
     }
-    if (!launch) throw new Error('Cursor 联动窗口尚未打开，点击“在 Cursor Agents 中打开”连接');
+    if (!launch) throw new Error(this.options.surface === 'ide' ? 'Cursor 连接已断开，点击“在 Cursor 中打开”重新连接' : 'Cursor 联动窗口尚未打开，点击“在 Cursor Agents 中打开”连接');
     if (await (this.options.running || (() => userDesktopAppOpen('cursor')))()) throw new Error('请先保存并退出已打开的 Cursor，再从工作台打开桌面联动；不会关闭或改写现有窗口');
     await fs.mkdir(this.parent, { recursive: true });
     // A failed/uncertain launch is not automatically repeated by another Workbench instance.
@@ -112,14 +118,14 @@ export class CursorDesktopService implements CursorDesktopIntegration {
       await lock.writeFile(JSON.stringify({ pid: process.pid }));
       this.directory ||= await (this.options.privateDirectory || privateBridgeDirectory)(this.parent);
       const port = await freePort();
-      await (this.options.launch || launchCursor)(cwd, port);
+      await this.launch(cwd, port);
       let endpoint: string | undefined;
       for (let i = 0; i < 50 && !this.closed; i++) { try { endpoint = await (this.options.discover || discover)(port); break; } catch { await pause(200); } }
       if (!endpoint) throw new Error('Cursor 已启动但联动尚未就绪，请保存并退出 Cursor 后重新连接');
       const record = path.join(this.directory, 'desktop.json');
       await fs.writeFile(record, JSON.stringify({ endpoint }), { mode: 0o600 });
       await fs.writeFile(activeFile, JSON.stringify({ file: record }), { mode: 0o600 });
-      this.client = (this.options.connect || (value => new CursorDesktopCdp(value)))(endpoint);
+      this.client = this.connect(endpoint);
       this.port = port;
       // Window initialization may lag behind the debug endpoint. Do not create a chat in another workspace.
       for (let i = 0; i < 50; i++) { if (await this.client.hasWorkspace(cwd)) return this.client; await pause(200); }
@@ -129,9 +135,9 @@ export class CursorDesktopService implements CursorDesktopIntegration {
   private async workspace(client: CursorDesktopClient, cwd: string) {
     if (await client.hasWorkspace(cwd)) return;
     if (!this.port) throw new Error('Cursor 联动记录无效');
-    await (this.options.launch || launchCursor)(cwd, this.port);
+    await this.launch(cwd, this.port);
     for (let i = 0; i < 50; i++) { if (await client.hasWorkspace(cwd)) return; await pause(200); }
-    throw new Error('Cursor Agents 项目尚未就绪，请在侧栏添加并展开对应本地目录');
+    throw new Error(this.options.surface === 'ide' ? 'Cursor 工作目录尚未打开，请在普通 IDE 中打开原工作目录后重试' : 'Cursor Agents 项目尚未就绪，请在侧栏添加并展开对应本地目录');
   }
   async list(cwd: string, launch = false) { const client=await this.ensure(launch,cwd); if(launch)await this.workspace(client,cwd);return client.list(); }
   async prepare(session: AgentSession, launch = true, persist?: () => Promise<void>) {

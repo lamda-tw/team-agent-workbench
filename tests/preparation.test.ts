@@ -8,12 +8,14 @@ import { execFileSync } from 'node:child_process';
 import { Workbench } from '../src/core/workbench';
 import { Store } from '../src/core/store';
 import { applyPreparation, contributionDirectory, discoverDestinations, preparationFieldContract, preparationWritingGuide } from '../src/core/preparation';
-import { contributionCategories, contributionCategoryFields } from '../src/shared/content';
+import { contributionCategories, contributionCategoryFields, contributionTitle } from '../src/shared/content';
 import { applyContentMerge } from '../src/core/content-merge';
 import type { Draft, RemoteBinding } from '../src/shared/types';
 import { LocalAdminConnection } from '../src/admin/local-connection';
 import { memberProfile } from './fixtures/member-profile';
 import { diskPath } from '../src/core/local-space';
+import { preparationSnapshot } from '../src/core/preparation-snapshot';
+import { randomUUID } from 'node:crypto';
 // @ts-expect-error JS protocol fixture.
 import { authLauncher } from './fixtures/auth-launcher.mjs';
 // @ts-expect-error JS SFTP fixture.
@@ -54,7 +56,7 @@ test('result names stay in the draft until personal save and never rewrite submi
     assert.equal(artifact.body, body); assert.equal(artifact.selected, selected);
     assert.equal(wb.conclusions(offlineProjectId).length, 0);
     await wb.saveDraftPersonal(draft.id, [artifact.id]);
-    assert(wb.conclusions(offlineProjectId).some(item => item.title === '【探索记录】 人工修改的短名称'));
+    assert(wb.conclusions(offlineProjectId).some(item => item.title === contributionTitle('finding','人工修改的短名称')));
     assert.throws(() => wb.renameDraftResult(draft.id, '  ', artifact.id), /名称/);
     await assert.rejects(wb.renameDraftResult(draft.id, '名字', 'missing'), /不存在/);
     const originalTitle = artifact.title; draft.submitted = artifact.submitted = 'frozen-transfer';
@@ -135,7 +137,7 @@ test('reorganization creates preserved incremental or full tasks from an exact m
   } finally { await wb.close(); await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
 });
 
-test('local shared filesystem: discover descriptions, auto destination, explicit upload, immutable package, teammate visibility and live permission denial', async () => {
+test('legacy category drafts on local storage retain upload, immutable packages, teammate visibility, merges and permission checks', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'wb-prepare-local-')), share = path.join(root, 'share'); await fs.mkdir(share);
   const admin = new LocalAdminConnection(() => {}), wb = new Workbench(path.join(root, 'alice'), () => {}, () => {}), bob = new Workbench(path.join(root, 'bob'), () => {}, () => {});
   const fixture = await authLauncher(path.join(root, 'cli'), { status: 'ready', turn: 'success', turnDelay: 500 });
@@ -154,7 +156,14 @@ test('local shared filesystem: discover descriptions, auto destination, explicit
     await fixture.write({ status: 'ready', turn: 'success', turnDelay: 800, preparationResult: { ...result, destinationId: selected.id } });
     const s = await wb.createSession('codex', root, p.id); await wb.renameSession(s.id, '覆盖率验证会话'); assert.equal(s.title, '覆盖率验证会话');
     await wb.saveHandoff(s.id, '# 已完成\nhttps://github.com/owner/repo\n材料原始内容');
+    // A saved category-format draft from the earlier release must still finish,
+    // upload and merge without being converted to the new one-project profile.
+    const legacyId=randomUUID(),legacyBase=path.join(wb.store.root,'drafts',legacyId),legacyInput=path.join(legacyBase,'input');
+    const frozen=await preparationSnapshot(s,legacyInput);
+    wb.store.drafts.push({id:legacyId,sessionId:s.id,sourceSessionTitle:s.title,title:'待恢复的旧版分类整理',body:'',files:frozen.files,snapshot:frozen.snapshot,binding:structuredClone(s.binding),inputDir:legacyInput,outputPath:path.join(legacyBase,'draft.md'),createdAt:new Date().toISOString(),generation:'error',preparationVersion:3,resultRules:{contract:4,categories:['capability','exploration','todo']}});
+    await wb.store.save();
     const [d, same] = await Promise.all([wb.prepare(s.id), wb.prepare(s.id)]); assert.equal(d.id, same.id);
+    assert.equal(d.id,legacyId);await wb.retryPreparation(d.id);
     await wb.saveDraftSupplement(d.id, '人工补充：下轮补充边界用例。', '');
     await assert.rejects(wb.submitDraft(d.id));
     await until(() => d.generation === 'ready'); assert.equal(d.target, p.uploadPath + '/explorations'); assert.equal(wb.store.transfers.length, 0); assert(d.generationStartedAt); assert(d.generationFinishedAt);
