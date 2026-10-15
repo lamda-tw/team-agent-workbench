@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { MessageSquare, X } from 'lucide-react';
 import type { AgentSession, FilePreview, Project } from '../shared/types';
 import { visibleImportedReply, type QuestionFile, type QuestionInbox, type QuestionMember, type TeamQuestion } from '../shared/questions';
@@ -88,28 +88,18 @@ export function questionAutoLock(inbox: QuestionInbox | undefined, sessionId: st
   const peer = question?.recipients.find(item => item.username === dialogue.peer);
   return { name: peer?.name || dialogue.peer, title: question?.title || '提问', suggested: !!dialogue.suggested || !!peer?.endSuggestedAt };
 }
-export function QuestionDetail({ question: q, inbox, username, sessions, session, changed, onPlace, onUnplace }: { question: TeamQuestion; inbox: QuestionInbox; username: string; sessions: AgentSession[]; session?: AgentSession; changed: () => Promise<void>; onPlace?: (sessionId: string, text: string) => void; onUnplace?: (sessionId: string) => void }) {
+export function QuestionDetail({ question: q, inbox, username, sessions, session, changed, onPlace, onUnplace, onBack }: { question: TeamQuestion; inbox: QuestionInbox; username: string; sessions: AgentSession[]; session?: AgentSession; changed: () => Promise<void>; onPlace?: (sessionId: string, text: string) => void; onUnplace?: (sessionId: string) => void; onBack?: () => void }) {
   const own = q.recipients.find(r => r.username === username), author = q.author === username;
   const [laneText, setLaneText] = useState<Record<string, string>>({}), [laneFiles, setLaneFiles] = useState<Record<string, StagedFile[]>>({}), [laneHeight, setLaneHeight] = useState(QUESTION_COMPOSER_DEFAULT);
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [placing, setPlacing] = useState('');
   const [ack, setAck] = useState<{ peer: string; kind: 'send' | 'auto' | 'stop' | 'close'; body?: string }>();
   const followDraft = useRef<Record<string, { payload: string; id: string }>>({});
   const working = useRef(false);
-  const scrollPanel = useRef<HTMLElement | null>(null);
-  const committedHeight = useRef(laneHeight);
   const linked = sessions.find(s => s.id === (author ? q.sessionId : own?.sessionId));
   const job = [...inbox.jobs].reverse().find(j => j.questionId === q.id && j.mode !== 'import' && j.mode !== 'auto' && j.mode !== 'fill'), active = !!job && ['queued', 'running', 'ready'].includes(job.phase);
   const inDialogue = !!own && (!!own.sessionId || own.answers.length > 0 || own.state !== 'pending');
   useEffect(() => { if (questionUnread(q, inbox)) void window.workbench.call('question.read', { id: q.id, revision: q.activityRevision }).then(changed).catch(e => setError(e.message)); }, [q.id, q.activityRevision]);
-  useLayoutEffect(() => {
-    const delta = laneHeight - committedHeight.current;
-    committedHeight.current = laneHeight;
-    if (delta && scrollPanel.current) scrollPanel.current.scrollTop += delta;
-  }, [laneHeight]);
-  const resizeLane = (height: number, anchor: HTMLElement) => {
-    scrollPanel.current = anchor.closest('.team-question-panel-body');
-    setLaneHeight(height);
-  };
+  const resizeLane = (height: number) => setLaneHeight(height);
   const run = async (action: string, payload: object) => { if (working.current) return false; working.current = true; setBusy(true); setError(''); try { await window.workbench.call(action, payload); await changed(); return true; } catch (e: any) { setError(e.message); return false; } finally { working.current = false; setBusy(false); } };
   const pickLane = async (username: string) => {
     setError('');
@@ -118,10 +108,7 @@ export function QuestionDetail({ question: q, inbox, username, sessions, session
       setLaneFiles(current => { const next = [...(current[username] || [])]; for (const file of added) if (!next.some(item => item.id === file.id) && next.length < 30) next.push(file); return { ...current, [username]: next }; });
     } catch (reason: any) { setError(reason.message); }
   };
-  return <section className="team-question-detail"><div className="row"><h3>{q.title}</h3><span className="spacer"/><span className="badge">{q.closedAt ? '已关闭' : '开放'}</span></div><p className="muted small">{q.authorName} · {time(q.createdAt)}</p><div className="team-question-text">{q.body}</div><QuestionFileList projectId={q.projectId} questionId={q.id} files={q.files}/>{q.context && <details><summary>补充资料</summary><div className="team-question-text">{q.context}</div></details>}
-    {q.closedAt && <p className="callout">提问已于 {time(q.closedAt)} 结束，不再接收答复。已关联的 Session 保留，需要结束时请在 Session 中手动关闭。</p>}
-    {author && <p className="muted small">{q.recipients.filter(r => r.answers.length).length}/{q.recipientCount} 人已回复 · 每人一条对话</p>}
-    {q.recipients.map(r => {
+  const lanes = q.recipients.map(r => {
       const peer = author ? r.username : q.author, peerName = author ? r.name : q.authorName;
       const dialogue = author ? inbox.dialogues?.find(item => item.questionId === q.id && item.peer === r.username) : undefined;
       const receiverAuto = !author && !!linked && !linked.closedAt && inbox.replyModes?.[q.id] !== 'manual';
@@ -157,7 +144,7 @@ export function QuestionDetail({ question: q, inbox, username, sessions, session
         });
       };
       const status = q.closedAt ? '已结束' : automatic ? (suggested ? '建议结束' : '自动对话中') : r.answers.length ? `${r.answers.length} 条答复` : ({ pending: '待回复', linked: '已关联', running: '回答中', replied: '已回复' })[r.state];
-      return <section className="team-question-replies" key={r.username}>
+      const thread = <section className="team-question-replies" key={r.username}>
         <div className="team-question-lane-head"><b>{peerName}</b><small className="muted">{status}</small></div>
         <div className="team-question-thread">{turns.map(turn => {
           const placed = !!turn.answerId && inbox.jobs.some(job => job.sessionId === linked?.id && job.phase !== 'error' && job.phase !== 'closed' && (job.sourceId === turn.answerId || job.covered?.includes(turn.answerId!)));
@@ -165,7 +152,8 @@ export function QuestionDetail({ question: q, inbox, username, sessions, session
           const acknowledged = placed || (placing === turn.answerId && !failed);
           return <article key={turn.id} className={'team-question-turn' + (turn.mine ? ' mine' : '')}><span className="who">{turn.who} · {time(turn.at)}</span><div className="team-question-text">{turn.body}</div><QuestionFileList projectId={q.projectId} questionId={q.id} files={turn.files}/>{author && !q.closedAt && !dialogue && turn.answerId && linked && !linked.closedAt && <button className={'secondary compact team-question-import' + (acknowledged ? ' is-placed' : '')} disabled={busy || acknowledged} onClick={() => { const answerId = turn.answerId!, sessionId = linked.id; const introduced = inbox.jobs.some(job => job.questionId === q.id && job.sessionId === sessionId && ['tracked', 'sent', 'ready'].includes(job.phase)); setPlacing(answerId); onPlace?.(sessionId, visibleImportedReply(introduced, q.title, r.name, turn.body, turn.files)); void run('question.import', { projectId: q.projectId, id: q.id, sessionId, answerId }).then(ok => { if (!ok) { setPlacing(current => current === answerId ? '' : current); onUnplace?.(sessionId); } }); }}>{acknowledged ? '已放入 Session' : '引入到 Session'}</button>}</article>;
         })}{pendingSend && !turns.some(turn => turn.mine && turn.body === pendingSend) && <article className="team-question-turn mine is-pending" role="status"><span className="who">我 · 刚刚</span><div className="team-question-text">{pendingSend}</div><p className="team-question-ack">已写入对话，正在送达。</p></article>}{!turns.length && !pendingSend && <p className="muted small">还没有往来。</p>}</div>
-        {!q.closedAt && !pendingClose && <div className={'team-question-composer' + (autoNow ? ' is-auto' : '')}>
+      </section>;
+      const composer = !q.closedAt && !pendingClose && <div className={'team-question-composer' + (autoNow ? ' is-auto' : '')}>
           {!autoNow && <QuestionResizeHandle height={laneHeight} resize={resizeLane}/>}
           <textarea readOnly={autoNow} style={{ height: laneHeight }} maxLength={12000} aria-label={`回复${peerName}`} value={autoNow ? '' : (laneText[r.username] || '')} placeholder={autoNow ? `正在与${peerName}自动往返。新的回复会出现在上面的对话里，这里暂时不能手动发送。` : (author ? '继续提问' : '回复对方')} onChange={e => { if (!autoNow) setLaneText(current => ({ ...current, [r.username]: e.target.value })); }} onKeyDown={e => { if (autoNow) return; if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && e.nativeEvent.keyCode !== 229) { e.preventDefault(); if (!e.repeat) sendMessage(); } }}/>
           {author && !autoNow && !!lane.length && <div className="team-question-file-row">{lane.map(file => <span className="team-question-file-chip" key={file.id}><span>{file.name}</span><button type="button" className="text-button" disabled={busy} onClick={() => void window.workbench.call('question.files.remove', { id: file.id }).then(() => setLaneFiles(current => ({ ...current, [r.username]: (current[r.username] || []).filter(item => item.id !== file.id) })), reason => setError(reason.message))}>移除</button></span>)}</div>}
@@ -183,11 +171,23 @@ export function QuestionDetail({ question: q, inbox, username, sessions, session
           {pendingStop && <p className="team-question-ack" role="status">已停止自动，可以继续手动发送。</p>}
           {!author && job?.phase === 'error' && <p className="muted small team-question-composer-status">{job.error}</p>}
           {!author && job?.phase === 'ready' && job.error && <p className="muted small team-question-composer-status">答复已保留，连接恢复后自动送达。</p>}
-        </div>}
-      </section>;
-    })}
-    {ack?.kind === 'close' && !q.closedAt && <p className="team-question-ack" role="status">正在结束这条提问。结束后不再接收新的答复。</p>}
-    {error && <p className={error === '这条回复已经引入当前 Session' ? 'team-question-note' : 'inline-error'} role={error === '这条回复已经引入当前 Session' ? 'status' : 'alert'}>{error}</p>}
+        </div>;
+      return { username: r.username, peerName, thread, composer };
+    });
+  const docked = lanes.some(lane => lane.composer);
+  return <section className="team-question-detail">
+    <div className="team-question-detail-scroll">
+      {onBack && <button className="text-button" onClick={onBack}>返回问题列表</button>}
+      <div className="row"><h3>{q.title}</h3><span className="spacer"/><span className="badge">{q.closedAt ? '已关闭' : '开放'}</span></div><p className="muted small">{q.authorName} · {time(q.createdAt)}</p><div className="team-question-text">{q.body}</div><QuestionFileList projectId={q.projectId} questionId={q.id} files={q.files}/>{q.context && <details><summary>补充资料</summary><div className="team-question-text">{q.context}</div></details>}
+      {q.closedAt && <p className="callout">提问已于 {time(q.closedAt)} 结束，不再接收答复。已关联的 Session 保留，需要结束时请在 Session 中手动关闭。</p>}
+      {author && <p className="muted small">{q.recipients.filter(r => r.answers.length).length}/{q.recipientCount} 人已回复 · 每人一条对话</p>}
+      {lanes.map(lane => lane.thread)}
+    </div>
+    {(docked || (ack?.kind === 'close' && !q.closedAt) || error) && <div className="team-question-dock">
+      {ack?.kind === 'close' && !q.closedAt && <p className="team-question-ack" role="status">正在结束这条提问。结束后不再接收新的答复。</p>}
+      {lanes.map(lane => lane.composer && <div key={lane.username}>{lanes.length > 1 && <span className="team-question-dock-label">{author ? `继续向${lane.peerName}提问` : `回复${lane.peerName}`}</span>}{lane.composer}</div>)}
+      {error && <p className={error === '这条回复已经引入当前 Session' ? 'team-question-note' : 'inline-error'} role={error === '这条回复已经引入当前 Session' ? 'status' : 'alert'}>{error}</p>}
+    </div>}
   </section>;
 }
 
@@ -195,7 +195,7 @@ export function QuestionPanel({ inbox = empty, selectedId, session, username, se
   const items = inbox.items.filter(q => session && q.projectId === session.binding?.project.id && (q.sessionId === session.id || q.recipients.some(r => r.username === username && (!r.sessionId || r.sessionId === session.id)))).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   const q = items.find(item => item.id === selectedId);
   return <aside className="team-question-panel" aria-label="成员提问"><header className="row"><MessageSquare size={18}/><h3>提问</h3><span className="spacer"/><button className="icon" aria-label="关闭提问窗口" onClick={close}><X size={18}/></button></header><div className="team-question-panel-body">
-    {!connected && <p className="callout">连接团队账号后，可发送问题和答复。</p>}{inbox.error && <p className="inline-error">{inbox.error}</p>}
-    {q ? <><button className="text-button" onClick={() => select('session')}>返回问题列表</button><QuestionDetail key={q.id} question={q} inbox={inbox} username={username} sessions={sessions} session={session} changed={changed} onPlace={onPlace} onUnplace={onUnplace}/></> : <>{session && !session.closedAt && connected && <QuestionComposer key={session.id} session={session} sent={item => { select(item.id); void changed(); }}/>}<h3>与当前 Session 有关的问题</h3>{items.map(item => <QuestionCard key={item.id} question={item} unread={questionUnread(item, inbox)} open={() => select(item.id)}/>)}{!items.length && <p className="muted small">暂无问题。收到的问题也会显示在动态中。</p>}</>}
+    {(!connected || inbox.error) && <div className="team-question-panel-note">{!connected && <p className="callout">连接团队账号后，可发送问题和答复。</p>}{inbox.error && <p className="inline-error">{inbox.error}</p>}</div>}
+    {q ? <QuestionDetail key={q.id} question={q} inbox={inbox} username={username} sessions={sessions} session={session} changed={changed} onPlace={onPlace} onUnplace={onUnplace} onBack={() => select('session')}/> : <div className="team-question-panel-scroll">{session && !session.closedAt && connected && <QuestionComposer key={session.id} session={session} sent={item => { select(item.id); void changed(); }}/>}<h3>与当前 Session 有关的问题</h3>{items.map(item => <QuestionCard key={item.id} question={item} unread={questionUnread(item, inbox)} open={() => select(item.id)}/>)}{!items.length && <p className="muted small">暂无问题。收到的问题也会显示在动态中。</p>}</div>}
   </div></aside>;
 }

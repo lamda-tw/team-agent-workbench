@@ -191,7 +191,9 @@ test('both sides share the conversation composer; recipient can type before link
   const render = (username: string, replyModes?: Record<string, 'manual' | 'auto'>, sessions: AgentSession[] = []) => renderToStaticMarkup(React.createElement(QuestionDetail, { question: questionView(q, username)!, username, inbox: { items, jobs: [], read: {}, replyModes }, sessions, changed: async () => {} }));
   for (const markup of [render('alice'), render('bob')]) {
     assert.match(markup, /team-question-thread/);
-    assert.match(markup, /team-question-composer[\s\S]*<textarea[\s\S]*team-question-composer-bar[\s\S]*结束提问[\s\S]*team-question-send[\s\S]*发送/);
+    assert.match(markup, /team-question-detail-scroll[\s\S]*team-question-thread/);
+    assert.match(markup, /team-question-dock[\s\S]*team-question-composer[\s\S]*<textarea[\s\S]*team-question-composer-bar[\s\S]*结束提问[\s\S]*team-question-send[\s\S]*发送/);
+    assert.doesNotMatch(markup.slice(0, markup.indexOf('team-question-dock')), /team-question-composer/);
     assert.doesNotMatch(markup, /team-question-answer|关联并回答|选择回答问题的 Session/);
   }
   assert.match(render('bob'), /aria-label="回复alice"/);
@@ -320,7 +322,7 @@ test('closed question UI retains link and answers, removes answer and closure ac
   assert.match(answerSide, />AI填入</);
   assert.match(answerSide, /还没有 AI 生成的回答/);
   const autoMarkup = renderToStaticMarkup(React.createElement(QuestionDetail, { question: openQuestion, inbox: { items: openItems, jobs: [], read: {}, dialogues: [{ questionId: openQuestion.id, projectId, peer: 'bob', sessionId: openQuestion.sessionId, mode: 'auto' }] }, username: 'alice', sessions: [], changed: async () => {} }));
-  const autoLane = autoMarkup.split('team-question-composer is-auto')[1].split('team-question-replies')[0];
+  const autoLane = autoMarkup.split('team-question-composer is-auto')[1].split('team-question-dock-label')[0];
   assert.match(autoLane, /boxed[\s\S]*>结束</);
   assert.match(autoLane, /boxed[\s\S]*>停止自动</);
   assert.match(autoLane, /正在与bob自动往返/);
