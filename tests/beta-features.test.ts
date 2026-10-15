@@ -3,6 +3,21 @@ import assert from 'node:assert/strict';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { BetaFeaturesModal, betaFeatureStates } from '../src/renderer/beta-features';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { Store } from '../src/core/store';
+
+test('Cursor Beta selection survives saving settings and restarting the store', async () => {
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'workbench-beta-persistence-'));
+  try {
+    const store=new Store(root);await store.init();
+    store.settings.betaFeatures={account:{cursorDesktopSync:true,codexDesktopSync:false}};
+    await store.save();const reopened=new Store(root);await reopened.init();
+    assert.equal(reopened.settings.betaFeatures?.account.cursorDesktopSync,true);
+    assert.equal(reopened.settings.betaFeatures?.account.codexDesktopSync,false);
+  } finally { await fs.rm(root,{recursive:true,force:true}); }
+});
 
 test('legacy combined Beta choice remains enabled for both abilities', () => {
   assert.deepEqual(betaFeatureStates({ sessionHandoff: true }), { sessionHandoff: true, subsessions: true, codexDesktopSync: false, cursorDesktopSync: false });

@@ -101,7 +101,8 @@ test('failed retry reuses the frozen conversation, project brief and historical 
     assert.equal(draft.generation, 'ready', draft.generationError || '应完成模拟整理'); assert.deepEqual(draft.resultRules!.categories, ['todo']);
     assert.equal(await fs.readFile(file, 'utf8'), frozen); assert.equal(await fs.readFile(path.join(draft.inputDir, 'conversation.json'), 'utf8'), conversation);
     const attempt = wb.session(draft.prepareSessionId!);
-    assert(attempt.messages.some(item => item.role === 'user' && item.text.includes('本次用户选择的整理方面：["todo"]') && item.text.includes('上一轮只覆盖均值误差。') && !item.text.includes('后续探索修改了原观点。')));
+    assert(attempt.messages.some(item => item.role === 'user' && item.text.includes('每个项目只整理一条') && item.text.includes('上一轮只覆盖均值误差。') && !item.text.includes('后续探索修改了原观点。')));
+    assert.equal(draft.organizationFormat,'project-profile-v1');
     assert.deepEqual(cachedPreparationBrief(projectBriefMarkdown('转换', brief, 'alice', 'now')).objectives, brief.objectives);
   } finally { await wb.close(); await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
 });

@@ -29,6 +29,24 @@ async function readyDraft(wb: Workbench, session: AgentSession) {
   rememberPreparationProgress(session, [draft]); await wb.store.save(); return draft;
 }
 
+test('a persisted legacy empty category result requires confirmation and is not migrated to a project profile',async()=>{
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'wb-preparation-legacy-empty-')),wb=new Workbench(path.join(root,'data'),()=>{},()=>{});
+  try {
+    await wb.store.init();grantTestWorkspace(wb,root);const session=await wb.createSession('codex',root,offlineProjectId);
+    session.messages.push(message('old'));const previous=await readyDraft(wb,session);
+    session.messages.push(message('new'));const id=randomUUID(),inputDir=path.join(wb.store.root,'drafts',id,'input');
+    const{snapshot,files}=await preparationSnapshot(session,inputDir);
+    const draft:Draft={id,sessionId:session.id,title:'',body:'',files,snapshot,binding:session.binding,generation:'ready',createdAt:new Date().toISOString(),inputDir,outputPath:path.join(inputDir,'draft.md'),resultRules:{contract:4,categories:['todo']}};
+    applyPreparation(draft,JSON.stringify({artifacts:[],sourceReview:{status:'complete',inputCount:snapshot.messageCount,conversationHash:snapshot.conversationHash},emptyReason:{code:'no_reusable_content',explanation:'没有可独立保留的新内容。',existingResultIds:[]}}));
+    wb.store.drafts.push(draft);rememberPreparationProgress(session,wb.store.drafts);
+    assert.equal(session.preparationCheckpoint?.draftId,previous.id);
+    await wb.confirmEmptyPreparation(draft.id);assert.equal(session.preparationCheckpoint?.draftId,draft.id);
+    await wb.store.save();const restored=new Store(wb.store.root);await restored.init();
+    assert.equal(restored.drafts.find(item=>item.id===id)?.organizationFormat,undefined);
+    assert.ok(restored.drafts.find(item=>item.id===id)?.emptyResult?.confirmedAt);
+  } finally {await wb.close();await fs.rm(root,{recursive:true,force:true,maxRetries:10,retryDelay:100});}
+});
+
 for (const deleteRecord of [false, true]) for (const deleteResult of [false, true]) test(`orthogonal deletion: record=${deleteRecord}, result=${deleteResult}, progress and Session references survive`, async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'wb-preparation-matrix-'));
   let wb = new Workbench(path.join(root, 'data'), () => {}, () => {});
@@ -59,11 +77,11 @@ for (const deleteRecord of [false, true]) for (const deleteResult of [false, tru
     assert.equal(next.baseDraftId, draft.id);
     assert.deepEqual(JSON.parse(await fs.readFile(path.join(next.inputDir, 'conversation.json'), 'utf8')).map((item: any) => item.id), ['new']);
     await until(() => next.generation === 'ready');
-    assert.equal(restored.preparationCheckpoint?.draftId, draft.id, 'empty output must be confirmed before progress advances');
-    await wb.confirmEmptyPreparation(next.id);
-    assert.equal(restored.preparationCheckpoint?.draftId, next.id, 'explicit confirmation advances progress');
+    assert.equal(next.organizationFormat,'project-profile-v1');
+    assert.equal(restored.preparationCheckpoint?.draftId,next.id,'a completed project profile advances its own frozen snapshot');
+    await assert.rejects(wb.confirmEmptyPreparation(next.id),/没有新成果/);
     assert.equal(wb.conclusions(offlineProjectId).length, deleteResult ? 0 : 1);
-    const full = await wb.prepare(restored.id, [], undefined, 'full');
+    const full = await wb.reorganizePreparation(next.id,'full');
     assert.deepEqual(JSON.parse(await fs.readFile(path.join(full.inputDir, 'conversation.json'), 'utf8')).map((item: any) => item.id), ['old', 'new']);
     await until(() => full.generation === 'ready');
   } finally { await wb.close(); await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }

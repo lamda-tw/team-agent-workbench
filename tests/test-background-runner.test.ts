@@ -18,7 +18,7 @@ test('a missing selected test fails before starting the test suite', async () =>
 });
 
 test('the background runner refuses desktop tests and paths outside the test directory', async () => {
-  for (const selection of ['tests/launcher.test.ts', 'tests/egress.test.ts', 'src/core/store.ts', '../outside.test.ts']) {
+  for (const selection of ['tests/launcher.test.ts', 'tests/egress.test.ts', 'tests/codex-process.test.ts', 'src/core/store.ts', '../outside.test.ts']) {
     await assert.rejects(run(process.execPath, [runner, selection], { cwd: root, windowsHide: true, timeout: 5000 }), (error: any) => {
       assert.equal(error.code, 1);
       assert.match(error.stderr, /此测试不属于后台测试范围/);

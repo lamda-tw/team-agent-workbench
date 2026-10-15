@@ -33,7 +33,7 @@ test('blank directions leave the default prompt unchanged; custom directions app
   assert(prompt.includes('未提供方向的类别使用默认提示词'));
   assert(prompt.includes('不得为了满足方向编造材料中没有的信息'));
   assert.equal(preparationPrompt(draft, [], true), merge);
-  const profile = preparationPrompt({ ...draft, resultRules: { contract: 4, categories: ['exploration', 'capability'] } }, []);
+  const profile = preparationPrompt({ ...draft, organizationFormat: 'project-profile-v1', resultRules: { contract: 4, categories: ['exploration', 'capability'] } }, []);
   assert(profile.includes('每个项目只整理一条'));
   assert(!profile.includes('重点解释性能的适用条件'));
 });

@@ -88,6 +88,8 @@ export function sameProjectOrganization(left: Record<string, string> | undefined
 }
 
 export interface OrganizationDraftRef {
+  organizationFormat?: 'project-profile-v1';
+  artifacts?: readonly { fields?: Record<string, string> }[];
   id: string;
   binding?: { project: { id: string } };
   resultRules?: { contract?: number };
@@ -97,8 +99,13 @@ export interface OrganizationDraftRef {
   generation?: string;
 }
 
-export function isProjectOrganizationDraft(draft: { resultRules?: { contract?: number }; mergeSources?: readonly unknown[] }) {
-  return draft.resultRules?.contract === 4 && !draft.mergeSources?.length;
+export function isProjectOrganizationDraft(draft: { organizationFormat?: string; artifacts?: readonly { fields?: Record<string, string> }[]; resultRules?: { contract?: number }; mergeSources?: readonly unknown[] }) {
+  if (draft.mergeSources?.length) return false;
+  if (draft.organizationFormat === 'project-profile-v1') return true;
+  // Contract 4 was already used by category-based drafts. Recognize earlier
+  // project profiles by their actual fields, never by that shared version alone.
+  const fields=draft.artifacts?.length===1?draft.artifacts[0].fields:undefined;
+  return draft.resultRules?.contract===4 && !!fields && projectOrganizationFields.every(field=>typeof fields[field.key]==='string');
 }
 
 export function organizationRefusal(drafts: readonly OrganizationDraftRef[], projectId: string, resumeId?: string) {

@@ -75,6 +75,8 @@ import { backgroundTextTask } from './background-text';
 import { writeHandoffAtomic } from './handoff-writer';
 import { CodexDesktopService, type CodexDesktopIntegration } from './codex-desktop-service';
 import { CursorDesktopService, type CursorDesktopIntegration } from './cursor-desktop-service';
+import { CursorFileService } from './cursor-file-service';
+import { isCursorFileSession } from '../shared/cursor-session-consistency';
 import { ProjectJournal } from './project-journal';
 import type { JournalEntry } from '../shared/project-journal';
 import type { ActivityChoice, ActivityActionResult } from '../shared/activity-assistant';
@@ -146,7 +148,7 @@ export class Workbench {
   desktopAppOpen: (provider: 'codex' | 'cursor') => Promise<boolean> = userDesktopAppOpen;
   accounts: ProviderAccounts;
   accountSync: AccountSync;
-  constructor(root: string, private broadcast: () => void, private notice: (message: string) => void, private preparationTimeoutMs = 10 * 60 * 1000, private providerEnvironment: (route?: SessionNetworkRoute) => NodeJS.ProcessEnv = () => ({}), private connectionReport?: (session: AgentSession, value: import('../shared/cli-connection').CliConnection) => void, readonly codexDesktop: CodexDesktopIntegration = new CodexDesktopService(), readonly cursorDesktop: CursorDesktopIntegration = new CursorDesktopService()) {
+  constructor(root: string, private broadcast: () => void, private notice: (message: string) => void, private preparationTimeoutMs = 10 * 60 * 1000, private providerEnvironment: (route?: SessionNetworkRoute) => NodeJS.ProcessEnv = () => ({}), private connectionReport?: (session: AgentSession, value: import('../shared/cli-connection').CliConnection) => void, readonly codexDesktop: CodexDesktopIntegration = new CodexDesktopService(), readonly cursorDesktop: CursorDesktopIntegration = new CursorFileService()) {
     this.assignmentUploads = new AssignmentUploads(root);
     this.store = new Store(root); this.remote = new SharedFiles(() => this.broadcast()); this.queue = new TransferQueue(this.store, this.remote, () => this.broadcast());
     this.journal = new ProjectJournal(this.store);
@@ -790,7 +792,7 @@ export class Workbench {
     return feature === 'subsessions' ? !!(features?.subsessions ?? features?.sessionHandoff) : !!features?.[feature];
   }
   async setBetaFeature(feature: BetaFeature, enabled: boolean) {
-    if (feature === 'cursorDesktopSync' && enabled) assertCursorSharedSessionAvailable();
+    if (feature === 'cursorDesktopSync' && enabled && !this.cursorDesktop.fileBridge) assertCursorSharedSessionAvailable();
     const profile = this.localProfile();
     if (!profile) throw new Error('请先连接团队账号');
     const key = accountIdentity(profile);
@@ -1053,7 +1055,7 @@ export class Workbench {
       if (switching) {
         this.clearCatalogCache();
         const runtimes = [...this.runtimes.values()]; this.runtimes.clear(); await Promise.all(runtimes.map(runtime => runtime.close()));
-          for (const session of this.store.sessions) if (session.cursorNative?.managed) this.cursorDesktop.release(session.id);
+          for (const session of this.store.sessions) if (session.cursorNative?.managed) await this.cursorDesktop.release(session.id);
       }
       this.store.settings.verifiedLocalWorkspace = canonicalLocal; this.store.settings.localWorkspace = canonicalLocal; this.store.settings.lastWorkspace = canonicalLocal;
       this.store.settings.connections = [result];
@@ -1348,7 +1350,23 @@ export class Workbench {
     if (!userText.trim()) throw new Error('请输入任务内容');
     const s = this.session(id); this.assertCanWork(s.binding);
     if (!questionRunId) { const autoPeer = this.questions.lockedPeer(id); if (autoPeer) throw new Error(`这个 Session 正在与${autoPeer}自动对话，不能手动发送`); }
-    if (s.cursorNative) assertCursorSharedSessionAvailable();
+    if (s.cursorNative) {
+      assertCursorSharedSessionAvailable(s);
+      if (s.closedAt || this.closing || this.stoppingSessions.has(id)) throw new Error('会话已关闭或正在停止');
+      if (this.sending.has(id)) throw new Error('上一条消息正在加入等待队列，请稍后发送');
+      if (sourceIds.length || capabilitySelections.length || questionRunId) throw new Error('请在 Cursor 原生窗口选择参考文件、Skill 和 MCP');
+      if(/^\s*\/(summarize|compact)(?:\s|$)/i.test(userText))throw new Error('请在 Cursor 原生窗口执行上下文压缩；压缩期间后续消息会等待');
+      if(Buffer.byteLength(userText)>200*1024)throw new Error('消息过长，请缩短后再发送');
+      if (s.cursorPendingSubmission && s.cursorPendingSubmission.text !== userText) throw new Error('上一条消息的入队结果尚未确认，请先核对等待队列');
+      this.sending.add(id);
+      try {
+        const runtime = await this.runtime(s); if(!(runtime instanceof AgentRuntime))throw new Error('原生 Cursor 运行器不匹配'); await runtime.ensureStarted();
+        const pending = s.cursorPendingSubmission ||= {id:randomUUID(),text:userText};
+        await this.store.save();
+        await runtime.rpc.request('cursor/nativeEnqueue',{sessionId:s.nativeId,id:pending.id,text:userText},10000,submitted);
+        delete s.cursorPendingSubmission; await this.store.save(); this.broadcast(); return true;
+      } finally { this.sending.delete(id); }
+    }
     if (s.provider === 'cursor' && this.configuringCursorPermissions) throw new Error('正在保存 Cursor 权限配置，请保存完成后再发送任务');
     if (s.closedAt) throw new Error('此会话已关闭，请先重新打开');
     if (this.sending.has(id) || this.steering.has(id) || ['running', 'approval', 'starting'].includes(s.status)) throw new Error('当前会话正在运行，可以切换到其他会话继续工作');
@@ -1459,12 +1477,17 @@ export class Workbench {
     const s = this.session(id);
     if (s.purpose !== 'work') throw new Error('请在整理结果页停止整理');
     if (this.stoppingSessions.has(id)) return;
-    if (!this.sending.has(id) && !['starting', 'running', 'approval'].includes(s.status)) return;
+    if(isCursorFileSession(s)){
+      this.stoppingSessions.add(id);
+      try{const runtime=await this.runtime(s);await runtime.ensureStarted();await runtime.cancel();s.stoppedAt=new Date().toISOString();await this.store.save();this.broadcast();}
+      finally{this.stoppingSessions.delete(id);}return;
+    }
+    if (!this.sending.has(id) && !['starting', 'running', 'approval'].includes(s.status) && !s.cursorQueue?.requests.some(request=>request.state==='queued')) return;
     this.stoppingSessions.add(id); if (this.sending.has(id)) this.canceledSends.add(id);
     s.stoppedAt = new Date().toISOString();
     try {
       const runtime = this.runtimes.get(id); this.runtimes.delete(id);
-      if (runtime) { void runtime.cancel().catch(() => {}); await runtime.close(); }
+      if (runtime) { if(isCursorFileSession(s)) {try{await runtime.cancel();}finally{await runtime.close();}}else {void runtime.cancel().catch(() => {});await runtime.close();} }
       this.deferredSettings.delete(id); s.settingsPending = undefined; s.permissions = undefined;
       s.status = 'idle'; s.error = undefined; s.approvals = []; await this.questions.sessionStopped(s); await this.store.save(); this.broadcast();
     } finally { this.stoppingSessions.delete(id); }
@@ -1474,7 +1497,7 @@ export class Workbench {
     s.closedAt = new Date().toISOString();
     const runtime = this.runtimes.get(id); this.runtimes.delete(id);
     if (runtime) await runtime.close();
-    if (s.cursorNative?.managed) this.cursorDesktop.release(id);
+    if (s.cursorNative?.managed) await this.cursorDesktop.release(id);
     this.deferredSettings.delete(id); s.settingsPending = undefined; s.permissions = undefined;
     s.status = 'idle'; s.approvals = []; await this.questions.sessionStopped(s); await this.store.save(); this.broadcast();
     this.ensureNativeTranscriptSync();
@@ -1502,9 +1525,39 @@ export class Workbench {
     const chats = await this.cursorDesktop.list(cwd, launch);
     return { provider: 'cursor' as const, groups: [...new Set(chats.map(chat=>chat.cwd))].map((cwd,position)=>({id:cwd,name:cwd,position})), sessions: chats.map(chat=>({nativeId:chat.nativeId,name:chat.title,cwd:chat.cwd,groupId:chat.cwd,updatedAt:0,linkedSessionId:this.store.sessions.find(s=>s.cursorNative&&s.nativeId===chat.nativeId&&this.ownsLocal(s.binding))?.id})) };
   }
-  async linkCursorDesktopSessions(_nativeIds: string[], _projectId: string): Promise<AgentSession[]> {
+  async linkCursorDesktopSessions(nativeIds: string[], projectId: string): Promise<AgentSession[]> {
     this.assertAccountReady(); this.assertWorkspace();
-    assertCursorSharedSessionAvailable();
+    if (!this.cursorDesktop.fileBridge) { assertCursorSharedSessionAvailable(); throw new Error('Cursor 原生联动不可用'); }
+    if (!this.betaFeatureEnabled('cursorDesktopSync')) throw new Error('请先开启 Cursor 原生联动 Beta');
+    return this.edit('native-import', async () => {
+      const ids = [...new Set(nativeIds.map(id=>id.toLowerCase()))];
+      if (!ids.length || ids.length>50 || ids.some(id=>!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id))) throw new Error('请选择有效的原生会话');
+      const catalog = await this.cursorDesktop.list('',false);
+      const sources = ids.map(id=>{
+        const existing=this.store.sessions.find(session=>session.provider==='cursor'&&[session.nativeId,session.nativeSourceId].some(value=>value?.toLowerCase()===id)&&this.ownsLocal(session.binding));
+        if(existing)throw new Error('「'+existing.title+'」已在工作台，不能重复关联');
+        const source=catalog.find(chat=>chat.nativeId.toLowerCase()===id);if(!source)throw new Error('请在 Cursor 普通 IDE 中打开所选会话后刷新');return source;
+      });
+      const added:AgentSession[]=[];
+      try {
+        for(const source of sources){
+          const session=await this.createSession('cursor',source.cwd,projectId,'work',undefined,undefined,'inherit',false,'direct');added.push(session);
+          session.title=source.title;session.nativeId=source.nativeId;session.nativeLive=true;session.cursorNative={managed:true,descriptorFile:'',transport:'ide-files-v1'};
+          await this.cursorDesktop.prepare(session,false,()=>this.store.save());await(await this.runtime(session)).ensureStarted();
+        }
+        await this.store.save();this.broadcast();return added;
+      }catch(error){for(const session of added){await this.cursorDesktop.release(session.id);await this.runtimes.get(session.id)?.close();this.runtimes.delete(session.id);this.store.sessions=this.store.sessions.filter(value=>value.id!==session.id);}await this.store.save();this.broadcast();throw error;}
+    },false);
+  }
+  async cursorQueueAction(id:string,action:'cancel'|'resume'|'reconcile'|'confirm'|'withdraw',requestId?:string,nativeMessageId?:string){
+    const session=this.session(id);this.assertCanWork(session.binding);assertCursorSharedSessionAvailable(session);if(session.closedAt)throw new Error('此会话已关闭');
+    const pending=session.cursorPendingSubmission;
+    if(action==='confirm'){if(!pending)throw new Error('没有待确认的提交');return this.send(id,pending.text);}
+    if(action==='withdraw'&&!pending)throw new Error('没有待确认的提交');
+    const runtime=await this.runtime(session);if(!(runtime instanceof AgentRuntime))throw new Error('原生 Cursor 运行器不匹配');await runtime.ensureStarted();
+    const result=await runtime.rpc.request('cursor/nativeQueueAction',{sessionId:session.nativeId,action:action==='withdraw'?'cancel':action,id:action==='withdraw'?pending!.id:requestId,...(action==='withdraw'?{text:pending!.text}:{}),nativeMessageId});
+    if(action==='withdraw'){if(!result.cancelled)throw new Error('这条消息已送达原生窗口，无法撤回；需要中止时请停止当前任务');delete session.cursorPendingSubmission;await this.store.save();this.broadcast();}
+    return result;
   }
   private nativeTranscriptFile(session: AgentSession) {
     if (!session.nativeLive || session.closedAt || session.purpose !== 'work' || !session.nativePath) return;
@@ -1706,7 +1759,7 @@ export class Workbench {
       try { await this.store.save(); }
       catch (error) { this.store.sessions = sessions; if (input) this.store.inputs[id] = input; this.store.activity.jobs = jobs; throw error; }
       await this.journal.remove(s);
-      if (s.cursorNative?.managed) this.cursorDesktop.release(id);
+      if (s.cursorNative?.managed) await this.cursorDesktop.release(id);
       clearTimeout(this.trajectoryTimers.get(id)); this.trajectoryTimers.delete(id);
       this.broadcast();
     }, false);
@@ -1887,6 +1940,7 @@ export class Workbench {
     prepared.binding = parent.binding ? structuredClone(parent.binding) : undefined;
     const draft: Draft = { sourceSessionTitle, id: draftId, sessionId: id, snapshot, preparationScope: scope, baseDraftId: checkpoint?.draftId, git, includeGit: source?.includeGit ?? !!git, prepareSessionId: prepared.id, preparationVersion: 3, concise: true, requestedCategories, supplement: source?.supplement || '', repoUrlOverride: source?.repoUrlOverride || '', title: sourceSessionTitle + (scope === 'incremental' ? ' · 增量成果' : ' · 成果'), body: '', files, binding, inputDir, outputPath: path.join(base, 'draft.md'), createdAt: new Date().toISOString() };
     draft.resultRules = resultRules;
+    draft.organizationFormat = !source || isProjectOrganizationDraft(source) ? 'project-profile-v1' : undefined;
     draft.preparationDirections = preparationDirections;
     this.store.drafts.unshift(draft); await this.runPreparation(draft); return draft;
   }

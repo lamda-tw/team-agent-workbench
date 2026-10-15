@@ -4,8 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-// Launchers and Windows certificate provisioning need separate, isolated desktop validation.
-const desktopOnly = new Set(['launcher.test.ts', 'egress.test.ts']);
+// OS launchers, certificates and process identity/termination need separate validation.
+const desktopOnly = new Set(['launcher.test.ts', 'egress.test.ts', 'codex-process.test.ts']);
 const selected = process.argv.slice(2);
 const files = selected.length ? await Promise.all(selected.map(async file => {
   const resolved = path.resolve(root, file);

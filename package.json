@@ -1,6 +1,6 @@
 {
   "name": "team-agent-workbench",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "private": true,
   "description": "Windows team workspace for local Codex, Cursor and Claude Code agents with Linux SFTP sharing",
   "main": "dist/user/main.cjs",
@@ -15,7 +15,7 @@
     "test:provider-paths": "tsx scripts/check-windows-provider-paths.ts",
     "test:handbook-labels": "python scripts/verify-handbook-labels.py",
     "test:handbook-ui": "node scripts/verify-handbook-ui-scenarios.mjs",
-    "test:desktop": "tsx --test --test-concurrency=1 tests/launcher.test.ts tests/egress.test.ts",
+    "test:desktop": "tsx --test --test-concurrency=1 tests/launcher.test.ts tests/egress.test.ts tests/codex-process.test.ts",
     "test:ui": "node scripts/smoke.mjs",
     "test:session-ui": "node scripts/session-experience-smoke.mjs",
     "test:handoff-ui": "node scripts/session-handoff-smoke.mjs",

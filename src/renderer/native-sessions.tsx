@@ -64,28 +64,29 @@ export function NativeSessionPicker({ provider, projectId, cursorDesktopBeta = f
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [groupId, setGroupId] = useState('');
+  const [nativeDesktop,setNativeDesktop] = useState(provider==='cursor'&&cursorDesktopBeta);
   const load = async () => {
     setLoading(true); setError('');
     try {
-      const value = await window.workbench.call<NativeSessionCatalog>('session.native.list', { provider });
+      const value = await window.workbench.call<NativeSessionCatalog>(nativeDesktop?'session.cursorDesktop.list':'session.native.list', nativeDesktop?{cwd:directory,launch:false}:{ provider });
       if (value.provider !== provider) throw new Error(provider === 'codex' ? '读到的不是 Codex 会话' : '读到的不是 Cursor 会话');
       setCatalog(value);
       setSelectedIds(current => current.filter(id => value.sessions.some(session => session.nativeId === id && canImportNativeSession(session))));
       setGroupId(current => current === '__ungrouped__' || value.groups.some(group => group.id === current) ? current : '');
-    } catch (loadError: any) { setCatalog(undefined); setError(loadError.message); }
+    } catch (loadError: any) { setCatalog(undefined); setError(nativeDesktop ? loadError.message.replace('点击“在 Cursor 中打开”重新连接', '点击上方“打开 Cursor 并读取会话”建立连接') : loadError.message); }
     finally { setLoading(false); }
   };
-  useEffect(() => { void load(); }, [provider]);
+  useEffect(() => { setSelectedIds([]);void load(); }, [provider,nativeDesktop,directory,projectId]);
   const selectable = catalog ? nativeSessionsInGroup(catalog, groupId).filter(canImportNativeSession) : [];
   const chosen = (catalog?.sessions || []).filter(session => canImportNativeSession(session) && selectedIds.includes(session.nativeId)).sort((left, right) => right.updatedAt - left.updatedAt || left.name.localeCompare(right.name, 'zh-CN'));
   const allSelected = selectable.length > 0 && selectable.every(session => selectedIds.includes(session.nativeId));
   const title = provider === 'codex' ? '接入 Codex 会话' : '接入 Cursor 会话';
-  const explanation = provider === 'codex' ? '按 Codex 项目查看，可以勾选多条，一次导入。已在工作台的会话不能重复导入。' : '导入已有 Cursor CLI 会话，继续其原有上下文。CLI 会话与 Cursor Agents 独立，当前不能关联为同一会话。';
+  const explanation = provider === 'codex' ? '按 Codex 项目查看，可以勾选多条，一次导入。已在工作台的会话不能重复导入。' : nativeDesktop ? '关联普通 IDE 窗口当前打开的 Cursor 会话；两端共用原生执行上下文。请保留关联会话打开，模型、权限和工具在 Cursor 中设置。' : '导入已有 Cursor CLI 会话。CLI 会话与原生窗口中的聊天独立。';
   const groups = catalog ? orderedNativeSessions(catalog).groups : [];
   const groupButton = (id: string, name: string, count: number) => <button type="button" key={id} aria-pressed={groupId === id} className={groupId === id ? 'selected' : ''} disabled={busy} onClick={() => setGroupId(id)}><span title={name}>{name}</span><small>{count}</small></button>;
   return <div className="modal-backdrop"><section className="modal wide native-session-modal" role="dialog" aria-modal="true" aria-labelledby="native-session-title"><header><h2 id="native-session-title">{title}</h2><button className="icon" aria-label="关闭窗口" disabled={busy} onClick={close}>×</button></header>
-    <div className="modal-body">{provider === 'cursor' && cursorDesktopBeta && <div className="row"><button className="secondary" disabled title={cursorSharedSessionUnavailable}>Agents 会话（暂不可关联）</button><button className="primary" disabled={busy || loading}>CLI 会话</button></div>}<p className="agent-notes-explanation">{explanation}</p>{error && <div className="inline-error" role="alert">{error}</div>}
-      {loading ? <p className="muted">正在读取会话…</p> : catalog && !catalog.sessions.length ? <p className="muted">没有读到{providerLabel(provider)}会话。</p> : catalog && <div className="native-session-layout">
+    <div className="modal-body">{provider === 'cursor' && cursorDesktopBeta && <div className="row"><button className={nativeDesktop?'primary':'secondary'} disabled={busy||loading} onClick={()=>setNativeDesktop(true)}>原生会话 · Beta</button><button className={!nativeDesktop?'primary':'secondary'} disabled={busy || loading} onClick={()=>setNativeDesktop(false)}>CLI 会话</button></div>}<p className="agent-notes-explanation">{explanation}</p>{nativeDesktop&&<button className="secondary" disabled={busy||loading||!directory} onClick={()=>void(async()=>{setLoading(true);setError('');try{await window.workbench.call('session.cursorDesktop.list',{cwd:directory,launch:true});await load();}catch(e:any){setError(e.message);}finally{setLoading(false);}})()}>打开 Cursor 并读取会话</button>}{error && <div className="inline-error" role="alert">{error}</div>}
+      {loading ? <p className="muted">正在读取会话…</p> : catalog && !catalog.sessions.length ? <p className="muted">{nativeDesktop ? '请在 Cursor 普通 IDE 中打开要关联的聊天，再点击“刷新”。' : `没有读到${providerLabel(provider)}会话。`}</p> : catalog && <div className="native-session-layout">
         <nav className="native-project-nav" aria-label={provider === 'codex' ? 'Codex 项目' : 'Cursor 工作目录'}>
           {groupButton('', '全部会话', catalog.sessions.length)}
           {groups.map(group => groupButton(group.id, group.name, nativeSessionsInGroup(catalog, group.id).length))}
@@ -96,7 +97,7 @@ export function NativeSessionPicker({ provider, projectId, cursorDesktopBeta = f
       </div>}
     </div><footer><button className="secondary" disabled={busy} onClick={close}>取消</button><button className="secondary" disabled={loading || busy} onClick={() => void load()}>刷新</button><button className="primary" disabled={!chosen.length || busy || loading} onClick={() => void (async () => {
       if (!chosen.length) return; setBusy(true); setError('');
-      try { linked(await window.workbench.call<AgentSession[]>('session.native.linkMany', { provider, nativeIds: chosen.map(session => session.nativeId), projectId })); }
+      try { linked(await window.workbench.call<AgentSession[]>(nativeDesktop?'session.cursorDesktop.linkMany':'session.native.linkMany', { provider, nativeIds: chosen.map(session => session.nativeId), projectId })); }
       catch (linkError: any) { await load(); setError(linkError.message); }
       finally { setBusy(false); }
     })()}>{busy ? '正在导入…' : chosen.length ? `导入 ${chosen.length} 条` : '导入所选'}</button></footer>

@@ -112,6 +112,6 @@ test('native controls restore idle associations for either provider and suppress
   assert.match(render(),/尚未同步/);assert.match(render(),/恢复同步/);
   f.session.desktopSyncState='connected';assert.match(render(),/同步中/);assert.doesNotMatch(render(),/恢复同步/);
   f.session.codexDesktop=false;f.session.provider='cursor';f.session.cursorNative={managed:true,descriptorFile:'fixture'};f.session.desktopSyncState='disconnected';
-  assert.match(render(),/记录未连接/);assert.match(render(),/重新读取/);assert.match(render(),/无法让 CLI 与 Agents 共用完整历史和上下文/);assert.doesNotMatch(render(),/同步中|恢复同步|CLI 请求失败/);
+  assert.match(render(),/记录未连接/);assert.match(render(),/重新读取/);assert.match(render(),/尚未通过完整历史、上下文压缩与恢复的一致性验证/);assert.doesNotMatch(render(),/同步中|恢复同步|CLI 请求失败/);
   f.session.nativeId=undefined;assert.doesNotMatch(render(),/重新读取/);
 });
