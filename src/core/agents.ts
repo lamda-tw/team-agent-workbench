@@ -72,7 +72,11 @@ export class AgentRuntime {
   }
   private message(id: string, role: Message['role'], text: string, append = false, metadata: Pick<Message, 'userText' | 'context'> = {}) {
     const existing = this.session.messages.find(x => x.id === id || this.storage?.sharedEndpoint && (x.nativeItemId === id || x.id === 'native:' + id));
-    if (existing) existing.text = append ? existing.text + text : text;
+    if (existing) {
+      existing.text = append ? existing.text + text : text;
+      if (metadata.userText !== undefined) existing.userText = metadata.userText;
+      if (metadata.context) existing.context = metadata.context;
+    }
     else this.session.messages.push({ id, role, text, createdAt: now(), ...metadata });
     this.hooks.changed();
     return existing || this.session.messages.at(-1)!;
@@ -307,7 +311,7 @@ export class AgentRuntime {
     if (this.session.provider === 'cursor' && resolved.filter(item => item.kind === 'skill').length > 1) throw new Error('Cursor 每条消息只能显式调用一个 Skill，请重新选择');
     return resolved;
   }
-  async prompt(text: string, options?: { userText: string; context: Omit<MessageContext, 'nativeId' | 'accepted'>; capabilities?: AgentCapabilityOption[]; submitted?: () => void }) {
+  async prompt(text: string, options?: { userText: string; context: Omit<MessageContext, 'nativeId' | 'accepted'>; capabilities?: AgentCapabilityOption[]; submitted?: () => void; messageId?: string }) {
     if (this.session.cursorNative) assertCursorSharedSessionAvailable();
     if (!text.trim()) throw new Error('请输入任务内容');
     if (this.session.status === 'running' || this.session.status === 'approval') throw new Error('当前会话仍在运行，可以新建独立会话继续工作');
@@ -321,7 +325,7 @@ export class AgentRuntime {
     const selected = options?.capabilities || [], prefixes = selected.filter(item => item.kind === 'skill' || this.session.provider === 'codex').map(item => this.session.provider === 'cursor' ? '/' + item.invocation : item.kind === 'skill' ? '$' + item.invocation : '@' + item.invocation);
     const nativeText = [prefixes.join(' '), text].filter(Boolean).join(' ');
     const context = options ? { ...options.context, capabilities: selected.map(({ id, kind, name }) => ({ id, kind, name })), nativeId: this.session.nativeId!, accepted: false } : undefined;
-    this.message(randomUUID(), 'user', nativeText, false, options ? { userText: options.userText, context } : {});
+    this.message(options?.messageId || randomUUID(), 'user', nativeText, false, options ? { userText: options.userText, context } : {});
     this.hooks.event({ direction: 'user', text: nativeText, ...(options ? { userText: options.userText, capabilities: context?.capabilities } : {}) });
     this.sharedRevision++; this.turnId = undefined; this.turnActive = true; this.sharedTurnOwned = true; this.session.status = 'running'; this.session.error = undefined; this.cursorMessageId = randomUUID(); this.hooks.changed();
     this.connection.begin();

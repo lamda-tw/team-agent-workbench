@@ -1,26 +1,41 @@
 import { z } from 'zod';
+import { accountNameSchema } from './accounts';
 
 export interface QuestionMember { username: string; name: string }
-export interface QuestionAnswer { id: string; body: string; createdAt: string }
-export interface QuestionFollowUp { id: string; body: string; createdAt: string; target?: string }
+export const questionFileSchema = z.object({
+  name: z.string().min(1).max(240).regex(/^[^/\\\x00-\x1f]+$/),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  size: z.number().int().min(0).max(2 * 1024 ** 3),
+  owner: accountNameSchema,
+});
+export type QuestionFile = z.infer<typeof questionFileSchema>;
+const questionFilesSchema = z.array(questionFileSchema).max(30).refine(files => new Set(files.map(file => `${file.sha256}\0${file.name}`)).size === files.length, '附件不能重复');
+export function questionFileNote(files?: QuestionFile[]) {
+  return files?.length ? `\n附件：${files.map(file => file.name).join('、')}` : '';
+}
+export function visibleImportedReply(introduced: boolean, title: string, name: string, body: string, files?: QuestionFile[]) {
+  return `${introduced ? '' : `问题：${title}\n`}回复人：${name}\n${body}${questionFileNote(files)}`;
+}
+export interface QuestionAnswer { id: string; body: string; createdAt: string; files?: QuestionFile[] }
+export interface QuestionFollowUp { id: string; body: string; createdAt: string; target?: string; files?: QuestionFile[] }
 export interface QuestionRecipient extends QuestionMember {
   sessionId?: string; state: 'pending' | 'linked' | 'running' | 'replied'; runId?: string; activityRevision: number;
   answers: QuestionAnswer[]; endSuggestedAt?: string;
 }
 export interface TeamQuestion {
   id: string; projectId: string; author: string; authorName: string; sessionId: string;
-  title: string; body: string; context: string; createdAt: string; updatedAt: string; revision: number; activityRevision: number;
+  title: string; body: string; context: string; files?: QuestionFile[]; createdAt: string; updatedAt: string; revision: number; activityRevision: number;
   closedAt?: string; followUps?: QuestionFollowUp[]; recipients: QuestionRecipient[]; recipientCount: number;
 }
 const uuid = z.string().uuid();
 export const questionCommandSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('create'), id: uuid, sessionId: uuid, title: z.string().trim().min(1).max(200), body: z.string().trim().min(1).max(12000), context: z.string().max(24000).default(''), recipients: z.array(z.string().min(1).max(160)).min(1).max(50).refine(a => new Set(a).size === a.length) }),
+  z.object({ kind: z.literal('create'), id: uuid, sessionId: uuid, title: z.string().trim().min(1).max(200), body: z.string().trim().min(1).max(12000), context: z.string().max(24000).default(''), files: questionFilesSchema.optional(), recipients: z.array(z.string().min(1).max(160)).min(1).max(50).refine(a => new Set(a).size === a.length) }),
   z.object({ kind: z.literal('link'), id: uuid, sessionId: uuid }),
   z.object({ kind: z.literal('run'), id: uuid, sessionId: uuid, runId: uuid }),
-  z.object({ kind: z.literal('reply'), id: uuid, runId: uuid, body: z.string().trim().min(1).max(48000) }),
-  z.object({ kind: z.literal('answer'), id: uuid, answerId: uuid, body: z.string().trim().min(1).max(12000) }),
+  z.object({ kind: z.literal('reply'), id: uuid, runId: uuid, body: z.string().trim().min(1).max(48000), files: questionFilesSchema.optional() }),
+  z.object({ kind: z.literal('answer'), id: uuid, answerId: uuid, body: z.string().trim().min(1).max(12000), files: questionFilesSchema.optional() }),
   z.object({ kind: z.literal('fail'), id: uuid, runId: uuid }),
-  z.object({ kind: z.literal('follow'), id: uuid, followId: uuid, body: z.string().trim().min(1).max(12000), target: z.string().trim().min(1).max(160).optional() }),
+  z.object({ kind: z.literal('follow'), id: uuid, followId: uuid, body: z.string().trim().min(1).max(12000), target: z.string().trim().min(1).max(160).optional(), files: questionFilesSchema.optional() }),
   z.object({ kind: z.literal('suggest'), id: uuid, username: z.string().trim().min(1).max(160) }),
   z.object({ kind: z.literal('resume'), id: uuid, username: z.string().trim().min(1).max(160) }),
   z.object({ kind: z.literal('close'), id: uuid }),
@@ -39,7 +54,7 @@ export function changeQuestion(items: TeamQuestion[], projectId: string, actor: 
   const command = questionCommandSchema.parse(raw), existing = items.find(q => q.id === command.id);
   if (command.kind === 'create') {
     if (existing) {
-      if (existing.author !== actor.username || existing.sessionId !== command.sessionId || existing.title !== command.title || existing.body !== command.body || existing.context !== command.context || JSON.stringify(existing.recipients.map(r => r.username)) !== JSON.stringify(command.recipients)) throw new Error('问题编号已使用');
+      if (existing.author !== actor.username || existing.sessionId !== command.sessionId || existing.title !== command.title || existing.body !== command.body || existing.context !== command.context || JSON.stringify(existing.files || []) !== JSON.stringify(command.files || []) || JSON.stringify(existing.recipients.map(r => r.username)) !== JSON.stringify(command.recipients)) throw new Error('问题编号已使用');
       return existing;
     }
     const recipients = command.recipients.map(username => {
@@ -49,6 +64,7 @@ export function changeQuestion(items: TeamQuestion[], projectId: string, actor: 
     });
     const question: TeamQuestion = { ...command, projectId, author: actor.username, authorName: actor.name, recipients, recipientCount: recipients.length, revision: 1, activityRevision: 1, createdAt: at, updatedAt: at };
     delete (question as any).kind;
+    if (!question.files?.length) delete question.files;
     items.push(question); return question;
   }
   if (!existing || !questionView(existing, actor.username)) throw new Error('问题不存在或无权访问');
@@ -66,8 +82,8 @@ export function changeQuestion(items: TeamQuestion[], projectId: string, actor: 
       if (command.target && !named(command.target)) throw new Error('后续信息的接收人不存在');
       const follows = existing.followUps ||= [];
       const prior = follows.find(item => item.id === command.followId);
-      if (prior) { if (prior.body !== command.body || (prior.target || '') !== (command.target || '')) throw new Error('后续信息编号已使用'); return existing; }
-      follows.push({ id: command.followId, body: command.body, createdAt: at, ...(command.target ? { target: command.target } : {}) });
+      if (prior) { if (prior.body !== command.body || (prior.target || '') !== (command.target || '') || JSON.stringify(prior.files || []) !== JSON.stringify(command.files || [])) throw new Error('后续信息编号已使用'); return existing; }
+      follows.push({ id: command.followId, body: command.body, createdAt: at, ...(command.target ? { target: command.target } : {}), ...(command.files?.length ? { files: command.files } : {}) });
       if (command.target) delete named(command.target)!.endSuggestedAt;
     } else if (command.kind === 'suggest') {
       const recipient = named(command.username);
@@ -87,11 +103,11 @@ export function changeQuestion(items: TeamQuestion[], projectId: string, actor: 
   } else {
     const recipient = existing.recipients.find(r => r.username === actor.username);
     if (!recipient) throw new Error('只有指定接收人可以回答');
-    if (command.kind === 'answer') { const prior = recipient.answers.find(a => a.id === command.answerId); if (prior) { if (prior.body !== command.body) throw new Error('答复编号已使用'); return existing; } }
-    if (command.kind === 'reply') { const prior = recipient.answers.find(a => a.id === command.runId); if (prior) { if (prior.body !== command.body) throw new Error('答复编号已使用'); return existing; } }
+    if (command.kind === 'answer') { const prior = recipient.answers.find(a => a.id === command.answerId); if (prior) { if (prior.body !== command.body || JSON.stringify(prior.files || []) !== JSON.stringify(command.files || [])) throw new Error('答复编号已使用'); return existing; } }
+    if (command.kind === 'reply') { const prior = recipient.answers.find(a => a.id === command.runId); if (prior) { if (prior.body !== command.body || JSON.stringify(prior.files || []) !== JSON.stringify(command.files || [])) throw new Error('答复编号已使用'); return existing; } }
     if (existing.closedAt) throw new Error('问题已关闭，答案保留在自己的 Session 中，不再回传');
     if (command.kind === 'answer') {
-      recipient.answers.push({ id: command.answerId, body: command.body, createdAt: at });
+      recipient.answers.push({ id: command.answerId, body: command.body, createdAt: at, ...(command.files?.length ? { files: command.files } : {}) });
       delete recipient.endSuggestedAt;
       if (recipient.state !== 'running') recipient.state = 'replied';
     } else if (command.kind === 'link') {
@@ -106,7 +122,7 @@ export function changeQuestion(items: TeamQuestion[], projectId: string, actor: 
       recipient.runId = command.runId; recipient.state = 'running';
     } else {
       if (recipient.runId !== command.runId) throw new Error('答复不属于当前回答轮次');
-      if (command.kind === 'reply') { recipient.answers.push({ id: command.runId, body: command.body, createdAt: at }); recipient.state = 'replied'; }
+      if (command.kind === 'reply') { recipient.answers.push({ id: command.runId, body: command.body, createdAt: at, ...(command.files?.length ? { files: command.files } : {}) }); recipient.state = 'replied'; }
       else if (recipient.state === 'running') recipient.state = 'linked';
       else return existing;
     }
@@ -122,6 +138,6 @@ export function changeQuestion(items: TeamQuestion[], projectId: string, actor: 
   }
   existing.updatedAt = at; return existing;
 }
-export interface QuestionJob { questionId: string; projectId: string; sessionId: string; runId: string; phase: 'queued' | 'running' | 'ready' | 'sent' | 'error' | 'closed' | 'tracked'; mode?: 'answer' | 'import' | 'auto' | 'ingest' | 'fill'; sourceId?: string; covered?: string[]; peer?: string; answer?: string; error?: string; released?: boolean }
+export interface QuestionJob { questionId: string; projectId: string; sessionId: string; runId: string; phase: 'queued' | 'running' | 'ready' | 'sent' | 'error' | 'closed' | 'tracked'; mode?: 'answer' | 'import' | 'auto' | 'ingest' | 'fill'; sourceId?: string; covered?: string[]; peer?: string; answer?: string; files?: QuestionFile[]; outputSnapshot?: string[]; error?: string; released?: boolean }
 export interface QuestionDialogue { questionId: string; projectId: string; peer: string; sessionId: string; mode: 'auto'; suggested?: boolean }
 export interface QuestionInbox { items: TeamQuestion[]; read: Record<string, number>; jobs: QuestionJob[]; dialogues?: QuestionDialogue[]; replyModes?: Record<string, 'manual' | 'auto'>; fills?: Record<string, Record<string, string>>; error?: string }

@@ -24,4 +24,8 @@ test('the temporary bubble disappears when the accepted user message arrives', (
   assert.match(renderToStaticMarkup(React.createElement(PendingSessionMessage, { pending, messages: [previous] })), /消息正在提交/);
   assert.equal(renderToStaticMarkup(React.createElement(PendingSessionMessage, { pending, messages: [previous, accepted] })), '');
   assert.match(renderToStaticMarkup(React.createElement(PendingSessionMessage, { pending: { ...pending, phase: 'matching' }, messages: [previous] })), /正在检查相关成果/);
+  const placed = renderToStaticMarkup(React.createElement(PendingSessionMessage, { pending: { text: '问题：验收\n回复人：周祺智\n先用 v2', beforeMessageCount: 0, phase: 'question' }, messages: [] }));
+  assert.match(placed, /提问已放入对话/);
+  assert.match(placed, /问题：验收/);
+  assert.match(placed, /已放入对话，正在连接本地 CLI/);
 });

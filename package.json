@@ -1,6 +1,6 @@
 {
   "name": "team-agent-workbench",
-  "version": "0.7.5",
+  "version": "0.7.6",
   "private": true,
   "description": "Windows team workspace for local Codex, Cursor and Claude Code agents with Linux SFTP sharing",
   "main": "dist/user/main.cjs",

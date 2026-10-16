@@ -224,7 +224,20 @@ async function dispatch(action: string, raw: unknown, owner: BrowserWindow): Pro
     case 'question.read': { const p = z.object({ id, revision: z.number().int().positive() }).parse(raw); return workbench.questions.read(p.id, p.revision); }
     case 'question.link': { const p = z.object({ projectId: z.string(), id, sessionId: id }).parse(raw); return workbench.questions.link(p.projectId, p.id, p.sessionId); }
     case 'question.answer': { const p = z.object({ projectId: z.string(), id, answerId: id, body: z.string().trim().min(1).max(12000) }).parse(raw); return workbench.questions.answer(p.projectId, p.id, p.answerId, p.body); }
-    case 'question.follow': { const p = z.object({ projectId: z.string(), id, followId: id, body: z.string(), target: z.string().trim().min(1).max(160).optional() }).parse(raw); return workbench.questions.follow(p.projectId, p.id, p.followId, p.body, p.target); }
+    case 'question.files.stage': return workbench.questions.stage(await chooseFiles(owner));
+    case 'question.files.remove': return workbench.questions.unstage(z.object({ id }).parse(raw).id);
+    case 'question.file.preview':
+    case 'question.file.download': {
+      const p = z.object({ projectId: z.string(), id, sha256: z.string().regex(/^[a-f0-9]{64}$/), name: z.string().min(1).max(240) }).parse(raw);
+      const located = workbench.questions.locateFile(p.projectId, p.id, p.sha256, p.name);
+      if (action === 'question.file.preview') return workbench.remote.preview(located.binding, located.path, located.file.name);
+      const selected = await dialog.showSaveDialog(owner, { defaultPath: safeFilename(located.file.name) }); if (!selected.filePath) return false;
+      const temporary = path.join(workbench.store.root, 'downloads', randomUUID(), safeFilename(located.file.name));
+      try { await workbench.remote.download(located.binding, located.path, temporary, () => {}, { sha256: located.file.sha256, size: located.file.size }); await fs.copyFile(temporary, selected.filePath); }
+      finally { await fs.unlink(temporary).catch(() => {}); }
+      notice('附件已下载'); return true;
+    }
+    case 'question.follow': { const p = z.object({ projectId: z.string(), id, followId: id, body: z.string(), target: z.string().trim().min(1).max(160).optional(), fileIds: z.array(id).max(30).optional() }).parse(raw); return workbench.questions.follow(p.projectId, p.id, p.followId, p.body, p.target, p.fileIds || []); }
     case 'question.import': { const p = z.object({ projectId: z.string(), id, sessionId: id, answerId: id }).parse(raw); return workbench.questions.importReply(p.projectId, p.id, p.sessionId, p.answerId); }
     case 'question.auto': { const p = z.object({ projectId: z.string(), id, sessionId: id, peer: z.string().trim().min(1).max(160) }).parse(raw); return workbench.questions.startAuto(p.projectId, p.id, p.peer, p.sessionId); }
     case 'question.auto.stop': { const p = z.object({ projectId: z.string(), id, peer: z.string().trim().min(1).max(160) }).parse(raw); return workbench.questions.stopAuto(p.projectId, p.id, p.peer); }
@@ -583,7 +596,8 @@ async function createWindow(preferredSlot?: number, fresh = false) {
   window.on('close', event => {
     if (quitting || closingWindows.has(window)) return;
     event.preventDefault();
-    if (windows.size === 1) void finishQuit(window);
+    dismissWindow(window);
+    if (windows.size === 1) void finishQuit();
     else void closeWindow(window);
   });
   window.on('closed', () => {
@@ -645,21 +659,35 @@ if (ownDataDirectory(latestWindow, () => openAdditionalWindow(true))) app.whenRe
   void drainAdditionalWindows();
 }).catch(error => { dialog.showErrorBox('工作台启动失败', error.message); app.quit(); });
 app.on('window-all-closed', () => { if (!closing) void finishQuit(); });
-async function closeWindow(window: BrowserWindow) {
-  if (closingWindows.has(window) || window.isDestroyed()) return;
-  const context = contexts.get(window); if (!context) { window.destroy(); return; }
-  closingWindows.add(window);
-  for (const context of contexts.values()) context.workbench.activity.removeWindow(String(window.id));
-  try {
-    await routeAccount(async () => { await contexts.get(window)?.release(); contexts.delete(window); activeSlots.delete(context.slot); windows.delete(window); window.destroy(); });
-  } catch (e: any) {
-    if (!window.isDestroyed()) await dialog.showMessageBox(window, { type: 'error', title: '未保存的编辑', message: '保存失败，已保留此账号窗口和待保存内容。', detail: e.message + '\n请恢复目录或磁盘空间后重试关闭。', buttons: ['返回工作台'] });
-  } finally { closingWindows.delete(window); }
+function dismissWindow(window: BrowserWindow) {
+  if (window.isDestroyed()) return;
+  window.hide();
 }
-async function finishQuit(owner = latestWindow()) {
+function reportCloseFailure(error: unknown) {
+  dialog.showErrorBox('未保存的编辑', '保存失败，窗口已经关闭。\n' + errorMessage(error) + '\n请恢复目录或磁盘空间后重新打开工作台。');
+}
+async function closeWindow(window: BrowserWindow) {
+  if (closingWindows.has(window)) return;
+  const context = contexts.get(window); if (!context) { if (!window.isDestroyed()) window.destroy(); return; }
+  closingWindows.add(window);
+  for (const current of contexts.values()) current.workbench.activity.removeWindow(String(window.id));
+  contexts.delete(window); activeSlots.delete(context.slot); windows.delete(window);
+  dismissWindow(window);
+  if (!window.isDestroyed()) window.destroy();
+  try { await routeAccount(() => context.release()); }
+  catch (error) { reportCloseFailure(error); }
+  finally { closingWindows.delete(window); }
+}
+async function finishQuit() {
   if (closing) return; closing = true;
-  try { await routeAccount(async () => { for (const context of contexts.values()) await context.release(); }); quitting = true; app.quit(); }
-  catch (e: any) { if (owner && !owner.isDestroyed()) await dialog.showMessageBox(owner, { type: 'error', title: '未保存的编辑', message: '保存失败，已保留窗口和待保存内容。', detail: e.message + '\n请恢复目录或磁盘空间后重试保存或退出。', buttons: ['返回工作台'] }); }
-  finally { closing = false; }
+  const pending = [...contexts.entries()];
+  for (const [window, context] of pending) {
+    closingWindows.add(window); activeSlots.delete(context.slot); windows.delete(window); contexts.delete(window);
+    for (const [, current] of pending) current.workbench.activity.removeWindow(String(window.id));
+  }
+  for (const [window] of pending) { dismissWindow(window); if (!window.isDestroyed()) window.destroy(); }
+  try { await routeAccount(async () => { for (const [, context] of pending) await context.release(); }); }
+  catch (error) { reportCloseFailure(error); }
+  finally { quitting = true; for (const [window] of pending) closingWindows.delete(window); closing = false; app.quit(); }
 }
 app.on('before-quit', event => { if (!quitting && contexts.size) { event.preventDefault(); void finishQuit(); } });

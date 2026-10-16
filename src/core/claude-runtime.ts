@@ -57,12 +57,16 @@ export class ClaudeRuntime {
   }
   private message(id: string, role: Message['role'], value: string, append = false, metadata: Pick<Message, 'userText' | 'context'> = {}) {
     const item = this.session.messages.find(m => m.id === id);
-    if (item) item.text = append ? item.text + value : value;
+    if (item) {
+      item.text = append ? item.text + value : value;
+      if (metadata.userText !== undefined) item.userText = metadata.userText;
+      if (metadata.context) item.context = metadata.context;
+    }
     else this.session.messages.push({ id, role, text: value, createdAt: now(), ...metadata });
     this.hooks.changed();
   }
   private send(value: unknown) { if (!this.child || this.child.stdin.destroyed) throw new Error('CLI 连接已关闭'); this.child.stdin.write(JSON.stringify(value) + '\n'); }
-  async prompt(text: string, options?: { userText: string; context: Omit<MessageContext, 'nativeId' | 'accepted'>; capabilities?: AgentCapabilityOption[]; submitted?: () => void }): Promise<boolean> {
+  async prompt(text: string, options?: { userText: string; context: Omit<MessageContext, 'nativeId' | 'accepted'>; capabilities?: AgentCapabilityOption[]; submitted?: () => void; messageId?: string }): Promise<boolean> {
     if (!text.trim()) throw new Error('请输入任务内容');
     if (this.running) throw new Error('当前会话仍在运行');
     await this.ensureStarted();
@@ -75,7 +79,7 @@ export class ClaudeRuntime {
     this.currentContext = context;
     const mode = claudeNativeMode(this.session.permissionMode, this.session.purpose);
     const args = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--permission-prompt-tool', 'stdio', ...(this.session.purpose === 'background' ? ['--tools', '', '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}', '--no-session-persistence'] : []), ...(mode ? ['--permission-mode', mode] : []), ...(this.session.nativeId ? ['--resume', this.session.nativeId] : ['--session-id', plannedId]), ...(this.session.model ? ['--model', this.session.model] : [])];
-    this.message(randomUUID(), 'user', nativeText, false, options ? { userText: options.userText, context } : {});
+    this.message(options?.messageId || randomUUID(), 'user', nativeText, false, options ? { userText: options.userText, context } : {});
     this.hooks.event({ direction: 'user', text: nativeText, ...(options ? { userText: options.userText, capabilities: context?.capabilities } : {}) });
     this.session.status = 'running'; this.session.error = undefined; this.running = true; this.finished = false; this.streamed = false; this.stderr = ''; this.replyId = randomUUID(); this.hooks.changed();
     this.connection.begin();

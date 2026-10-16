@@ -3,11 +3,16 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { accountIdentity } from '../shared/account-data';
 import type { AgentSession, ConnectionProfile } from '../shared/types';
-import { questionCommandSchema, type QuestionCommand, type QuestionInbox, type QuestionJob, type TeamQuestion } from '../shared/questions';
-import { autoDialogueNotice, fillFollowNotice, incomingFollowNotice, incomingQuestionNotice, incomingReplyNotice, questionControl, withoutQuestionControl } from '../shared/session-context-text';
+import { questionCommandSchema, questionFileNote, visibleImportedReply, type QuestionCommand, type QuestionFile, type QuestionInbox, type QuestionJob, type TeamQuestion } from '../shared/questions';
+import { attachmentPath } from '../shared/attachments';
+import { autoDialogueNotice, fillFollowNotice, incomingFollowNotice, incomingQuestionNotice, incomingReplyNotice, questionSuggestsEnd, withoutQuestionFields } from '../shared/session-context-text';
 import { atomicJson, type Store } from './store';
 import type { SharedFiles } from './shared-files';
-import { freezeFile } from './artifacts';
+import { freezeFile, hashFile } from './artifacts';
+import { safeFilename } from './paths';
+import { sessionFilePath } from './session-files';
+import type { SourceFile } from '../shared/types';
+import { z } from 'zod';
 
 type SavedInbox = QuestionInbox & { notified: Record<string, number>; followSeen?: Record<string, number>; suggestSeen?: Record<string, boolean> };
 export class Questions {
@@ -17,11 +22,13 @@ export class Questions {
   private saving: Promise<unknown> = Promise.resolve();
   private active = new Set<string>();
   private references = new Map<string, Promise<void>>();
+  private staged = new Map<string, SourceFile>();
   private autoRunning = false;
   private stopped = false;
   constructor(private store: Store, private remote: SharedFiles, private hooks: {
     profile: () => ConnectionProfile | undefined; session: (id: string) => AgentSession;
     send: (sessionId: string, text: string, runId: string, agentNotice: string, draft?: boolean) => Promise<boolean>;
+    steer?: (sessionId: string, text: string, agentNotice: string, runId: string) => Promise<boolean>;
     changed: () => void; notice: (text: string) => void;
   }) {}
   private get file() { return path.join(this.store.root, 'questions.json'); }
@@ -37,15 +44,28 @@ export class Questions {
     ((inbox.fills ||= {})[questionId] ||= {})[peer] = body;
     return true;
   }
+  private fillText(answer: string) {
+    return withoutQuestionFields(answer).slice(0, 12000);
+  }
+  private rememberJobFill(inbox: SavedInbox, job: QuestionJob, answer: string) {
+    const peer = job.mode === 'answer' ? `answer:${job.peer || ''}` : job.peer;
+    return this.rememberFill(inbox, job.questionId, peer, this.fillText(answer));
+  }
   private rememberSessionFill(inbox: SavedInbox, session: AgentSession, answer: string) {
-    const control = questionControl(answer);
-    if (control.kind !== 'continue' || !control.body) return false;
+    const body = this.fillText(answer);
+    if (!body) return false;
+    const username = this.hooks.profile()?.username;
     let wrote = false;
     for (const q of inbox.items) {
-      if (q.closedAt || q.sessionId !== session.id) continue;
-      const dialogue = inbox.dialogues?.find(item => item.questionId === q.id && item.sessionId === session.id);
-      const peer = dialogue?.peer || (q.recipients.length === 1 ? q.recipients[0].username : '');
-      if (this.rememberFill(inbox, q.id, peer, control.body)) wrote = true;
+      if (q.closedAt) continue;
+      if (q.sessionId === session.id) {
+        const dialogue = inbox.dialogues?.find(item => item.questionId === q.id && item.sessionId === session.id);
+        const peer = dialogue?.peer || (q.recipients.length === 1 ? q.recipients[0].username : '');
+        if (this.rememberFill(inbox, q.id, peer, body)) wrote = true;
+        continue;
+      }
+      const own = username && q.recipients.find(item => item.username === username && item.sessionId === session.id);
+      if (own && this.rememberFill(inbox, q.id, `answer:${own.username}`, body)) wrote = true;
     }
     return wrote;
   }
@@ -57,6 +77,67 @@ export class Questions {
     this.timer = setInterval(() => void this.sync().catch(() => {}), 5000); this.timer.unref();
   }
   async members(projectId: string) { return this.remote.questionRequest(this.remote.binding(projectId), 'members'); }
+  async stage(paths: string[]) {
+    if (!paths.length) return [];
+    const copies = await Promise.all(paths.map(file => freezeFile(file, path.join(this.store.root, 'question-files', 'staging'))));
+    for (const copy of copies) this.staged.set(copy.id, copy);
+    return copies.map(file => ({ id: file.id, name: file.name, size: file.size }));
+  }
+  async unstage(id: string) {
+    const file = this.staged.get(id);
+    this.staged.delete(id);
+    if (file) await fs.rm(file.localPath, { force: true });
+    return true;
+  }
+  private async published(projectId: string, fileIds: string[]) {
+    const ids = z.array(z.string().uuid()).max(30).parse(fileIds);
+    if (new Set(ids).size !== ids.length) throw new Error('附件不能重复选择');
+    if (!ids.length) return [] as QuestionFile[];
+    const binding = this.remote.binding(projectId), files: QuestionFile[] = [];
+    for (const id of ids) {
+      const staged = this.staged.get(id);
+      if (!staged) throw new Error('附件已不存在，请重新选择');
+      const stored = await this.remote.uploadAttachment(binding, staged.localPath, staged.sha256, () => {});
+      if (stored.sha256 !== staged.sha256 || stored.size !== staged.size) throw new Error('附件上传回执与本地快照不一致');
+      files.push({ name: staged.name, sha256: staged.sha256, size: staged.size, owner: binding.username });
+    }
+    return files;
+  }
+  private async stageTurnFiles(session: AgentSession, before: string[] = []) {
+    const known = new Set(before), picked: string[] = [], seenPath = new Set<string>();
+    for (const file of session.outputFiles || []) {
+      if (known.has(file) || picked.length >= 30) continue;
+      try {
+        const target = sessionFilePath(session, file), relative = path.relative(session.cwd, target);
+        if (relative === '..' || relative.startsWith('..' + path.sep) || path.isAbsolute(relative) || seenPath.has(target)) continue;
+        const stat = await fs.lstat(target);
+        if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 2 * 1024 ** 3) continue;
+        seenPath.add(target); picked.push(target);
+      } catch { /* The model may mention a path that is not a local file. */ }
+    }
+    const ids: string[] = [], seenFile = new Set<string>();
+    for (const file of picked) {
+      try {
+        const staged = await this.stage([file]), copy = staged[0] && this.staged.get(staged[0].id);
+        const key = copy ? `${copy.sha256}\0${copy.name}` : '';
+        if (!copy || seenFile.has(key)) { if (staged[0]) await this.unstage(staged[0].id); continue; }
+        seenFile.add(key); ids.push(staged[0].id);
+      } catch { /* Skip a file that changes while it is copied. */ }
+    }
+    return ids;
+  }
+  private async captureTurnFiles(session: AgentSession, job: QuestionJob) {
+    const ids = await this.stageTurnFiles(session, job.outputSnapshot);
+    try { return await this.published(job.projectId, ids); }
+    finally { for (const id of ids) await this.unstage(id); }
+  }
+  locateFile(projectId: string, id: string, sha256: string, name: string) {
+    const question = this.inbox()?.items.find(item => item.id === id && item.projectId === projectId);
+    const file = [...(question?.files || []), ...(question?.followUps || []).flatMap(item => item.files || []), ...(question?.recipients || []).flatMap(recipient => recipient.answers.flatMap(answer => answer.files || []))].find(item => item.sha256 === sha256 && item.name === name);
+    if (!question || !file) throw new Error('附件不存在或无权访问');
+    const binding = this.remote.binding(projectId);
+    return { binding, path: attachmentPath({ ...binding, username: file.owner }, file.sha256), file };
+  }
   private async request(projectId: string, command: QuestionCommand) {
     const owner = this.owner(), inbox = this.inbox(); if (!owner || !inbox) throw new Error('请先连接团队账号');
     const question = await this.remote.questionRequest(this.remote.binding(projectId), command) as TeamQuestion;
@@ -75,11 +156,23 @@ export class Questions {
   async create(sessionId: string, raw: unknown) {
     const session = this.hooks.session(sessionId);
     if (!session.binding || session.closedAt || session.purpose !== 'work') throw new Error('请选择当前项目中打开的工作 Session');
-    const command = questionCommandSchema.parse({ ...(raw as object), kind: 'create', sessionId });
-    return this.request(session.binding.project.id, command);
+    const source = { ...(raw as object) } as Record<string, unknown>;
+    delete source.files; delete source.fileIds; delete source.kind;
+    questionCommandSchema.parse({ ...source, kind: 'create', sessionId });
+    const fileIds = z.array(z.string().uuid()).max(30).parse((raw as { fileIds?: string[] } | null)?.fileIds || []);
+    const files = await this.published(session.binding.project.id, fileIds);
+    const question = await this.request(session.binding.project.id, questionCommandSchema.parse({ ...source, kind: 'create', sessionId, ...(files.length ? { files } : {}) }));
+    for (const id of fileIds) await this.unstage(id);
+    return question;
   }
   async closeQuestion(projectId: string, id: string) { return this.request(projectId, { kind: 'close', id }); }
-  async follow(projectId: string, id: string, followId: string, body: string, target?: string) { return this.request(projectId, { kind: 'follow', id, followId, body, ...(target ? { target } : {}) }); }
+  async follow(projectId: string, id: string, followId: string, body: string, target?: string, fileIds: string[] = []) {
+    questionCommandSchema.parse({ kind: 'follow', id, followId, body, ...(target ? { target } : {}) });
+    const files = await this.published(projectId, fileIds);
+    const question = await this.request(projectId, { kind: 'follow', id, followId, body, ...(target ? { target } : {}), ...(files.length ? { files } : {}) });
+    for (const fileId of fileIds) await this.unstage(fileId);
+    return question;
+  }
   async answer(projectId: string, id: string, answerId: string, body: string) { return this.request(projectId, { kind: 'answer', id, answerId, body }); }
   lockedPeer(sessionId: string) {
     const inbox = this.inbox(), dialogue = inbox?.dialogues?.find(item => item.sessionId === sessionId);
@@ -103,7 +196,7 @@ export class Questions {
     const bound = inbox.dialogues?.find(item => item.sessionId === sessionId);
     if (bound && bound.peer !== recipient.username) throw new Error('这个自动 Session 只跟一个人进行，不能加入其他人的回答');
     if (bound) throw new Error('自动对话中的 Session 会自行接收这一位成员的回复');
-    if (inbox.jobs.some(job => job.sourceId === answerId && job.sessionId === sessionId && job.phase !== 'error' && job.phase !== 'closed')) throw new Error('这条回复已经引入当前 Session');
+    if (inbox.jobs.some(job => job.sessionId === sessionId && job.phase !== 'error' && job.phase !== 'closed' && (job.sourceId === answerId || job.covered?.includes(answerId)))) throw new Error('这条回复已经引入当前 Session');
     inbox.jobs.push({ questionId: id, projectId, sessionId, runId: randomUUID(), phase: 'queued', mode: 'import', sourceId: answerId, peer: recipient.username });
     await this.save(); this.hooks.changed(); void this.sync().catch(() => {});
     return question;
@@ -183,14 +276,35 @@ export class Questions {
     this.references.set(key, work);
     return work.finally(() => { if (this.references.get(key) === work) this.references.delete(key); });
   }
+  private async ensureReferenceFiles(session: AgentSession, q: TeamQuestion, valid: () => boolean) {
+    const binding = session.binding;
+    if (!binding) return false;
+    let added = false;
+    const seen = new Set<string>();
+    for (const file of [...(q.files || []), ...(q.followUps || []).flatMap(item => item.files || []), ...q.recipients.flatMap(recipient => recipient.answers.flatMap(answer => answer.files || []))]) {
+      if (seen.has(file.sha256)) continue;
+      seen.add(file.sha256);
+      const sourcePath = `question:${q.id}:file:${file.sha256}`;
+      if (session.sources.some(source => source.sourcePath === sourcePath && source.sha256 === file.sha256)) continue;
+      const target = path.join(this.store.sessionDir(session.id), 'question-files', file.sha256, safeFilename(file.name));
+      let ready = false;
+      try { ready = await hashFile(target) === file.sha256; } catch { ready = false; }
+      if (!ready) await this.remote.download(binding, attachmentPath({ ...binding, username: file.owner }, file.sha256), target, () => {}, { sha256: file.sha256, size: file.size });
+      if (!valid()) return added;
+      session.sources.push({ id: randomUUID(), name: file.name, localPath: target, sourcePath, sha256: file.sha256, size: file.size, fetchedAt: new Date().toISOString() });
+      added = true;
+    }
+    return added;
+  }
   private async writeReference(session: AgentSession, q: TeamQuestion) {
     const owner = this.owner();
     const valid = () => owner === this.owner() && !!session.binding && accountIdentity(session.binding) === owner && (this.inbox()?.items.find(item => item.id === q.id)?.revision || 0) <= q.revision;
     if (!valid()) return;
-    const follows = (q.followUps || []).map(item => `## 后续 · ${item.createdAt}\n${item.body}`).join('\n\n');
-    const body = `# 提问：${q.title}\n发问人：${q.authorName}\n状态：${q.closedAt ? '已关闭；不再回传答案' : '开放'}\n\n${q.body}\n\n${q.context}\n\n${follows}\n\n` + q.recipients.flatMap(r => r.answers.map(a => `## ${r.name} · ${a.createdAt}\n${a.body}`)).join('\n\n');
+    const added = await this.ensureReferenceFiles(session, q, valid);
+    const follows = (q.followUps || []).map(item => `## 后续 · ${item.createdAt}\n${item.body}${questionFileNote(item.files)}`).join('\n\n');
+    const body = `# 提问：${q.title}\n发问人：${q.authorName}\n状态：${q.closedAt ? '已关闭；不再回传答案' : '开放'}\n\n${q.body}${questionFileNote(q.files)}\n\n${q.context}\n\n${follows}\n\n` + q.recipients.flatMap(r => r.answers.map(a => `## ${r.name} · ${a.createdAt}\n${a.body}${questionFileNote(a.files)}`)).join('\n\n');
     const sourcePath = 'question:' + q.id, prior = session.sources.find(s => s.sourcePath === sourcePath);
-    if (prior && await fs.readFile(prior.localPath, 'utf8').catch(() => '') === body) return;
+    if (prior && await fs.readFile(prior.localPath, 'utf8').catch(() => '') === body) { if (added) await this.store.save(); return; }
     const folder = path.join(this.store.sessionDir(session.id), 'questions'); await fs.mkdir(folder, { recursive: true });
     const file = path.join(folder, q.id + '-v' + q.revision + '.md'); await fs.writeFile(file, body, 'utf8');
     const source = await freezeFile(file, path.join(this.store.sessionDir(session.id), 'sources')); source.name = '提问 · ' + q.title; source.sourcePath = sourcePath;
@@ -241,7 +355,7 @@ export class Questions {
         const seenFollows = inbox.followSeen?.[q.id] || 0, follows = q.followUps?.length || 0;
         if (q.author !== profile.username && seenFollows > 0 && follows > seenFollows) this.hooks.notice(`问题有后续：${q.title}`);
         (inbox.followSeen ||= {})[q.id] = follows;
-        this.queueContinuation(inbox, q, profile.username);
+        await this.queueContinuation(inbox, q, profile.username);
         const ids = q.author === profile.username ? [q.sessionId, ...(inbox.dialogues || []).filter(item => item.questionId === q.id).map(item => item.sessionId)] : q.recipients.filter(r => r.username === profile.username).flatMap(r => r.sessionId ? [r.sessionId] : []);
         for (const id of ids) { const session = this.store.sessions.find(s => s.id === id && s.binding && accountIdentity(s.binding) === owner && s.binding.project.id === q.projectId); if (session && !session.closedAt) await this.reference(session, q); }
       }
@@ -251,7 +365,7 @@ export class Questions {
         if (!q || q.closedAt) { if (!['sent', 'error', 'tracked'].includes(job.phase)) job.phase = 'closed'; continue; }
         if (job.phase === 'ready' && job.mode && job.mode !== 'answer') { job.phase = 'tracked'; continue; }
         if (job.phase === 'ready' && job.answer) {
-          try { await this.request(job.projectId, { kind: 'reply', id: job.questionId, runId: job.runId, body: job.answer }); job.phase = 'sent'; job.error = undefined; }
+          try { await this.request(job.projectId, { kind: 'reply', id: job.questionId, runId: job.runId, body: job.answer, ...(job.files?.length ? { files: job.files } : {}) }); job.phase = 'sent'; job.error = undefined; }
           catch (e: any) { job.error = e.message; } // Delivery retry keeps the exact same answer ID.
         } else if (job.phase === 'error' && !job.released) {
           const own = q.recipients.find(r => r.username === profile.username);
@@ -269,7 +383,14 @@ export class Questions {
       await this.save(); this.hooks.changed();
     } catch (e: any) { if (owner === this.owner()) { inbox.error = e.message; this.hooks.changed(); } }
   }
-  private queueContinuation(inbox: SavedInbox, q: TeamQuestion, username: string) {
+  private cover(job: QuestionJob, ids: string[]) {
+    job.covered = [...new Set([...(job.covered || []), ...(job.sourceId ? [job.sourceId] : []), ...ids])];
+  }
+  private async steerIncoming(sessionId: string, text: string, notice: string, runId: string) {
+    if (!this.hooks.steer) return false;
+    try { return await this.hooks.steer(sessionId, text, notice, runId); } catch { return false; }
+  }
+  private async queueContinuation(inbox: SavedInbox, q: TeamQuestion, username: string) {
     if (q.closedAt) return;
     const known = new Set(inbox.jobs.filter(job => job.questionId === q.id).flatMap(job => [job.sourceId, ...(job.covered || [])]).filter((id): id is string => !!id));
     const open = (sessionId?: string) => !!sessionId && this.store.sessions.some(session => session.id === sessionId && !session.closedAt && session.binding && accountIdentity(session.binding) === this.owner());
@@ -278,24 +399,29 @@ export class Questions {
         if (dialogue.questionId !== q.id || dialogue.suggested || !open(dialogue.sessionId)) continue;
         const peer = q.recipients.find(recipient => recipient.username === dialogue.peer);
         if (!peer || peer.endSuggestedAt) continue;
-        const seenOnSession = new Set(inbox.jobs.filter(job => job.questionId === q.id && job.sessionId === dialogue.sessionId).map(job => job.sourceId));
-        for (const answer of peer.answers) {
-          if (seenOnSession.has(answer.id)) continue;
-          inbox.jobs.push({ questionId: q.id, projectId: q.projectId, sessionId: dialogue.sessionId, runId: randomUUID(), phase: 'queued', mode: 'auto', sourceId: answer.id, peer: peer.username });
-          seenOnSession.add(answer.id);
-        }
+        const seenOnSession = new Set(inbox.jobs.filter(job => job.questionId === q.id && job.sessionId === dialogue.sessionId).flatMap(job => [job.sourceId, ...(job.covered || [])]).filter((id): id is string => !!id));
+        const unseen = peer.answers.filter(answer => !seenOnSession.has(answer.id));
+        if (!unseen.length) continue;
+        const ids = unseen.map(answer => answer.id);
+        const text = unseen.map(answer => `回复人：${peer.name}\n${answer.body}${questionFileNote(answer.files)}`).join('\n\n');
+        const running = inbox.jobs.find(job => job.questionId === q.id && job.sessionId === dialogue.sessionId && job.mode === 'auto' && job.phase === 'running');
+        if (running && await this.steerIncoming(dialogue.sessionId, text, autoDialogueNotice(peer.name) + incomingReplyNotice(peer.name), running.runId)) { this.cover(running, ids); continue; }
+        const queued = inbox.jobs.find(job => job.questionId === q.id && job.sessionId === dialogue.sessionId && job.mode === 'auto' && job.phase === 'queued');
+        if (queued) { this.cover(queued, ids); continue; }
+        inbox.jobs.push({ questionId: q.id, projectId: q.projectId, sessionId: dialogue.sessionId, runId: randomUUID(), phase: 'queued', mode: 'auto', sourceId: ids[0], covered: ids, peer: peer.username });
       }
       return;
     }
     const own = q.recipients.find(recipient => recipient.username === username), sessionId = own?.sessionId;
     if (!sessionId || !open(sessionId) || own?.endSuggestedAt || inbox.replyModes?.[q.id] === 'manual') return;
-    const pending = inbox.jobs.find(job => job.questionId === q.id && job.mode !== 'import' && job.mode !== 'auto' && job.mode !== 'ingest' && job.mode !== 'fill' && job.phase === 'queued');
-    for (const follow of (q.followUps || []).filter(item => !item.target || item.target === username)) {
-      if (known.has(follow.id)) continue;
-      if (pending) { pending.covered = [...new Set([...(pending.covered || []), follow.id])]; known.add(follow.id); continue; }
-      inbox.jobs.push({ questionId: q.id, projectId: q.projectId, sessionId, runId: randomUUID(), phase: 'queued', mode: 'answer', sourceId: follow.id, covered: [follow.id], peer: username });
-      known.add(follow.id);
-    }
+    const fresh = (q.followUps || []).filter(item => (!item.target || item.target === username) && !known.has(item.id));
+    if (!fresh.length) return;
+    const ids = fresh.map(item => item.id);
+    const running = inbox.jobs.find(job => job.questionId === q.id && job.sessionId === sessionId && (!job.mode || job.mode === 'answer') && job.phase === 'running');
+    if (running && await this.steerIncoming(sessionId, fresh.map(item => `${item.body}${questionFileNote(item.files)}`).join('\n\n'), incomingFollowNotice(q.authorName), running.runId)) { this.cover(running, ids); return; }
+    const pending = inbox.jobs.find(job => job.questionId === q.id && job.sessionId === sessionId && (!job.mode || job.mode === 'answer') && job.phase === 'queued');
+    if (pending) { this.cover(pending, ids); return; }
+    inbox.jobs.push({ questionId: q.id, projectId: q.projectId, sessionId, runId: randomUUID(), phase: 'queued', mode: 'answer', sourceId: ids[0], covered: ids, peer: username });
   }
   private async start(job: QuestionJob, q: TeamQuestion, owner: string) {
     try {
@@ -304,8 +430,8 @@ export class Questions {
         if (owner !== this.owner() || this.stopped) return;
         job.phase = 'running'; await this.save(); this.hooks.changed();
         const peer = q.recipients.find(item => item.username === job.peer);
-        const lines = [...(q.followUps || []).filter(item => !item.target || item.target === job.peer).map(item => ({ at: item.createdAt, text: `发问人：${item.body}` })), ...(peer?.answers || []).map(item => ({ at: item.createdAt, text: `${peer?.name || '对方'}：${item.body}` }))].sort((a, b) => a.at.localeCompare(b.at));
-        const text = `问题：${q.title}\n${q.body}${q.context ? `\n\n附带资料：\n${q.context}` : ''}${lines.length ? `\n\n已有往来：\n${lines.map(item => item.text).join('\n\n')}` : ''}`;
+        const lines = [...(q.followUps || []).filter(item => !item.target || item.target === job.peer).map(item => ({ at: item.createdAt, text: `发问人：${item.body}${questionFileNote(item.files)}` })), ...(peer?.answers || []).map(item => ({ at: item.createdAt, text: `${peer?.name || '对方'}：${item.body}${questionFileNote(item.files)}` }))].sort((a, b) => a.at.localeCompare(b.at));
+        const text = `问题：${q.title}\n${q.body}${questionFileNote(q.files)}${q.context ? `\n\n附带资料：\n${q.context}` : ''}${lines.length ? `\n\n已有往来：\n${lines.map(item => item.text).join('\n\n')}` : ''}`;
         const sent = await this.hooks.send(job.sessionId, text, job.runId, fillFollowNotice(peer?.name || job.peer || '对方'), true);
         if (!sent && job.phase === 'running') throw new Error('没有起草出继续提问，请检查 Session');
         return;
@@ -315,12 +441,23 @@ export class Questions {
       job.phase = 'running'; await this.save(); this.hooks.changed();
       const followIds = new Set(job.covered || []);
       const follows = (q.followUps || []).filter(item => followIds.has(item.id) && (!item.target || item.target === job.peer));
-      const reply = q.recipients.flatMap(recipient => recipient.answers.map(answer => ({ ...answer, name: recipient.name, username: recipient.username }))).find(answer => answer.id === job.sourceId);
-      if (incoming && !reply) throw new Error('要接入的回复已不存在');
-      const text = incoming
-        ? `问题：${q.title}\n回复人：${reply!.name}\n${reply!.body}`
-        : `问题：${q.title}\n${q.body}\n\n附带资料：\n${q.context}${follows.length ? `\n\n同一问题的后续信息：\n${follows.map(item => item.body).join('\n\n')}` : ''}`;
-      const notice = incoming ? (job.mode === 'auto' ? autoDialogueNotice(reply!.name) : '') + incomingReplyNotice(reply!.name) : follows.length && job.sourceId !== 'origin' ? incomingFollowNotice(q.authorName) : incomingQuestionNotice(q.authorName);
+      const answerIds = new Set([job.sourceId, ...(job.covered || [])].filter((id): id is string => !!id));
+      const replies = job.mode === 'auto'
+        ? q.recipients.filter(recipient => recipient.username === job.peer).flatMap(recipient => recipient.answers.filter(answer => answerIds.has(answer.id)).map(answer => ({ ...answer, name: recipient.name }))).sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
+        : q.recipients.flatMap(recipient => recipient.answers.filter(answer => answer.id === job.sourceId).map(answer => ({ ...answer, name: recipient.name })));
+      if (incoming && !replies.length) throw new Error('要接入的回复已不存在');
+      const introduced = (this.inbox()?.jobs || []).some(item => item.runId !== job.runId && item.questionId === q.id && item.sessionId === job.sessionId && ['tracked', 'sent', 'ready'].includes(item.phase));
+      const followText = follows.map(item => `${item.body}${questionFileNote(item.files)}`).join('\n\n');
+      const replyText = replies.map(answer => `回复人：${answer.name}\n${answer.body}${questionFileNote(answer.files)}`).join('\n\n');
+      const text = job.mode === 'import'
+        ? visibleImportedReply(introduced, q.title, replies[0].name, replies[0].body, replies[0].files)
+        : incoming
+        ? `${introduced ? '' : `问题：${q.title}\n`}${replyText}`
+        : introduced && followText
+          ? followText
+          : `问题：${q.title}\n${q.body}${questionFileNote(q.files)}\n\n附带资料：\n${q.context}${followText ? `\n\n同一问题的后续信息：\n${followText}` : ''}`;
+      const notice = incoming ? (job.mode === 'auto' ? autoDialogueNotice(replies[0].name) : '') + incomingReplyNotice(replies[0].name) : follows.length && job.sourceId !== 'origin' ? incomingFollowNotice(q.authorName) : incomingQuestionNotice(q.authorName);
+      try { job.outputSnapshot = [...(this.hooks.session(job.sessionId).outputFiles || [])]; } catch { job.outputSnapshot = []; }
       const sent = await this.hooks.send(job.sessionId, text, job.runId, notice);
       if (!sent && job.phase === 'running') throw new Error('本轮回答未完成，请检查 Session');
     } catch (e: any) { if (job.phase === 'running' || job.phase === 'queued') { job.phase = 'error'; job.error = e.message; } await this.save(); this.hooks.changed(); }
@@ -340,38 +477,43 @@ export class Questions {
       return;
     }
     if (job.mode === 'fill') {
-      const body = withoutQuestionControl(answer || '').trim();
+      const body = this.fillText(answer || '');
       if (failed || !body) { job.phase = 'error'; job.error = session.error || '没有起草出继续提问'; }
-      else { job.answer = body.slice(0, 12000); job.phase = 'tracked'; this.rememberFill(inbox, job.questionId, job.peer, job.answer); }
+      else { job.answer = body; job.phase = 'tracked'; this.rememberFill(inbox, job.questionId, job.peer, body); }
       await this.save(); this.hooks.changed(); void this.sync().catch(() => {}); return;
     }
     if (job.mode === 'import' || job.mode === 'ingest') {
       job.phase = failed ? 'error' : 'tracked';
       if (job.phase === 'error') job.error = session.error || '回复引入已停止';
-      else { const control = questionControl(answer || ''); if (control.kind === 'continue') this.rememberFill(inbox, job.questionId, job.peer, control.body); }
+      else this.rememberJobFill(inbox, job, answer || '');
       await this.save(); this.hooks.changed(); void this.sync().catch(() => {}); return;
     }
     if (job.mode === 'auto') {
       const dialogue = inbox.dialogues?.find(item => item.questionId === job.questionId && item.peer === job.peer);
-      const control = questionControl(answer || '');
+      const ending = questionSuggestsEnd(answer || '');
+      const body = withoutQuestionFields(answer || '');
       if (failed || !answer) { job.phase = 'error'; job.error = session.error || '自动对话已停止'; }
-      else if (control.kind === 'end') {
+      else if (ending) {
         job.phase = 'tracked';
+        this.rememberJobFill(inbox, job, answer || '');
         if (dialogue) dialogue.suggested = true;
         for (const other of inbox.jobs) if (other !== job && other.mode === 'auto' && other.questionId === job.questionId && other.peer === job.peer && other.phase === 'queued') other.phase = 'closed';
         if (job.peer) await this.request(job.projectId, { kind: 'suggest', id: job.questionId, username: job.peer }).catch((error: any) => { job.error = error.message; });
-      } else if (control.kind === 'continue' && control.body && dialogue && !dialogue.suggested) {
+      } else if (body && dialogue && !dialogue.suggested) {
         job.phase = 'tracked';
-        this.rememberFill(inbox, job.questionId, job.peer, control.body);
-        await this.follow(job.projectId, job.questionId, randomUUID(), control.body, job.peer).catch((error: any) => { job.phase = 'error'; job.error = error.message; });
-      } else job.phase = 'tracked';
+        this.rememberJobFill(inbox, job, answer || '');
+        const ids = await this.stageTurnFiles(session, job.outputSnapshot);
+        try { await this.follow(job.projectId, job.questionId, randomUUID(), body, job.peer, ids); }
+        catch (error: any) { job.phase = 'error'; job.error = error.message; }
+        finally { for (const id of ids) await this.unstage(id); }
+      } else { job.phase = 'tracked'; this.rememberJobFill(inbox, job, answer || ''); }
       await this.save(); this.hooks.changed(); void this.sync().catch(() => {}); return;
     }
-    const control = questionControl(answer || '');
-    const body = control.kind === 'end' ? (control.body || '我认为这条提问可以结束。') : answer;
+    const ending = questionSuggestsEnd(answer || '');
+    const body = ending ? (withoutQuestionFields(answer || '') || '我认为这条提问可以结束。') : withoutQuestionFields(answer || '');
     if (failed || !body) { job.phase = 'error'; job.error = session.error || '回答已停止或没有生成答案'; }
     else if (body.length > 48000) { job.phase = 'error'; job.error = '答案过长，请在 Session 中精简后重新回答'; }
-    else { job.answer = body; job.phase = 'ready'; if (control.kind === 'end' && job.peer) await this.request(job.projectId, { kind: 'suggest', id: job.questionId, username: job.peer }).catch((error: any) => { job.error = error.message; }); }
+    else { job.answer = body; job.phase = 'ready'; try { job.files = await this.captureTurnFiles(session, job); } catch { /* The reply is still delivered when a new file cannot be copied. */ } this.rememberJobFill(inbox, job, answer || ''); if (ending && job.peer) await this.request(job.projectId, { kind: 'suggest', id: job.questionId, username: job.peer }).catch((error: any) => { job.error = error.message; }); }
     await this.save(); this.hooks.changed(); void this.sync().catch(() => {});
   }
   async sessionStopped(session: AgentSession) {

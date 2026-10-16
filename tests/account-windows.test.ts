@@ -39,7 +39,7 @@ test('production window routing restores the account in any window, isolates fai
     static fromWebContents(contents: unknown) { return opened.find(window => window.webContents === contents); }
     static getFocusedWindow() { return opened.find(window => !window.destroyed); }
     isDestroyed() { return this.destroyed; } isFocused() { return false; } isMinimized() { return false; }
-    flashFrame() {} setMenuBarVisibility() {} focus() {} show() {} restore() {}
+    flashFrame() {} setMenuBarVisibility() {} focus() {} show() {} hide() {} restore() {}
     async loadFile(file: string) { this.entry = file; }
     destroy() { this.destroyed = true; this.emit('closed'); }
     close() { this.emit('close', { preventDefault() {} }); }

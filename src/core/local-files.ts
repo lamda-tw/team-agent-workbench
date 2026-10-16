@@ -212,7 +212,8 @@ export class LocalFileConnection {
   private async checked(binding: RemoteBinding, target: string, write = false, missing = false) {
     this.channel(binding); target = assertRemote(binding.project.remoteRoot, target); await this.access(target);
     const p = binding.project, suffix = target.slice(p.remoteRoot.length).split('/').filter(Boolean), user = this.profile!.username;
-    if (suffix.some(s => s.startsWith('.'))) throw new Error('模拟权限拒绝：管理记录不可操作');
+    const attachmentBlob = !write && suffix[0] === '.workbench-attachments' && suffix.length === 3 && /^[a-f0-9]{64}$/.test(suffix[2]);
+    if (suffix.some(s => s.startsWith('.')) && !attachmentBlob) throw new Error('模拟权限拒绝：管理记录不可操作');
     if (write && ['trajectories', 'submissions'].includes(suffix[0]) && suffix[1] !== user) { const { user: member, group } = await this.access(target); if (!member.contentAdminGroups?.includes(group.name)) throw new Error('模拟权限拒绝：不能修改他人的公共提交'); }
     const marker = await this.readProject(p.remoteRoot);
     if (!marker || marker.id !== p.id) throw new Error('项目身份已改变');
