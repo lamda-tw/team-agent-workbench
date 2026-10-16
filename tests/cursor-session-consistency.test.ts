@@ -23,9 +23,9 @@ test('existing Cursor records never advertise full synchronization and the compo
 test('native IDE Beta is explicitly separate from legacy view-only and CLI sessions',()=>{
   const render=(enabled:boolean)=>renderToStaticMarkup(React.createElement(BetaFeaturesModal,{features:{cursorDesktopSync:enabled},close(){},changed:async()=>{}}));
   const checkbox=(html:string)=>html.match(/<input[^>]*aria-label="开启 Cursor 原生联动"[^>]*>/)?.[0]||'';
-  assert.doesNotMatch(checkbox(render(false)),/disabled=""/);assert.doesNotMatch(checkbox(render(true)),/disabled=""/);assert.match(render(true),/保留原生会话打开/);
+  assert.doesNotMatch(checkbox(render(false)),/disabled=""/);assert.doesNotMatch(checkbox(render(true)),/disabled=""/);assert.match(render(true),/保留普通 IDE 窗口/);assert.match(render(true),/切回已有标签页/);
   const picker=renderToStaticMarkup(React.createElement(NativeSessionPicker,{provider:'cursor',projectId:'project',cursorDesktopBeta:true,close(){},linked(){}}));
-  assert.match(picker,/原生会话 · Beta/);assert.match(picker,/普通 IDE 窗口当前打开/);assert.doesNotMatch(picker,/按 Cursor Agents 的项目查看/);
+  assert.match(picker,/原生会话 · Beta/);assert.match(picker,/普通 IDE 当前显示/);assert.match(picker,/模型、模式和权限双向同步/);assert.doesNotMatch(picker,/按 Cursor Agents 的项目查看/);
 });
 
 test('verified file bindings enable send and queue actions while preserving the native execution owner',()=>{

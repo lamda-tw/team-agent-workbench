@@ -16,7 +16,29 @@ export async function cursorIdePage(arg: { operation?: string; id?: string; cwd?
     const bubble = document.querySelector('[id^="bubble-' + id + '-"]');
     return bubble?.closest('[role="tabpanel"]')?.getAttribute('aria-label') || document.title || 'Cursor 会话';
   };
-  if (arg.operation === 'catalog') return { chats: roots().map(root => ({ nativeId: nativeId(root), cwd, title: title(nativeId(root)) })), workspaces: [cwd] };
+  // Native editor tabs carry the resource basename (the composer UUID).
+  // Titles are editable and may collide; never use them to select a chat.
+  const tabs = () => [...document.querySelectorAll<HTMLElement>('.tab[role="tab"][data-resource-name]')].filter(visible);
+  if (arg.operation === 'catalog') return { chats: roots().map(root => ({ nativeId: nativeId(root), cwd, title: title(nativeId(root)) })), workspaces: [cwd], tabs: tabs().map(tab => ({ nativeId: tab.getAttribute('data-resource-name'), cwd })) };
+  const modal = () => [...document.querySelectorAll('[role="dialog"], [role="alertdialog"], .monaco-dialog-box')].some(node => visible(node)
+    && (node.getAttribute('aria-modal') === 'true' || !node.closest('.notifications-toasts, .notifications-center, .notification-toast-container')));
+  const anchors: Map<string, any> = (window as any).__teamWorkbenchCursorIdeAnchors ||= new Map();
+  if (arg.operation === 'release') { anchors.delete(arg.token!); return {}; }
+  if (arg.operation === 'reveal') {
+    if (modal()) throw new Error('请先在 Cursor 原生窗口处理弹窗');
+    for (const [token,anchor] of anchors) if (Date.now()-anchor.at>60000) anchors.delete(token);
+    if (anchors.size) throw new Error('Cursor 正在确认消息送达，请稍后切换会话');
+    const displayed = roots();
+    if (displayed.length > 1) throw new Error('请在 Cursor 中只显示一个会话面板，再继续操作');
+    if (displayed.length === 1 && nativeId(displayed[0]) === arg.id) return {};
+    const matches = tabs().filter(tab => tab.getAttribute('data-resource-name') === arg.id);
+    if (matches.length !== 1) throw new Error('未找到唯一的原生会话标签页，请在 Cursor 中打开这条会话后重试');
+    // Native tabs open their own editor on Enter keyup. No input, stored
+    // history or execution context is copied. The caller verifies the newly
+    // visible composer ID before allowing any subsequent control operation.
+    matches[0].dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }));
+    return {};
+  }
   const target = () => {
     const all = roots(), matches = all.filter(root => nativeId(root) === arg.id);
     if (all.length !== 1 || matches.length !== 1) throw new Error('请在 Cursor 中只显示关联会话，再继续操作');
@@ -28,12 +50,9 @@ export async function cursorIdePage(arg: { operation?: string; id?: string; cwd?
     const messages = [...document.querySelectorAll<HTMLElement>('[data-message-id][data-message-kind="human"], [data-message-id][data-message-kind="assistant"]')].filter(visible).map(node => ({ id: node.getAttribute('data-message-id')!, role: node.getAttribute('data-message-kind') === 'human' ? 'user' as const : 'assistant' as const, text: (node.querySelector<HTMLElement>('.aislash-editor-input-readonly') || node).innerText }));
     // VS Code also gives nonmodal notification toasts role=dialog. They must
     // not hold a chat queue; real modal confirmations still block dispatch.
-    const modal = [...document.querySelectorAll('[role="dialog"], [role="alertdialog"], .monaco-dialog-box')].some(node => visible(node)
-      && (node.getAttribute('aria-modal') === 'true' || !node.closest('.notifications-toasts, .notifications-center, .notification-toast-container')));
-    return { root, input: inputs[0], modal, sessionId: arg.id!, status: modal ? 'approval' : root.getAttribute('data-composer-status') || 'unknown', messages: messages.filter((message, index) => messages.findIndex(other => other.id === message.id) === index), draft: (inputs[0].innerText || '').replace(/[\u200b\ufeff]/g, '') };
+    const blocked = modal();
+    return { root, input: inputs[0], modal: blocked, sessionId: arg.id!, status: blocked ? 'approval' : root.getAttribute('data-composer-status') || 'unknown', messages: messages.filter((message, index) => messages.findIndex(other => other.id === message.id) === index), draft: (inputs[0].innerText || '').replace(/[\u200b\ufeff]/g, '') };
   };
-  const anchors: Map<string, any> = (window as any).__teamWorkbenchCursorIdeAnchors ||= new Map();
-  if (arg.operation === 'release') { anchors.delete(arg.token!); return {}; }
   const current = state();
   const settings = settingsReader?.(current.root, { ...arg, operation: 'settings' });
   if (arg.operation === 'snapshot') return { sessionId: current.sessionId, status: current.status, messages: current.messages, ...(settings ? { settings } : {}) };
@@ -42,7 +61,6 @@ export async function cursorIdePage(arg: { operation?: string; id?: string; cwd?
     if (arg.operation !== 'settings' && (current.modal || ['generating','applying'].includes(current.status))) throw new Error('请等待当前回复或原生确认结束');
     return settingsReader(current.root, arg);
   }
-  if (arg.operation === 'reveal') return {};
   if (arg.operation === 'focus') { if(current.modal)throw new Error('请先在 Cursor 原生窗口处理弹窗');current.input.focus(); return {}; }
   if (arg.operation === 'prepareSend') {
     if (settings && settings.state !== 'ready') throw new Error('正在确认 Cursor 设置，消息尚未发送');

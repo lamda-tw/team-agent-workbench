@@ -181,3 +181,12 @@ test('workspace identity rejects remote and multi-root folders and retains speci
   assert.equal(cursorWorkspacePath({ configPath: { scheme: 'file', path: '/example.code-workspace' } }), undefined);
   assert.equal(cursorWorkspacePath({ uri: { scheme: 'file', authority: 'server', path: '/workspace' } }), undefined);
 });
+
+test('explicit IDE focus waits for cold-launch tab identity but performs the reveal only once',async()=>{
+  const client=new CursorDesktopCdp('ws://127.0.0.1:1234/devtools/browser/test','ide');
+  const nativeId=randomUUID(),cwd=path.resolve('test-workspace'),calls:string[]=[];let attempts=0;
+  const page={async call(method:string){calls.push(method);}};
+  (client as any).target=async(id:string,directory:string,reveal:boolean)=>{assert.equal(id,nativeId);assert.equal(directory,cwd);assert.equal(reveal,true);if(++attempts<3)throw Error('tabs still restoring');return page;};
+  (client as any).read=async(target:unknown,operation:string,args:any)=>{assert.equal(target,page);assert.equal(args.id,nativeId);calls.push(operation);return{};};
+  try{await client.focus(nativeId,cwd);assert.equal(attempts,3);assert.deepEqual(calls,['reveal','Page.bringToFront','focus']);}finally{client.close();}
+});

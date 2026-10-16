@@ -34,10 +34,13 @@ export class CursorFileService implements CursorDesktopIntegration {
     return chats.map(chat=>{try{return{...chat,title:this.readHistory(this.database,chat.nativeId,chat.cwd).title||chat.title};}catch{return chat;}});
   }
   async prepare(session: AgentSession, launch = true, persist?: () => Promise<void>) {
-    const job = this.preparation.then(() => this.associate(session, launch, persist));
+    await this.schedule(session, launch, persist, false);
+  }
+  private async schedule(session: AgentSession, launch: boolean, persist: (() => Promise<void>) | undefined, reveal: boolean) {
+    const job = this.preparation.then(() => this.associate(session, launch, persist, reveal));
     this.preparation = job.catch(() => {}); await job;
   }
-  private async associate(session: AgentSession, launch: boolean, persist?: () => Promise<void>) {
+  private async associate(session: AgentSession, launch: boolean, persist: (() => Promise<void>) | undefined, reveal: boolean) {
     if (this.closed || session.closedAt || session.provider !== 'cursor' || session.purpose !== 'work' || session.networkRoute === 'management' || !session.cursorNative?.managed || !/^[0-9a-f-]{36}$/i.test(session.id)) throw Error('此会话不能关联 Cursor 原生窗口');
     if (!session.nativeId) throw Error('请先在 Cursor 普通 IDE 中创建会话，再使用“导入 Cursor 会话”关联');
     const nativeId = session.nativeId, cwd = session.cwd;
@@ -46,6 +49,7 @@ export class CursorFileService implements CursorDesktopIntegration {
     if (history.issues.some(issue => issue.kind !== 'empty-native-checkpoint')) throw Error('Cursor 原生历史尚未完整保存，请稍后重新连接');
     if(launch)await this.launcher.list(cwd,true);
     const client = await this.launcher.clientFor(cwd, launch);
+    if (reveal) await client.focus(nativeId, cwd);
     // The workspace can exist before Cursor has restored the selected chat.
     // Observe that exact identity while it loads; never create a replacement.
     let observation;
@@ -125,7 +129,7 @@ export class CursorFileService implements CursorDesktopIntegration {
       respond(200,{ok:true});
     }catch(error:any){respond(409,{message:error.message||'Cursor 原生连接暂不可用'});}
   }
-  async open(session:AgentSession,persist?:()=>Promise<void>){await this.prepare(session,true,persist);await(await this.launcher.clientFor(session.cwd,false)).focus(session.nativeId!,session.cwd);}
+  async open(session:AgentSession,persist?:()=>Promise<void>){await this.schedule(session,true,persist,true);}
   async release(sessionId:string){for(const[token,entry]of this.entries)if(entry.owner===sessionId){this.entries.delete(token);await entry.bridge.pauseQueue();for(const request of await entry.bridge.requests())if(request.state==='queued')await entry.bridge.cancel(request.id);}}
   async close(){this.closed=true;await this.preparation;await Promise.allSettled([...this.bridges.values()].map(bridge=>bridge.close()));this.bridges.clear();this.entries.clear();this.server?.closeAllConnections();if(this.server)await new Promise<void>(resolve=>this.server!.close(()=>resolve()));await this.launcher.close();}
 }

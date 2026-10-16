@@ -88,6 +88,19 @@ test('explicit reopening waits for the exact native chat to restore, while passi
   }finally{await f.clean();}
 });
 
+test('explicit reopening selects a hidden native tab before validating it; passive restore never switches tabs',async()=>{
+  const f=await fixture();try{
+    await f.service.prepare(f.session);let visible=false;
+    const snapshot=f.client.snapshot.bind(f.client);
+    f.client.snapshot=async(id,cwd)=>{if(!visible)throw Error('native tab hidden');return snapshot(id,cwd);};
+    f.client.focus=async(id,cwd)=>{assert.equal(id,f.session.nativeId);assert.equal(cwd,f.session.cwd);visible=true;f.calls.push('focus');};
+    await assert.rejects(f.service.prepare(f.session,false),/hidden/);assert.equal(visible,false);
+    await f.service.open(f.session);assert.equal(visible,true);assert.equal(f.calls.filter(call=>call==='focus').length,1);
+    f.session.closedAt=new Date().toISOString();visible=false;
+    await assert.rejects(f.service.open(f.session),/不能关联/);assert.equal(visible,false);
+  }finally{await f.clean();}
+});
+
 test('Workbench imports full native history, bypasses CLI auth and context injection, queues busy sends, and retains observation after Stop',async()=>{
   const f=await fixture();const wb=new Workbench(path.join(f.root,'workbench'),()=>{},()=>{},undefined,undefined,undefined,undefined,f.service);
   try{

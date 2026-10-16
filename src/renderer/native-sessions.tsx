@@ -81,7 +81,7 @@ export function NativeSessionPicker({ provider, projectId, cursorDesktopBeta = f
   const chosen = (catalog?.sessions || []).filter(session => canImportNativeSession(session) && selectedIds.includes(session.nativeId)).sort((left, right) => right.updatedAt - left.updatedAt || left.name.localeCompare(right.name, 'zh-CN'));
   const allSelected = selectable.length > 0 && selectable.every(session => selectedIds.includes(session.nativeId));
   const title = provider === 'codex' ? '接入 Codex 会话' : '接入 Cursor 会话';
-  const explanation = provider === 'codex' ? '按 Codex 项目查看，可以勾选多条，一次导入。已在工作台的会话不能重复导入。' : nativeDesktop ? '关联普通 IDE 窗口当前打开的 Cursor 会话；两端共用原生执行上下文。请保留关联会话打开，模型、权限和工具在 Cursor 中设置。' : '导入已有 Cursor CLI 会话。CLI 会话与原生窗口中的聊天独立。';
+  const explanation = provider === 'codex' ? '按 Codex 项目查看，可以勾选多条，一次导入。已在工作台的会话不能重复导入。' : nativeDesktop ? '关联普通 IDE 当前显示的 Cursor 会话，两端共用原生上下文。切换后，可用“在 Cursor 中打开”回到已打开的标签页。模型、模式和权限双向同步；工具及授权在 Cursor 中处理。' : '导入已有 Cursor CLI 会话。CLI 会话与原生窗口中的聊天独立。';
   const groups = catalog ? orderedNativeSessions(catalog).groups : [];
   const groupButton = (id: string, name: string, count: number) => <button type="button" key={id} aria-pressed={groupId === id} className={groupId === id ? 'selected' : ''} disabled={busy} onClick={() => setGroupId(id)}><span title={name}>{name}</span><small>{count}</small></button>;
   return <div className="modal-backdrop"><section className="modal wide native-session-modal" role="dialog" aria-modal="true" aria-labelledby="native-session-title"><header><h2 id="native-session-title">{title}</h2><button className="icon" aria-label="关闭窗口" disabled={busy} onClick={close}>×</button></header>

@@ -128,16 +128,27 @@ export class CursorDesktopCdp implements CursorDesktopClient {
     for(const page of await this.windows())if((await this.read(page,'catalog')).workspaces.some((directory:string)=>sameNativePath(directory,cwd)))return true;
     return false;
   }
-  private async target(id:string,cwd:string){
+  private async target(id:string,cwd:string,reveal=false){
     const matches:CursorCdpConnection[]=[];
-    for(const page of await this.windows())if((await this.read(page,'catalog')).chats.some((chat:CursorDesktopChat)=>chat.nativeId===id&&sameNativePath(chat.cwd,cwd)))matches.push(page);
+    for(const page of await this.windows()){
+      const catalog=await this.read(page,'catalog');
+      const candidates=[...catalog.chats,...(reveal&&this.surface==='ide'?catalog.tabs||[]:[])];
+      if(candidates.some((chat:CursorDesktopChat)=>chat.nativeId===id&&sameNativePath(chat.cwd,cwd)))matches.push(page);
+    }
     if(matches.length!==1)throw new Error(this.surface === 'ide' ? '请在 Cursor 普通 IDE 中打开关联会话，并保持原工作目录；不能关联重复窗口' : '请在 Cursor Agents 中打开关联会话，并保持原工作目录；不能关联重复窗口');
     return matches[0];
   }
   private serial<T>(work:()=>Promise<T>):Promise<T>{const job=this.mutation.then(work,work);this.mutation=job.catch(()=>{});return job;}
   async snapshot(id:string,cwd:string):Promise<CursorNativeSnapshot>{return this.read(await this.target(id,cwd),'snapshot',{id,cwd});}
   focus(id:string,cwd:string){return this.serial(async()=>{
-    const page=await this.target(id,cwd);await this.read(page,'reveal',{id,cwd});await page.call('Page.bringToFront');
+    // On a cold launch the workspace configuration appears before native
+    // editor tabs. Retry only identity discovery, never a reveal or send.
+    let page:CursorCdpConnection;
+    for(let attempt=0;;attempt++){
+      try{page=await this.target(id,cwd,true);break;}
+      catch(error){if(this.surface!=='ide'||attempt>=49)throw error;await pause(100);}
+    }
+    await this.read(page,'reveal',{id,cwd});await page.call('Page.bringToFront');
     for(let i=0;i<30;i++){try{await this.read(page,'focus',{id,cwd});return;}catch{await pause(100);}}
     throw new Error(this.surface === 'ide' ? '请在 Cursor 普通 IDE 中打开关联会话' : '请在 Cursor Agents 中打开关联会话');
   });}

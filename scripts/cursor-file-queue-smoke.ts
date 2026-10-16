@@ -43,6 +43,15 @@ try {
   assert.ok(calls.every((call:any)=>call.action==='session.cursorNative.queue'&&call.payload.id==='workbench-session'));
   assert.equal(calls[2].payload.requestId,'uncertain-id');assert.equal(calls[2].payload.nativeMessageId,'native-message-id');
   assert.equal(calls[3].payload.nativeMessageId,undefined);assert.equal(calls[4].payload.requestId,'queued-id');
+  const waiting={paused:false,requests:[{id:'queued-id',text:'waiting prompt',state:'queued'}]};
+  await show({desktopSyncState:'disconnected',cursorQueue:waiting});
+  await expect(page.getByText('等待关联会话连接，可点击“在 Cursor 中打开”',{exact:true})).toBeVisible();
+  await show({desktopSyncState:'connected',cursorQueue:waiting,cursorSettings:{state:'ready',pending:{state:'confirming'}}});
+  await expect(page.getByText('等待原生设置确认',{exact:true})).toBeVisible();
+  await show({desktopSyncState:'connected',cursorQueue:waiting,status:'running'});
+  await expect(page.getByText('等待前一轮结束',{exact:true})).toBeVisible();
+  await show({desktopSyncState:'connected',cursorQueue:{...waiting,paused:true}});
+  await expect(page.getByText('等待继续队列',{exact:true})).toBeVisible();
   await show({messages:[{nativeItemId:'native-id'}],cursorQueue:{paused:false,requests:[{id:'accepted-id',text:'already in canonical history',state:'accepted',nativeMessageId:'native-id'}]}});
   await expect(page.getByRole('region')).toHaveCount(0);
   await expect(page.getByText('already in canonical history')).toHaveCount(0);

@@ -33,6 +33,25 @@ async function main(){
     await page.locator('[role=dialog]').evaluate(node=>node.remove());await call('prepareSend');await page.locator('[contenteditable]').fill('never submit to another chat');
     await page.locator('[data-composer-id]').evaluate(node=>node.setAttribute('data-composer-id','22222222-2222-4222-8222-222222222222'));
     await assert.rejects(call('submit',{text:'never submit to another chat'}),/关联会话/);assert.equal(await page.evaluate(()=>(window as any).sent),1);
+    const otherId='22222222-2222-4222-8222-222222222222';
+    await page.setContent(`<div class="tab" role="tab" data-resource-name="${nativeId}">Same title</div><div class="tab" role="tab" data-resource-name="${otherId}">Same title</div><div data-composer-id="${nativeId}" data-composer-status="completed"><div contenteditable="true" role="textbox">keep A draft</div></div><div data-composer-id="${otherId}" data-composer-status="completed" hidden><div contenteditable="true" role="textbox">keep B draft</div></div>`);
+    await call('release');
+    await page.evaluate(()=>{(window as any).reveals=[];for(const tab of document.querySelectorAll<HTMLElement>('.tab'))tab.addEventListener('keyup',(event:any)=>{if(event.key!=='Enter')return;const id=tab.dataset.resourceName;(window as any).reveals.push(id);for(const root of document.querySelectorAll<HTMLElement>('[data-composer-id]'))root.hidden=root.dataset.composerId!==id;});});
+    assert.equal((await call('catalog')).chats.length,1);assert.equal((await call('catalog')).tabs.length,2);
+    await assert.rejects(call('snapshot',{id:otherId}),/关联会话/);assert.deepEqual(await page.evaluate(()=>(window as any).reveals),[],'passive observation never switches native tabs');
+    await call('reveal',{id:otherId});assert.equal((await call('snapshot',{id:otherId})).sessionId,otherId);
+    assert.equal(await page.locator(`[data-composer-id="${nativeId}"] [contenteditable]`).textContent(),'keep A draft');
+    assert.equal(await page.locator(`[data-composer-id="${otherId}"] [contenteditable]`).textContent(),'keep B draft');
+    await call('reveal');await assert.rejects(call('reveal',{id:otherId,cwd:'D:/other'}),/工作目录/);
+    await page.evaluate(()=>document.body.append(document.querySelectorAll('.tab')[1].cloneNode(true)));
+    await assert.rejects(call('reveal',{id:otherId}),/唯一/);await page.locator('.tab').last().evaluate(node=>node.remove());
+    await assert.rejects(call('reveal',{id:'33333333-3333-4333-8333-333333333333'}),/唯一/);
+    await page.evaluate(()=>{const modal=document.createElement('div');modal.setAttribute('role','dialog');modal.textContent='Confirmation';document.body.append(modal);});
+    await assert.rejects(call('reveal',{id:otherId}),/弹窗/);await page.locator('[role=dialog]').evaluate(node=>node.remove());
+    await page.locator(`[data-composer-id="${nativeId}"] [contenteditable]`).fill('');await call('prepareSend');
+    await assert.rejects(call('reveal',{id:otherId}),/确认消息送达/);await call('release');await call('reveal',{id:otherId});
+    assert.deepEqual(await page.evaluate(()=>(window as any).reveals),[otherId,nativeId,otherId]);
+    console.log('IDE tab recovery passed: exact UUID with duplicate titles, passive no-switch, preserved drafts, wrong workspace, duplicate/missing tab, modal and in-flight send guards.');
     console.log('IDE DOM guards passed: exact workspace/chat, native drafts, applying barrier, modal barrier, scoped single send, receipt identity and stale anchor rejection. No real Cursor or model used.');
   }finally{await browser.close();}
 }

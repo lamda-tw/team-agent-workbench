@@ -54,7 +54,14 @@ test('transient aborted storage immediately after send does not finish or abort 
 
 test('a lost send receipt survives restart without automatic replay and pauses later submissions',async()=>{
   const f=await fixture();let second:CursorFileBridge|undefined;try{
-    f.fail();const request=await f.bridge.enqueue('only once');await f.bridge.refresh();
+    f.fail();const request=await f.bridge.enqueue('only once');
+    // Enqueue acknowledges durable acceptance, not completion of the detached
+    // dispatcher. Observe its terminal delivery state before simulating restart.
+    for(let attempt=0;attempt<40;attempt++){
+      await f.bridge.refresh();
+      if((await f.bridge.requests())[0].state==='uncertain')break;
+      await new Promise(resolve=>setTimeout(resolve,5));
+    }
     assert.equal((await f.bridge.requests())[0].state,'uncertain');
     await f.bridge.close();second=f.make();await second.start();await second.enqueue('wait behind uncertain request');await second.refresh();
     assert.equal((await second.view()).paused,true);assert.deepEqual(f.calls,['only once','detach']);
