@@ -11,7 +11,7 @@ import { Workbench } from '../src/core/workbench';
 import { Questions } from '../src/core/questions';
 import { memberProfile } from './fixtures/member-profile';
 import { changeQuestion, questionView, type TeamQuestion, type QuestionCommand, type QuestionMember } from '../src/shared/questions';
-import { autoDialogueNotice, fillFollowNotice, incomingQuestionNotice, incomingReplyNotice, questionSuggestsEnd, sessionMessageText, withoutQuestionFields } from '../src/shared/session-context-text';
+import { autoDialogueNotice, fillFollowNotice, incomingQuestionNotice, incomingReplyNotice, questionSuggestsEnd, sessionMessageText, sessionQuestionDraft, withoutQuestionFields } from '../src/shared/session-context-text';
 import { historyMarkdown } from '../src/core/artifacts';
 import { QuestionDetail, QuestionCard, QuestionPanel, questionUnread } from '../src/renderer/team-questions';
 import type { AgentSession } from '../src/shared/types';
@@ -186,6 +186,17 @@ test('question and follow-up attachments stay with their audience', () => {
   assert.match(panel, /添加附件/);
 });
 
+test('a new question can be filled from the latest idle reply and renders markdown', () => {
+  const items: TeamQuestion[] = [], q = mutate(items, 'alice', { ...create(), body: '请核对 **v2** 接口', context: '- 任务 A' });
+  const detail = renderToStaticMarkup(React.createElement(QuestionDetail, { question: questionView(q, 'alice')!, username: 'alice', inbox: { items, jobs: [], read: {} }, sessions: [], changed: async () => {} }));
+  assert.match(detail, /<strong>v2<\/strong>/);
+  assert.match(detail, /<li>任务 A<\/li>/);
+  const idle = { id: randomUUID(), purpose: 'work', status: 'idle', binding: { project: { id: projectId } }, messages: [{ id: 'a', role: 'assistant', text: '[[继续提问]]\n请改成 v3', createdAt: '' }] } as AgentSession;
+  const panel = (session: AgentSession) => renderToStaticMarkup(React.createElement(QuestionPanel, { inbox: { items: [], jobs: [], read: {} }, selectedId: '', session, username: 'alice', sessions: [session], connected: true, select: () => {}, close: () => {}, changed: async () => {} }));
+  assert.equal(sessionQuestionDraft(idle), '请改成 v3');
+  assert.match(panel(idle), /title="把 AI 生成的提问填进输入框"/);
+  assert.match(panel({ ...idle, status: 'running' }), /disabled="" title="还没有 AI 生成的提问"/);
+});
 test('both sides share the conversation composer; recipient can type before linking a Session', () => {
   const items: TeamQuestion[] = [], q = mutate(items, 'alice', create());
   const render = (username: string, replyModes?: Record<string, 'manual' | 'auto'>, sessions: AgentSession[] = []) => renderToStaticMarkup(React.createElement(QuestionDetail, { question: questionView(q, username)!, username, inbox: { items, jobs: [], read: {}, replyModes }, sessions, changed: async () => {} }));

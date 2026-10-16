@@ -36,9 +36,8 @@ import { acceptedSessionContext, isPersonalHandoffSource, sourceIdentity, source
 import { ProjectBriefEditor, ProjectBriefSettings } from './project-brief-editor';
 import React, { useState, useEffect, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import { Folder, FolderOpen, FileText, Plus, Settings as SettingsIcon, ArrowUp, ArrowUpDown, ArrowLeft, RefreshCw, Upload, Download, Link, X, Check, ChevronRight, MessageSquare, Layers, Server, Unplug, Search, Paperclip, Square, ShieldCheck, FileArchive, HardDrive, PanelRightClose, Sparkles, ExternalLink, Copy, Terminal, CircleHelp, BellRing, Pencil, Puzzle, ClipboardList, Ellipsis, Compass } from 'lucide-react';
+import { Markdown } from './markdown';
+import { Folder, FolderOpen, FileText, Plus, Settings as SettingsIcon, ArrowUp, ArrowUpDown, ArrowLeft, RefreshCw, Upload, Download, Link, X, Check, ChevronRight, MessageSquare, Layers, Server, Unplug, Search, Paperclip, Square, ShieldCheck, FileArchive, HardDrive, PanelRightClose, Sparkles, Copy, Terminal, CircleHelp, BellRing, Pencil, Puzzle, ClipboardList, Ellipsis, Compass } from 'lucide-react';
 import { NativeSessionPicker } from './native-sessions';
 import './native-sessions.css';
 import type { AgentCapabilitySelection, AgentSession, ConclusionMatch, ConnectionProfile, ContentUpdate, Draft, FilePreview, Project, Provider, ProviderAuth, RemoteEntry, Settings, Snapshot, WorkspaceAccess } from '../shared/types';
@@ -107,7 +106,6 @@ function ComposerResizeHandle({ height, resize }: { height: number; resize: (hei
 function SidebarSplitter({ label, controls, value, fallback, resize, begin }: { label: string; controls: string; value: number; fallback: number; resize: (height: number, persist?: boolean) => void; begin: (event: React.PointerEvent<HTMLButtonElement>) => void }) {
   return <button type="button" className="sidebar-splitter" role="separator" aria-label={label} aria-orientation="horizontal" aria-controls={controls} aria-valuemin={MIN_SIDEBAR_PANE_HEIGHT} aria-valuemax={MAX_SIDEBAR_PANE_HEIGHT} aria-valuenow={value} title="上下拖动只调整这一块的高度，不会带动旁边的区域；双击恢复默认" onPointerDown={begin} onDoubleClick={() => resize(fallback, true)} onKeyDown={event => { if (event.key === 'ArrowUp' || event.key === 'ArrowDown') { event.preventDefault(); resize(value + (event.key === 'ArrowUp' ? -24 : 24), true); } }}><span/></button>;
 }
-function Markdown({ text, openFile }: { text: string; openFile?: (path: string) => void }) { return <div className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} urlTransform={url => /^(https?:|file:|[a-z]:[/\\])/i.test(url) || !/^[a-z][a-z\d+.-]*:/i.test(url) ? url : ''} components={{ a: ({ href, children }) => <a href={href} title={href} onClick={e => { e.preventDefault(); if (href && /^https?:/i.test(href)) void api.call('open.link', href); else if (href && !href.startsWith('#')) openFile?.(href); }}>{children}<ExternalLink size={11}/></a>, img: ({ alt }) => <span>[图片：{alt || '附件'}]</span> }}>{text}</ReactMarkdown></div>; }
 function Modal({ title, children, close, wide = false }: { title: string; children: React.ReactNode; close: () => void; wide?: boolean }) { return <div className="modal-backdrop"><section className={'modal ' + (wide ? 'wide' : '')}><header><h2>{title}</h2><button className="icon" aria-label="关闭窗口" onClick={close}><X size={19}/></button></header>{children}</section></div>; }
 function SessionRenameModal({ session, close, saved }: { session: AgentSession; close: () => void; saved: () => Promise<void> }) {
   const [title, setTitle] = useState(session.title), [busy, setBusy] = useState(false), [error, setError] = useState('');

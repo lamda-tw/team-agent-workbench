@@ -2,10 +2,13 @@ import React, { useEffect, useRef, useState } from 'react';
 import { MessageSquare, X } from 'lucide-react';
 import type { AgentSession, FilePreview, Project } from '../shared/types';
 import { visibleImportedReply, type QuestionFile, type QuestionInbox, type QuestionMember, type TeamQuestion } from '../shared/questions';
+import { sessionQuestionDraft } from '../shared/session-context-text';
 import { QUESTION_COMPOSER_DEFAULT, QUESTION_COMPOSER_MAX, QUESTION_COMPOSER_MIN, questionComposerHeightAfterDrag } from './composer-resize';
+import { Markdown } from './markdown';
 
 type StagedFile = { id: string; name: string; size: number };
 const fileSize = (n: number) => n < 1024 ? `${n} B` : n < 1024 ** 2 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 ** 2).toFixed(1)} MB`;
+function QuestionBody({ text }: { text: string }) { return <div className="team-question-text"><Markdown text={text}/></div>; }
 function FilePreviewDialog({ file, close }: { file: FilePreview; close: () => void }) {
   return <div className="modal-backdrop"><section className="modal wide" role="dialog" aria-modal="true" aria-label="附件预览"><header><h2>{file.name}</h2><button className="icon" aria-label="关闭附件预览" onClick={close}>×</button></header><div className="modal-body">{file.type === 'image' ? <img style={{ maxWidth: '100%' }} src={file.content} alt={file.name}/> : file.type === 'text' ? <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{file.content}</pre> : <p>此格式暂不支持预览，请下载后查看。</p>}{file.truncated && <p className="muted small">仅预览前 512 KB。</p>}</div></section></div>;
 }
@@ -46,6 +49,7 @@ function QuestionComposer({ session, sent }: { session: AgentSession; sent: (q: 
   const [files, setFiles] = useState<StagedFile[]>([]);
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [loading, setLoading] = useState(true);
   const submitted = useRef<{ payload: string; id: string } | undefined>(undefined), working = useRef(false);
+  const draft = sessionQuestionDraft(session);
   useEffect(() => { let active = true; void window.workbench.call<QuestionMember[]>('question.members', { projectId: session.binding!.project.id }).then(value => { if (active) setMembers(value); }, e => { if (active) setError(e.message); }).finally(() => { if (active) setLoading(false); }); return () => { active = false; }; }, [session.id]);
   const send = async () => {
     if (working.current) return; working.current = true; setBusy(true); setError('');
@@ -57,7 +61,8 @@ function QuestionComposer({ session, sent }: { session: AgentSession; sent: (q: 
   };
   return <details className="team-question-compose" open><summary>向组内成员提问</summary><fieldset disabled={busy || !!session.closedAt}>
     <label>问题标题<input maxLength={200} value={title} onChange={e => setTitle(e.target.value)}/></label>
-    <label>需要补充什么<textarea rows={4} maxLength={12000} value={body} onChange={e => setBody(e.target.value)}/></label>
+    <label>需要补充什么<textarea rows={4} maxLength={12000} value={body} onChange={e => setBody(e.target.value)} placeholder="可直接写 Markdown"/></label>
+    <button type="button" className="team-question-tool boxed" disabled={!draft || busy} title={draft ? '把 AI 生成的提问填进输入框' : '还没有 AI 生成的提问'} onClick={() => draft && setBody(draft)}>AI填入</button>
     <label>补充资料（可选）<textarea rows={2} maxLength={24000} placeholder="填写可以分享的背景、资料或链接" value={context} onChange={e => setContext(e.target.value)}/></label>
     <div className="team-question-attachments"><button type="button" className="secondary" disabled={busy || files.length >= 30} onClick={() => void window.workbench.call<StagedFile[]>('question.files.stage').then(added => setFiles(current => { const next = [...current]; for (const file of added) if (!next.some(item => item.id === file.id) && next.length < 30) next.push(file); return next; }), reason => setError(reason.message))}>添加附件</button>{files.map(file => <div className="team-question-file-chip" key={file.id}><span>{file.name}</span><small className="muted">{fileSize(file.size)}</small><button type="button" className="text-button" disabled={busy} onClick={() => void window.workbench.call('question.files.remove', { id: file.id }).then(() => setFiles(current => current.filter(item => item.id !== file.id)), reason => setError(reason.message))}>移除</button></div>)}</div>
     <span>接收成员（可多选）</span><div className="team-question-members">{members.map(m => <label key={m.username}><input type="checkbox" checked={selected.includes(m.username)} onChange={e => setSelected(current => e.target.checked ? [...current, m.username] : current.filter(name => name !== m.username))}/>{m.name} <small className="muted">{m.username}</small></label>)}{loading ? <small>正在读取成员…</small> : !members.length && <small>当前组没有可选择的其他成员</small>}</div>
@@ -150,8 +155,8 @@ export function QuestionDetail({ question: q, inbox, username, sessions, session
           const placed = !!turn.answerId && inbox.jobs.some(job => job.sessionId === linked?.id && job.phase !== 'error' && job.phase !== 'closed' && (job.sourceId === turn.answerId || job.covered?.includes(turn.answerId!)));
           const failed = !!turn.answerId && inbox.jobs.some(job => job.sessionId === linked?.id && job.phase === 'error' && (job.sourceId === turn.answerId || job.covered?.includes(turn.answerId!)));
           const acknowledged = placed || (placing === turn.answerId && !failed);
-          return <article key={turn.id} className={'team-question-turn' + (turn.mine ? ' mine' : '')}><span className="who">{turn.who} · {time(turn.at)}</span><div className="team-question-text">{turn.body}</div><QuestionFileList projectId={q.projectId} questionId={q.id} files={turn.files}/>{author && !q.closedAt && !dialogue && turn.answerId && linked && !linked.closedAt && <button className={'secondary compact team-question-import' + (acknowledged ? ' is-placed' : '')} disabled={busy || acknowledged} onClick={() => { const answerId = turn.answerId!, sessionId = linked.id; const introduced = inbox.jobs.some(job => job.questionId === q.id && job.sessionId === sessionId && ['tracked', 'sent', 'ready'].includes(job.phase)); setPlacing(answerId); onPlace?.(sessionId, visibleImportedReply(introduced, q.title, r.name, turn.body, turn.files)); void run('question.import', { projectId: q.projectId, id: q.id, sessionId, answerId }).then(ok => { if (!ok) { setPlacing(current => current === answerId ? '' : current); onUnplace?.(sessionId); } }); }}>{acknowledged ? '已放入 Session' : '引入到 Session'}</button>}</article>;
-        })}{pendingSend && !turns.some(turn => turn.mine && turn.body === pendingSend) && <article className="team-question-turn mine is-pending" role="status"><span className="who">我 · 刚刚</span><div className="team-question-text">{pendingSend}</div><p className="team-question-ack">已写入对话，正在送达。</p></article>}{!turns.length && !pendingSend && <p className="muted small">还没有往来。</p>}</div>
+          return <article key={turn.id} className={'team-question-turn' + (turn.mine ? ' mine' : '')}><span className="who">{turn.who} · {time(turn.at)}</span><QuestionBody text={turn.body}/><QuestionFileList projectId={q.projectId} questionId={q.id} files={turn.files}/>{author && !q.closedAt && !dialogue && turn.answerId && linked && !linked.closedAt && <button className={'secondary compact team-question-import' + (acknowledged ? ' is-placed' : '')} disabled={busy || acknowledged} onClick={() => { const answerId = turn.answerId!, sessionId = linked.id; const introduced = inbox.jobs.some(job => job.questionId === q.id && job.sessionId === sessionId && ['tracked', 'sent', 'ready'].includes(job.phase)); setPlacing(answerId); onPlace?.(sessionId, visibleImportedReply(introduced, q.title, r.name, turn.body, turn.files)); void run('question.import', { projectId: q.projectId, id: q.id, sessionId, answerId }).then(ok => { if (!ok) { setPlacing(current => current === answerId ? '' : current); onUnplace?.(sessionId); } }); }}>{acknowledged ? '已放入 Session' : '引入到 Session'}</button>}</article>;
+        })}{pendingSend && !turns.some(turn => turn.mine && turn.body === pendingSend) && <article className="team-question-turn mine is-pending" role="status"><span className="who">我 · 刚刚</span><QuestionBody text={pendingSend}/><p className="team-question-ack">已写入对话，正在送达。</p></article>}{!turns.length && !pendingSend && <p className="muted small">还没有往来。</p>}</div>
       </section>;
       const composer = !q.closedAt && !pendingClose && <div className={'team-question-composer' + (autoNow ? ' is-auto' : '')}>
           {!autoNow && <QuestionResizeHandle height={laneHeight} resize={resizeLane}/>}
@@ -178,7 +183,7 @@ export function QuestionDetail({ question: q, inbox, username, sessions, session
   return <section className="team-question-detail">
     <div className="team-question-detail-scroll">
       {onBack && <button className="text-button" onClick={onBack}>返回问题列表</button>}
-      <div className="row"><h3>{q.title}</h3><span className="spacer"/><span className="badge">{q.closedAt ? '已关闭' : '开放'}</span></div><p className="muted small">{q.authorName} · {time(q.createdAt)}</p><div className="team-question-text">{q.body}</div><QuestionFileList projectId={q.projectId} questionId={q.id} files={q.files}/>{q.context && <details><summary>补充资料</summary><div className="team-question-text">{q.context}</div></details>}
+      <div className="row"><h3>{q.title}</h3><span className="spacer"/><span className="badge">{q.closedAt ? '已关闭' : '开放'}</span></div><p className="muted small">{q.authorName} · {time(q.createdAt)}</p><QuestionBody text={q.body}/><QuestionFileList projectId={q.projectId} questionId={q.id} files={q.files}/>{q.context && <details><summary>补充资料</summary><QuestionBody text={q.context}/></details>}
       {q.closedAt && <p className="callout">提问已于 {time(q.closedAt)} 结束，不再接收答复。已关联的 Session 保留，需要结束时请在 Session 中手动关闭。</p>}
       {author && <p className="muted small">{q.recipients.filter(r => r.answers.length).length}/{q.recipientCount} 人已回复 · 每人一条对话</p>}
       {lanes.map(lane => lane.thread)}

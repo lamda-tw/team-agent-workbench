@@ -97,6 +97,12 @@ export function withoutQuestionFields(text: string) {
   }).join('\n').trim();
 }
 
+export function sessionQuestionDraft(session: Pick<AgentSession, 'messages' | 'status'> & Partial<Pick<AgentSession, 'closedAt' | 'error' | 'stoppedAt'>>) {
+  if (session.closedAt || session.error || session.stoppedAt || session.status !== 'idle') return '';
+  const answer = [...(session.messages || [])].reverse().find(message => message.role === 'assistant' && !message.kind)?.text || '';
+  return withoutQuestionFields(answer).slice(0, 12000);
+}
+
 export function withoutQuestionControl(text: string) {
   return text.replace(/^\[\[(?:继续提问|建议结束)\]\][ \t]*(?:\r?\n)?/, '');
 }
