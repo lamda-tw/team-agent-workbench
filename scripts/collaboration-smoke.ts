@@ -71,8 +71,8 @@ try {
   // The admin window shares the same team state but no longer carries an offline validity setting.
   await expect(mp.locator('.admin-content')).not.toContainText('离线工作');
   await call(bp, 'remote.manifest');
-  await ap.getByTitle('设置', { exact: true }).click();
-  await expect(ap.getByRole('tab', { name: '项目设置', exact: true })).toHaveAttribute('aria-selected', 'true');
+  await ap.getByRole('button', { name: '项目设置：方案迭代', exact: true }).click();
+  await expect(ap.getByRole('dialog', { name: '项目设置 · 方案迭代', exact: true })).toBeVisible();
   await expect(ap.getByLabel('项目背景', { exact: true })).toHaveValue('项目背景'); await ap.getByLabel('项目目标', { exact: true }).fill('提高质量和效率'); await ap.getByRole('button', { name: '保存项目设置', exact: true }).click();
   const briefFile = path.join(share, ...project.remoteRoot.split('/').filter(Boolean), '项目说明.md');
   await expect.poll(async () => fs.readFile(briefFile, 'utf8')).toMatch(/## 项目目标\s+提高质量和效率/);

@@ -64,7 +64,7 @@ try {
   await expect.poll(async () => (await alice.page.evaluate(() => window.workbench.call('snapshot'))).transfers[0]?.status, { timeout: 15000 }).toBe('done');
   const uploaded = (await alice.page.evaluate(() => window.workbench.call('snapshot'))).transfers[0];
   assert((await fs.stat(path.join(share, ...uploaded.target.split('/').filter(Boolean)))).isFile());
-  await bob.page.getByTitle('刷新文件', { exact: true }).click(); await bob.page.locator('.file-row').filter({ hasText: 'competition-note.md' }).click();
+  await bob.page.getByTitle('刷新工作组、项目和文件', { exact: true }).click(); await bob.page.locator('.file-row').filter({ hasText: 'competition-note.md' }).click();
   await expect(bob.page.locator('.preview-content')).toContainText('各迭代两轮');
   await alice.page.getByTitle('新建会话', { exact: true }).click(); await alice.page.getByLabel('Codex 登录状态').getByText('已登录', { exact: true }).waitFor(); await alice.page.getByRole('button', { name: '创建会话', exact: true }).click();
   await alice.page.getByTitle('重命名会话', { exact: true }).click(); await alice.page.getByLabel('会话名称', { exact: true }).fill('算法基线验证'); await alice.page.getByRole('button', { name: '保存名称', exact: true }).click(); await expect(alice.page.locator('.session-title-row')).toContainText('算法基线验证');

@@ -12,6 +12,8 @@ await fs.mkdir(store, { recursive: true });
 await fs.cp(path.join(root, 'dist/user'), application, { recursive: true });
 // Missing explicit paths prevent discovery or execution of the user's actual CLIs.
 const testSettings = { ...offlineSettings(), connections: [], providerPaths: { codex: path.join(data, 'missing-codex'), cursor: path.join(data, 'missing-cursor') }, lastWorkspace: '' };
+const secondProject = { ...testSettings.workspaceSnapshot.profile.projects[0], id: 'project_' + 'b'.repeat(32), name: '第二项目' };
+testSettings.workspaceSnapshot.profile.projects.push(secondProject);
 await fs.writeFile(path.join(store, 'settings.json'), JSON.stringify(testSettings));
 await fs.mkdir(path.join(store, 'instances/2'), { recursive: true });
 await fs.writeFile(path.join(store, 'instances/2/settings.json'), JSON.stringify({ connections: [], providerPaths: testSettings.providerPaths, lastWorkspace: '' }));
@@ -43,6 +45,37 @@ try {
   await expect(session.getByLabel('代码目录（选填）')).toHaveCount(0);
   await session.getByRole('button', { name: '取消', exact: true }).click();
 
+  // Each project's own settings stays available to members, including offline.
+  await page.getByRole('button', { name: '项目设置：测试项目', exact: true }).click();
+  const projectSettings = page.getByRole('dialog', { name: '项目设置 · 测试项目', exact: true });
+  await expect(projectSettings).toBeVisible();
+  await expect(projectSettings.getByText('只读，仅本组创建者或管理者可修改。', { exact: true })).toBeVisible();
+  await expect(projectSettings.getByLabel('代码目录（选填）')).toBeEnabled();
+  await projectSettings.getByLabel('代码目录（选填）').fill(data);
+  await projectSettings.getByRole('button', { name: '保存代码目录', exact: true }).click();
+  await expect.poll(async () => (await page.evaluate(() => window.workbench.call('snapshot'))).settings.projectDirectories[key]).toBe(await fs.realpath(data));
+  await projectSettings.getByRole('button', { name: '关闭窗口', exact: true }).click();
+  await page.getByRole('button', { name: '项目设置：第二项目', exact: true }).click();
+  const secondSettings = page.getByRole('dialog', { name: '项目设置 · 第二项目', exact: true });
+  await expect(secondSettings.getByLabel('代码目录（选填）')).toHaveValue('');
+  await expect(page.getByRole('dialog', { name: '设置项目代码目录', exact: true })).toHaveCount(0);
+  await secondSettings.getByLabel('代码目录（选填）').fill(store);
+  await secondSettings.getByRole('button', { name: '保存代码目录', exact: true }).click();
+  const secondKey = JSON.stringify([...JSON.parse(key).slice(0, -1), secondProject.id]);
+  await expect.poll(async () => (await page.evaluate(() => window.workbench.call('snapshot'))).settings.projectDirectories[secondKey]).toBe(await fs.realpath(store));
+  await secondSettings.getByRole('button', { name: '关闭窗口', exact: true }).click();
+  await page.getByRole('button', { name: '项目设置：测试项目', exact: true }).click();
+  await expect(projectSettings.getByLabel('代码目录（选填）')).toHaveValue(await fs.realpath(data));
+  await page.screenshot({ path: path.join(data, 'project-settings-dialog.png') });
+  await projectSettings.getByRole('button', { name: '关闭窗口', exact: true }).click();
+  await page.getByRole('button', { name: '设置', exact: true }).click();
+  const globalSettings = page.locator('.modal').filter({ hasText: '本机与 CLI 设置' });
+  await expect(globalSettings).toBeVisible();
+  await expect(globalSettings.getByLabel('代码目录（选填）')).toHaveCount(0);
+  await expect(globalSettings.getByRole('tab', { name: '项目设置', exact: true })).toHaveCount(0);
+  await globalSettings.getByRole('button', { name: '关闭窗口', exact: true }).click();
+  await page.screenshot({ path: path.join(data, 'project-settings-entry.png') });
+
   const originalMain = await fs.readFile(path.join(application, 'main.cjs'), 'utf8');
   const originalAssets = new URL(page.url()).pathname.match(/assets\/[^/]+/)?.[0]; assert(originalAssets);
   const changed = await publishRuntimeAssets(application, { 'index.html': '<h1>incompatible future UI</h1>', 'renderer.js': '', 'renderer.css': '', 'preload.cjs': '' });
@@ -58,5 +91,5 @@ try {
   assert(new URL(next.url()).pathname.includes(originalAssets), 'additional account windows must match their running main process');
   assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().some(window => window.isVisible())), false);
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ passed: true, data, cases: ['skip via production IPC', 'skip survives restart', 'no login/session directory fields', 'reload after rebuild keeps matching UI', 'additional window after rebuild keeps matching UI'], visibleWindows: 0, actualCLIs: 0 }));
+  console.log(JSON.stringify({ passed: true, data, cases: ['skip via production IPC', 'skip survives restart', 'member project settings available offline', 'two project directories remain independent', 'no duplicate initial dialog', 'global settings no longer contains project settings', 'no login/session directory fields', 'reload after rebuild keeps matching UI', 'additional window after rebuild keeps matching UI'], visibleWindows: 0, actualCLIs: 0 }));
 } finally { if (app) await app.close(); }

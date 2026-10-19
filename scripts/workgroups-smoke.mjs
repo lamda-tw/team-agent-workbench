@@ -75,20 +75,47 @@ try {
   await up.locator('[data-group-name="local_nlp"] .workgroup-project').click();
   assert.equal((await snap()).sessions.find(s => s.id === bound.id).binding.project.id, ocr.id);
   await up.screenshot({ path: path.join(data, 'two-groups.png') });
+  // Canceling the native picker must not create a task, show success, or navigate.
+  const transferIds = (await snap()).transfers.map(task => task.id);
+  await user.app.evaluate(({ dialog }) => { dialog.showOpenDialog = async () => ({ canceled: true, filePaths: [] }); });
+  await up.getByTitle('上传文件到当前目录', { exact: true }).click();
+  assert.deepEqual((await snap()).transfers.map(task => task.id), transferIds);
+  await expect(up.getByRole('button', { name: '工作会话', exact: true })).toHaveClass(/active/);
+  await expect(up.getByRole('heading', { name: '传输记录', exact: true })).toHaveCount(0);
+  await expect(up.locator('.toast').filter({ hasText: '文件已加入上传队列' })).toHaveCount(0);
+  // A real selection still queues the file and opens transfer records.
+  const uploadSource = path.join(data, 'picker-upload.md'); await fs.writeFile(uploadSource, '# File picker upload');
+  await user.app.evaluate(({ dialog }, file) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [file] }); }, uploadSource);
+  await up.getByTitle('上传文件到当前目录', { exact: true }).click();
+  await expect(up.getByRole('heading', { name: '传输记录', exact: true })).toBeVisible();
+  await expect(up.locator('.toast')).toContainText('文件已加入上传队列');
+  await expect.poll(async () => (await snap()).transfers.find(task => task.name === 'picker-upload.md')?.status).toBe('done');
+  const uploaded = (await snap()).transfers.find(task => task.name === 'picker-upload.md');
+  assert.equal(await fs.readFile(path.join(share, ...uploaded.target.split('/').filter(Boolean)), 'utf8'), '# File picker upload');
+  await up.getByRole('button', { name: '工作会话', exact: true }).click();
+  // A single refresh updates both membership and the selected project's files.
+  const nlp = projects.find(p => p.groupName === 'local_nlp');
+  const refreshButton = up.getByRole('button', { name: '刷新工作组、项目和文件', exact: true });
+  await expect(refreshButton).toHaveCount(1);
+  await expect(up.getByTitle('刷新文件', { exact: true })).toHaveCount(0);
+  await expect(up.locator('.file-row').filter({ hasText: 'refresh-check.md' })).toHaveCount(0);
   // Change role and membership through administrator UI while the user stays connected.
   await row.getByTitle('管理 nlp 成员身份', { exact: true }).click(); await ap.getByLabel('成员身份', { exact: true }).selectOption('member'); await ap.getByLabel('nlp 接任安排').selectOption('__vacant__'); await confirm(ap);
-  await up.getByTitle('刷新工作组与项目', { exact: true }).click(); await expect(up.locator('.toast')).toContainText('账号身份与工作组已刷新'); await expect(up.getByTitle('在 nlp 创建项目', { exact: true })).toHaveCount(0);
+  await fs.writeFile(path.join(share, ...nlp.remoteRoot.split('/').filter(Boolean), 'refresh-check.md'), '# Newly shared file');
+  await up.getByTitle('刷新工作组、项目和文件', { exact: true }).click(); await expect(up.locator('.toast')).toContainText('账号身份与工作组已刷新'); await expect(up.getByTitle('在 nlp 创建项目', { exact: true })).toHaveCount(0);
+  await expect(up.locator('.file-row').filter({ hasText: 'refresh-check.md' })).toBeVisible({ timeout: 5000 });
+  await expect(refreshButton).toBeEnabled();
   await expect(up.getByTitle('在 ocr 创建项目', { exact: true })).toHaveCount(1);
   await assert.rejects(up.evaluate(() => window.workbench.call('project.create', { name: '越权创建', groupName: 'local_nlp' })), /组管理员|权限|管理/);
   await up.screenshot({ path: path.join(data, 'independent-roles.png') });
   await row.getByTitle('管理 ocr 成员身份', { exact: true }).click(); await ap.getByLabel('成员身份', { exact: true }).selectOption('remove'); await ap.getByLabel('ocr 接任安排').selectOption('__vacant__'); await confirm(ap);
-  await up.getByTitle('刷新工作组与项目', { exact: true }).click(); await expect(up.locator('.workgroup')).toHaveCount(1);
+  await up.getByTitle('刷新工作组、项目和文件', { exact: true }).click(); await expect(up.locator('.workgroup')).toHaveCount(1);
   assert.equal((await snap()).sessions.find(s => s.id === bound.id).binding.project.id, ocr.id);
   await assert.rejects(up.evaluate(id => window.workbench.call('session.uploadTrajectory', { id }), bound.id), /项目入口配置已改变/);
   await fs.rename(path.join(share, 'projects', 'nlp'), path.join(share, 'projects', 'nlp-missing'));
-  await up.getByTitle('刷新工作组与项目', { exact: true }).click(); await expect(up.locator('.workgroup .inline-error')).toBeVisible();
+  await up.getByTitle('刷新工作组、项目和文件', { exact: true }).click(); await expect(up.locator('.workgroup .inline-error')).toBeVisible();
   await expect(up.getByText('还没有加入工作组', { exact: true })).toHaveCount(0);
   assert.deepEqual(errors, []);
-  await fs.writeFile(path.join(data, 'result.json'), JSON.stringify({ passed: true, cases: ['unassigned login and admin config import', 'no shared root or shared path input', 'unassigned users have no workbench', 'live group assignment', 'one saved account login discovers two groups', 'separate groups and same-name projects', 'independent subadmin/member roles and backend denial', 'user refreshes identity after administrator changes', 'session stays bound after switching groups', 'membership revocation blocks upload', 'inaccessible group differs from no groups'], screenshots: ['no-groups.png', 'two-groups.png', 'independent-roles.png'] }, null, 2));
+  await fs.writeFile(path.join(data, 'result.json'), JSON.stringify({ passed: true, cases: ['unassigned login and admin config import', 'no shared root or shared path input', 'unassigned users have no workbench', 'live group assignment', 'one saved account login discovers two groups', 'separate groups and same-name projects', 'independent subadmin/member roles and backend denial', 'canceled upload preserves view with no task or success toast', 'selected upload queues and reaches shared filesystem', 'one refresh updates both membership and current project files', 'separate file refresh removed', 'user refreshes identity after administrator changes', 'session stays bound after switching groups', 'membership revocation blocks upload', 'inaccessible group differs from no groups'], screenshots: ['no-groups.png', 'two-groups.png', 'independent-roles.png'] }, null, 2));
   console.log(JSON.stringify({ passed: true, data }));
 } finally { for (const app of apps.reverse()) await app.close().catch(() => {}); }

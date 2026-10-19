@@ -6,8 +6,7 @@ import path from 'node:path';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { Workbench } from '../src/core/workbench';
-import { ProjectDirectoryForm, ProjectDirectoryDialog } from '../src/renderer/project-directory';
-import { ProjectBriefSettings } from '../src/renderer/project-brief-editor';
+import { ProjectSettingsDialog, ProjectDirectoryDialog } from '../src/renderer/project-directory';
 import { migrateProjectDirectories, projectDirectory, projectDirectoryKey } from '../src/shared/project-directory';
 import { grantTestWorkspace, offlineProjectId } from './fixtures/offline-workspace';
 
@@ -86,7 +85,7 @@ test('ordinary members can edit their local directory even when shared project s
   const props = { projectId: project.id, projectName: project.name, contextKey: projectDirectoryKey(profile, project.id), directory: '', saved: async () => {} };
   const initial = renderToStaticMarkup(createElement(ProjectDirectoryDialog, props));
   assert.match(initial, /暂不设置/); assert.match(initial, /保存并进入项目/);
-  const settings = renderToStaticMarkup(createElement(ProjectBriefSettings, { project, admin: false, saved: async () => {}, localSettings: createElement(ProjectDirectoryForm, { ...props, directory: 'D:/project/code', embedded: true }) }));
+  const settings = renderToStaticMarkup(createElement(ProjectSettingsDialog, { project, admin: false, contextKey: props.contextKey, directory: 'D:/project/code', directorySaved: async () => {}, briefSaved: async () => {}, close: () => {} }));
   assert.match(settings, /只读，仅本组创建者或管理者可修改/);
   assert.match(settings, /<input aria-label="代码目录（选填）"[^>]*value="D:\/project\/code"/);
   assert.doesNotMatch(settings, /<input aria-label="代码目录（选填）"[^>]*disabled/);
