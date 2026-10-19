@@ -17,7 +17,7 @@ export function backgroundTextTask(root: string, providerPath: (s: AgentSession)
     const id = randomUUID(), cwd = path.join(root, 'background', id);
     await fs.mkdir(cwd, { recursive: true });
     const session: AgentSession = { id, title: '后台资料判断', purpose: 'background', provider: parent.provider,
-      model: parent.model, relayAccount: parent.relayAccount, networkRoute: parent.networkRoute, cwd, createdAt: new Date().toISOString(),
+      model: parent.model, reasoningEffort: parent.reasoningEffort, relayAccount: parent.relayAccount, networkRoute: parent.networkRoute, cwd, createdAt: new Date().toISOString(),
       status: 'idle', messages: [], sources: [], approvals: [], autoUpload: false, handoffPath: path.join(cwd, 'unused.md') };
     let runtime: AgentRuntime | ClaudeRuntime | undefined;
     let finished = false;

@@ -1,3 +1,5 @@
+import { workbenchRsi } from './rsi-workbench';
+import type { RsiEngine } from './rsi';
 import { persistPersonalMove, recoverPersonalMove, PersonalMovePendingError } from './personal-move';
 import { personalWorkspace, personalBinding, personalFamilyIds, PERSONAL_PROJECT_ID, isPersonalBinding } from '../shared/personal-workspace';
 import { Questions } from './questions';
@@ -83,6 +85,7 @@ import { ProjectJournal } from './project-journal';
 import type { JournalEntry } from '../shared/project-journal';
 import type { ActivityChoice, ActivityActionResult } from '../shared/activity-assistant';
 export class Workbench {
+  rsi: RsiEngine;
   questions: Questions;
   activity: ActivityAssistant;
   journal: ProjectJournal;
@@ -135,7 +138,7 @@ export class Workbench {
   async runAccountOperation<T>(action: string, operation: () => Promise<T>): Promise<T> {
     const independent = ['snapshot', 'remote.connect', 'window.new'].includes(action);
     if (!independent) this.assertAccountReady();
-    const readOnly = ['remote.list', 'remote.preview', 'remote.manifest', 'content.list', 'content.history', 'content.sync', 'content.updates', 'account.sync', 'project.brief', 'question.members', 'question.sync', 'assignment.list', 'assignment.members', 'conclusion.list', 'conclusion.match', 'content.deletion.conclusions', 'session.history', 'session.files', 'session.file.preview', 'handoff.read', 'handoff.list', 'subsession.report.preview', 'draft.attachment.preview', 'content.attachment.preview', 'conclusion.file.preview', 'question.file.preview', 'choose.directory', 'choose.executable', 'copy', 'open.link', 'open.data'].includes(action);
+    const readOnly = ['rsi.view', 'rsi.summary', 'remote.list', 'remote.preview', 'remote.manifest', 'content.list', 'content.history', 'content.sync', 'content.updates', 'account.sync', 'project.brief', 'question.members', 'question.sync', 'assignment.list', 'assignment.members', 'conclusion.list', 'conclusion.match', 'content.deletion.conclusions', 'session.history', 'session.files', 'session.file.preview', 'handoff.read', 'handoff.list', 'subsession.report.preview', 'draft.attachment.preview', 'content.attachment.preview', 'conclusion.file.preview', 'question.file.preview', 'choose.directory', 'choose.executable', 'copy', 'open.link', 'open.data'].includes(action);
     const epoch = this.accountRevision, token = Symbol(action);
     if (!independent && !readOnly) this.accountMutations.add(token);
     try {
@@ -164,6 +167,7 @@ export class Workbench {
       content: s => { this.assertCanWork(s.binding); return this.remote.contentList(s.binding!); },
       commitSummary: (s, hash, count, summary, entry) => this.commitHandoff(s, hash, count, summary, entry), changed: () => this.broadcast(),
     }, backgroundTextTask(root, s => this.store.settings.providerPaths[s.provider], s => this.providerEnvironment(s.networkRoute, s)));
+    this.rsi = workbenchRsi(this, backgroundTextTask(root, s => this.store.settings.providerPaths[s.provider], s => this.providerEnvironment(s.networkRoute, s)), this.broadcast);
     this.accountSync = new AccountSync(this.store, this.remote, this.broadcast, () => {
       for (const draft of this.store.drafts) {
         const explicitlySaved = new Set(draft.personalSavedIds || []);
@@ -767,6 +771,7 @@ export class Workbench {
         }
         if (JSON.stringify(priorRaw || {}) !== JSON.stringify(current)) { seen[key] = current; changed = true; }
         this.activity.observe(project.id, accountIdentity(profile), additions);
+        if (additions.length) void this.rsi.completed(project.id).catch(() => {});
       } catch { /* One inaccessible project must not suppress updates from the others. */ }
     }
     if (changed || beforeActivity !== JSON.stringify(this.store.activity)) { await this.store.save(); this.broadcast(); }
@@ -1323,6 +1328,7 @@ export class Workbench {
 
     this.personalMoving = true; ids.forEach(id => this.movingIds.add(id));
     try {
+      await this.rsi.pause(); await target.rsi.pause();
       await this.activity.pause();
       const profile = target.remote.profile!;
       await target.remote.loadManifest();
@@ -1621,7 +1627,7 @@ export class Workbench {
       }
     }
     await this.questions.completed(s);
-    if (s.purpose === 'work' && !s.closedAt) this.activity.completed(s.id);
+    if (s.purpose === 'work' && !s.closedAt) { this.activity.completed(s.id); if (s.binding) void this.rsi.completed(s.binding.project.id).catch(() => {}); }
     if (!this.configuring && this.ownsLocal(s.binding) && s.autoUpload && s.binding && s.purpose === 'work') { try { await this.archive(id, true); } catch (e: any) { this.sessionNotice(s, '会话自动上传未完成：' + e.message); } }
   }
   async readSessionCompletion(id: string, completionId: string) {
@@ -1929,6 +1935,7 @@ export class Workbench {
       // Persist removal first: a late worker reply or restart cannot resurrect the session.
       try { await this.store.save(); }
       catch (error) { this.store.sessions = sessions; if (input) this.store.inputs[id] = input; this.store.activity.jobs = jobs; throw error; }
+      if (s.binding) await this.rsi.forgetSession(s.binding.project.id, s.id);
       await this.journal.remove(s);
       if (s.cursorNative?.managed) await this.cursorDesktop.release(id);
       clearTimeout(this.trajectoryTimers.get(id)); this.trajectoryTimers.delete(id);
@@ -2933,5 +2940,5 @@ export class Workbench {
   async flushEdits() { await this.edits.catch(() => {}); for (const [key, fn] of this.unsavedEdits) { await fn(); if (this.unsavedEdits.get(key) === fn) this.unsavedEdits.delete(key); } await this.store.save(); }
   listDirections() { return this.remote.memberDirections(); }
   saveDirections(directions: unknown) { return this.remote.memberDirections(directions); }
-  async close() { this.closing = true; await this.questions.close(); this.stopNativeTranscriptSync(); clearInterval(this.contentWatch); await this.activity.close(); await this.contentSyncJob; for (const timer of this.trajectoryTimers.values()) clearTimeout(timer); this.trajectoryTimers.clear(); await Promise.allSettled(this.archiving.values()); clearTimeout(this.timer); this.timer = undefined; try { await this.flushEdits(); } catch (error) { this.closing = false; this.changed(); throw error; } this.closing = true; for (const timer of this.preparationTimers.values()) clearTimeout(timer); this.preparationTimers.clear(); for (const job of this.catalogJobs.values()) job.controller.abort(); await Promise.allSettled([...this.catalogJobs.values()].map(job => job.promise)); await this.accounts.close(); await this.accountSync.close(); const interrupted = this.store.sessions.filter(s => { const runtime = this.runtimes.get(s.id); return !(runtime instanceof AgentRuntime && runtime.sharedDesktop) && s.purpose === 'work' && !s.closedAt && ['starting', 'running', 'approval'].includes(s.status) && !s.stoppedAt; }); await Promise.all([...this.runtimes.values()].map(runtime => runtime.close())); this.remote.disconnect(); for (const s of interrupted) { s.status = 'error'; s.error = '应用关闭时任务尚未完成，已中断；可检查已有结果后继续发送。'; } await Promise.all(this.eventWrites.values()); await this.store.save(); await this.journal.close(); await this.cursorDesktop.close(); }
+  async close() { this.closing = true; await this.rsi.close(); await this.questions.close(); this.stopNativeTranscriptSync(); clearInterval(this.contentWatch); await this.activity.close(); await this.contentSyncJob; for (const timer of this.trajectoryTimers.values()) clearTimeout(timer); this.trajectoryTimers.clear(); await Promise.allSettled(this.archiving.values()); clearTimeout(this.timer); this.timer = undefined; try { await this.flushEdits(); } catch (error) { this.closing = false; this.changed(); throw error; } this.closing = true; for (const timer of this.preparationTimers.values()) clearTimeout(timer); this.preparationTimers.clear(); for (const job of this.catalogJobs.values()) job.controller.abort(); await Promise.allSettled([...this.catalogJobs.values()].map(job => job.promise)); await this.accounts.close(); await this.accountSync.close(); const interrupted = this.store.sessions.filter(s => { const runtime = this.runtimes.get(s.id); return !(runtime instanceof AgentRuntime && runtime.sharedDesktop) && s.purpose === 'work' && !s.closedAt && ['starting', 'running', 'approval'].includes(s.status) && !s.stoppedAt; }); await Promise.all([...this.runtimes.values()].map(runtime => runtime.close())); this.remote.disconnect(); for (const s of interrupted) { s.status = 'error'; s.error = '应用关闭时任务尚未完成，已中断；可检查已有结果后继续发送。'; } await Promise.all(this.eventWrites.values()); await this.store.save(); await this.journal.close(); await this.cursorDesktop.close(); }
 }

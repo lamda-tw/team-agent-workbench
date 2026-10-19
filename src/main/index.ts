@@ -94,13 +94,13 @@ async function alignPersonalRelay(team: DataContext, action: string, raw: any) {
   }
   const central = local.store.settings.egress?.viaSharedServer;
   const draft = local.store.drafts.find(item => item.id === raw?.id);
-  const session = local.store.sessions.find(item => item.id === (draft?.sessionId || raw?.id || raw?.parentId || raw?.sessionId));
+  const session = action === 'rsi.run' ? local.store.sessions.filter(item => item.purpose === 'work' && !item.closedAt).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0] : local.store.sessions.find(item => item.id === (draft?.sessionId || raw?.id || raw?.parentId || raw?.sessionId));
   const route = raw?.networkRoute || session?.networkRoute || (local.store.settings.egress?.enabled ? 'management' : 'direct');
-  const executing = /^(session\.(create|send|retry|mode|model|network|permission|native|codexDesktop|desktopSync)|draft\.(prepare|retry|reorganize)|conclusion\.merge\.prepare|subsession\.create|provider\.(auth|catalog|login$)|egress\.test)/.test(action);
+  const executing = /^(session\.(create|send|retry|mode|model|network|permission|native|codexDesktop|desktopSync)|draft\.(prepare|retry|reorganize)|conclusion\.merge\.prepare|subsession\.create|provider\.(auth|catalog|login$)|rsi\.run|egress\.test)/.test(action);
   if (central && executing && route === 'management') {
     const identity = team.workbench.remote.connected && team.workbench.remote.profile ? accountIdentity(team.workbench.remote.profile) : undefined;
     assertPersonalRelay(route, central, identity, session);
-    if (personalRelay && personalRelay !== team && local.store.sessions.some(item => item.networkRoute === 'management' && (['starting', 'running', 'approval'].includes(item.status) || local.activity.busy))) throw new Error('本机会话正在使用另一个中央账号中转，请先结束任务');
+    if (personalRelay && personalRelay !== team && local.store.sessions.some(item => item.networkRoute === 'management' && (['starting', 'running', 'approval'].includes(item.status) || (local.activity.busy || local.rsi.busy)))) throw new Error('本机会话正在使用另一个中央账号中转，请先结束任务');
     personalRelay = team;
     if (session && !session.relayAccount && session.networkRoute === 'management') { session.relayAccount = identity; await local.store.save(); }
   }
@@ -222,7 +222,7 @@ async function dispatch(action: string, raw: unknown, owner: BrowserWindow, pref
     case 'project.create': { const p = z.object({ name: z.string().min(1).max(180), groupName: z.string().optional(), brief: projectBriefSchema.optional() }).parse(raw); return workbench.createProject(p.name, p.groupName, p.brief); }
     case 'project.initialize': { const p = z.object({ name: z.string().min(1).max(180), groupName: z.string().min(1).max(80), contextKey: z.string().max(4096), brief: projectBriefSchema }).parse(raw); return workbench.initializeProject(p.name, p.groupName, p.brief, p.contextKey); }
     case 'remote.password': { const p = z.object({ oldPassword: z.string().min(1).max(4096), newPassword: newAccountPasswordSchema }).parse(raw); return workbench.remote.changePassword(p.oldPassword, p.newPassword); }
-    case 'remote.disconnect': if (personalRelay === active && personalContext?.workbench.store.sessions.some(session => session.networkRoute === 'management' && (['starting', 'running', 'approval'].includes(session.status) || personalContext?.workbench.activity.busy))) throw new Error('请先结束使用中央中转的本机会话，再断开连接'); workbench.remote.disconnect(); return true;
+    case 'remote.disconnect': if (personalRelay === active && personalContext?.workbench.store.sessions.some(session => session.networkRoute === 'management' && (['starting', 'running', 'approval'].includes(session.status) || (personalContext?.workbench.activity.busy || personalContext?.workbench.rsi.busy)))) throw new Error('请先结束使用中央中转的本机会话，再断开连接'); workbench.remote.disconnect(); return true;
     case 'group.control': return workbench.groupCommand(raw as any);
     case 'remote.manifest': return workbench.refreshGroups();
     case 'remote.list': { const p = z.object({ projectId: z.string(), path: text }).parse(raw); return workbench.remote.list(workbench.remote.binding(p.projectId), p.path); }
@@ -266,6 +266,17 @@ async function dispatch(action: string, raw: unknown, owner: BrowserWindow, pref
     case 'content.history': { const p = z.object({ projectId: z.string(), id: z.string().uuid().optional(), revision: z.number().int().positive().optional() }).parse(raw); return workbench.remote.contentHistory(workbench.remote.binding(p.projectId), p.id, p.revision); }
     case 'conclusion.publish': { const p = z.object({ id: z.string().uuid(), version: z.number().int().positive().optional(), disclose: z.array(resultReferenceSchema).max(30).default([]) }).parse(raw); return workbench.publishConclusion(p.id, p.disclose, p.version); }
     case 'content.alias.save': { const p = z.object({ projectId: z.string(), contentId: id, alias: z.string().trim().max(200) }).parse(raw); return workbench.saveContentAlias(p.projectId, p.contentId, p.alias); }
+    case 'rsi.summary': { const p = z.object({ projectId: text }).parse(raw); const view = await workbench.rsi.view(p.projectId); return { count: (view.config.enabled ? view.suggestions : []).filter(item => !view.events.some(event => event.suggestionId === item.id && ['accepted', 'rejected', 'dismissed', 'deferred', 'edited', 'action', 'outcome'].includes(event.kind))).length, busy: view.busy }; }
+    case 'rsi.preference': { const p = z.object({ projectId: text, text: z.string().max(2000) }).parse(raw); return workbench.rsi.personalPreference(p.projectId, p.text); }
+    case 'rsi.reuse': { const p = z.object({ projectId: text, sourceProjectId: text, policyId: text }).parse(raw); return workbench.rsi.reuse(p.projectId, p.sourceProjectId, p.policyId); }
+    case 'rsi.view': return workbench.rsi.view(z.object({ projectId: text }).parse(raw).projectId);
+    case 'rsi.configure': { const p = z.object({ projectId: text, config: z.unknown() }).parse(raw); return workbench.rsi.configure(p.projectId, p.config); }
+    case 'rsi.collect': return workbench.rsi.collect(z.object({ projectId: text }).parse(raw).projectId);
+    case 'rsi.run': { const p = z.object({ projectId: text, operation: z.enum(['recommend', 'learn', 'evaluate']), candidateId: text.optional() }).parse(raw); await workbench.rsi.start(p.projectId, p.operation, 'manual', p.candidateId); return true; }
+    case 'rsi.feedback': { const p = z.object({ projectId: text, reaction: z.unknown() }).parse(raw); return workbench.rsi.feedback(p.projectId, p.reaction); }
+    case 'rsi.case': { const p = z.object({ projectId: text, value: z.unknown() }).parse(raw); return workbench.rsi.addCase(p.projectId, p.value); }
+    case 'rsi.publish': { const p = z.object({ projectId: text, candidateId: text }).parse(raw); return workbench.rsi.publish(p.projectId, p.candidateId); }
+    case 'rsi.rollback': return workbench.rsi.rollback(z.object({ projectId: text }).parse(raw).projectId);
     case 'activity.project': { const p = z.object({ projectId: z.string() }).parse(raw); for (const current of contexts.values()) if (current.workbench !== workbench) current.workbench.activity.removeWindow(String(owner.id)); await workbench.setActivityProject(String(owner.id), p.projectId); return true; }
     case 'activity.presented':
     case 'activity.ignore': { const p = z.object({ id, jobIds: z.array(z.string()).max(1000) }).parse(raw); return workbench.markActivity(p.id, p.jobIds, action === 'activity.ignore'); }
@@ -499,7 +510,7 @@ async function storedWindowState(slot: number): Promise<{ profile?: import('../s
   catch (error: any) { if (error.code !== 'ENOENT') throw error; return {}; }
 }
 async function loginWindow(window: BrowserWindow, profile: import('../shared/types').ConnectionProfile, password: string, localPath: string, trust: (fingerprint: string) => Promise<boolean>, egressInput?: z.infer<typeof userEgressInputSchema>, newPassword?: string) {
-  if (personalRelay === contexts.get(window) && personalContext?.workbench.store.sessions.some(session => session.networkRoute === 'management' && (['starting', 'running', 'approval'].includes(session.status) || personalContext?.workbench.activity.busy))) throw new Error('请先结束使用中央中转的本机会话，再更换登录账号');
+  if (personalRelay === contexts.get(window) && personalContext?.workbench.store.sessions.some(session => session.networkRoute === 'management' && (['starting', 'running', 'approval'].includes(session.status) || (personalContext?.workbench.activity.busy || personalContext?.workbench.rsi.busy)))) throw new Error('请先结束使用中央中转的本机会话，再更换登录账号');
   if (switchingWindows.has(window)) throw new Error('正在登录，请等待结果');
   const previous = contexts.get(window)!;
   const currentProfile = previous.workbench.store.settings.workspaceSnapshot?.profile;
