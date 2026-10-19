@@ -802,6 +802,30 @@ def save_directions(root, username, raw):
 def handle(root, state, username, request, incoming=None):
     user = member(state, username)
     op = request.get('op')
+    if op == 'password_status':
+        return {'required': bool(user.get('mustChangePassword'))}
+    if op == 'password_change':
+        import ctypes
+        import ctypes.util
+        import hmac
+        login = user.get('systemUsername', username)
+        old, new = request.get('oldPassword'), request.get('newPassword')
+        if not isinstance(old, str) or not isinstance(new, str) or not 1 <= len(old) <= 4096 or not 1 <= len(new) <= 4096 or any(c in new + old for c in '\r\n\x00:'):
+            raise ValueError('密码不能为空，不能包含冒号、换行或空字符')
+        shadow = subprocess.run(['getent', 'shadow', login], check=True, capture_output=True, text=True).stdout.split(':')[1]
+        lib = ctypes.CDLL(ctypes.util.find_library('crypt') or 'libcrypt.so.1')
+        lib.crypt.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
+        lib.crypt.restype = ctypes.c_char_p
+        actual = lib.crypt(old.encode(), shadow.encode())
+        if not actual or not hmac.compare_digest(actual, shadow.encode()):
+            raise PermissionError('原密码错误')
+        subprocess.run(['chpasswd'], input=login + ':' + new + '\n', text=True, capture_output=True, check=True)
+        saved = read_json(safe(root, '.workbench/admin/state.json'))
+        saved['users'][username]['mustChangePassword'] = False
+        atom(safe(root, '.workbench/admin/state.json'), saved)
+        return True
+    if user.get('mustChangePassword'):
+        raise PermissionError('首次登录请先设置新密码')
     if op == 'team_group':
         return tg_handle(root, state, username, request.get('command'))
     if op in ('account_read', 'account_write', 'account_file_upload', 'account_file_download'):

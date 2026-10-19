@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
+import fs from 'node:fs/promises';
+import os from 'node:os';
 import { generateKeyPairSync } from 'node:crypto';
 import { Server, utils } from 'ssh2';
 import { AdminConnection } from '../src/admin/connection';
@@ -47,7 +49,7 @@ test('environment preparation works before initialization and preserves administ
 });
 
 async function fixture(role: 'root' | 'sudo' | 'project', writableManifest = false, alias = 'worker', login?: string) {
-  const requests: any[] = [], commands: string[] = [], clients: any[] = [];
+  const requests: any[] = [], commands: string[] = [], clients: any[] = [], programs: string[] = [];
   const state: any = { initialized: true, users: {}, groups: {}, sftpConfigured: true, storageVersion: 1 };
   const control = { failNext: false, holdStorage: false, startupError: '', authenticationAttempts: 0, missingCommands: [] as string[], setupIssues: [] as string[] };
   const server = new Server({ hostKeys: [key] }, client => {
@@ -76,7 +78,9 @@ async function fixture(role: 'root' | 'sudo' | 'project', writableManifest = fal
             const line = buffer.slice(0, n); buffer = buffer.slice(n + 1);
             if (!authorized) { assert.equal(line, 'sudo-secret'); authorized = true; channel.write('WORKBENCH_CODE_READY\n'); continue; }
             if (!programReceived) {
-              assert.match(inflateSync(Buffer.from(line, 'base64')).toString(), /def main\(request\)/); programReceived = true;
+              const program = inflateSync(Buffer.from(line, 'base64')).toString();
+              programs.push(program);
+              assert.match(program, /def main\(request\)/); programReceived = true;
               if (control.startupError) { channel.stderr.write(control.startupError); channel.exit(1); channel.end(); return; }
               channel.write('WORKBENCH_READY\n'); continue;
             }
@@ -97,8 +101,35 @@ async function fixture(role: 'root' | 'sudo' | 'project', writableManifest = fal
   });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const address = server.address() as { port: number };
-  return { requests, commands, control, state, port: address.port, close: async () => { clients.forEach(c => c.end()); await new Promise<void>(r => server.close(() => r())); } };
+  return { requests, commands, programs, control, state, port: address.port, close: async () => { clients.forEach(c => c.end()); await new Promise<void>(r => server.close(() => r())); } };
 }
+
+test('server update uploads current worker files after a rebuild without reconnecting', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'workbench-admin-code-'));
+  const f = await fixture('root'), remote = new AdminConnection(path.join(directory, 'admin.py'), () => {});
+  const workerFrom = (program: string) => {
+    const payload = program.match(/CONTENT_WORKER_ZLIB_BASE64 = '([^']+)'/)?.[1];
+    assert(payload);
+    return inflateSync(Buffer.from(payload, 'base64')).toString();
+  };
+  try {
+    for (const name of ['admin.py', 'acl_support.py', 'group_ops.py', 'content.py']) await fs.copyFile(path.join('server', name), path.join(directory, name));
+    await fs.appendFile(path.join(directory, 'content.py'), '\n# old-worker-before-rebuild\n');
+    await remote.connect({ host: '127.0.0.1', port: f.port, username: 'root', root: '/srv/teamspace', fingerprint: '' }, 'login-secret', '', async () => true);
+    assert.match(workerFrom(f.programs.at(-1)!), /old-worker-before-rebuild/);
+    await fs.writeFile(path.join(directory, 'content.py'), (await fs.readFile('server/content.py', 'utf8')) + '\n# current-worker-after-rebuild\n');
+    await remote.operation({ op: 'storage_upgrade' });
+    const uploaded = workerFrom(f.programs.at(-1)!);
+    assert.match(uploaded, /current-worker-after-rebuild/);
+    assert.doesNotMatch(uploaded, /old-worker-before-rebuild/);
+    assert.equal(f.requests.at(-1).op, 'storage_upgrade');
+    assert.equal(f.control.authenticationAttempts, 1);
+  } finally {
+    remote.disconnect(); await f.close();
+    assert.equal(await fs.realpath(path.dirname(directory)), await fs.realpath(os.tmpdir()));
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
 test('admin rejects a changed server identity before sending login credentials', async () => {
   const f = await fixture('root'), remote = new AdminConnection(path.resolve('server/admin.py'), () => {});
   try {

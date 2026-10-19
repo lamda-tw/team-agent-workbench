@@ -34,6 +34,8 @@ export class SharedFiles {
     if (expectedServer && this.profile && (this.profile.host.toLowerCase() !== expectedServer.host.toLowerCase() || this.profile.port !== expectedServer.port || this.profile.fingerprint !== expectedServer.fingerprint)) throw new Error('当前共享服务器与中转接入码不匹配，请登录接入码对应的服务器');
     return this.backend.openEgressTunnel(host, port, signal);
   }
+  passwordStatus() { return this.backend.passwordStatus(); }
+  changePassword(oldPassword: string, newPassword: string) { return this.backend.changePassword(oldPassword, newPassword); }
   accountData(write?: AccountSnapshot) { return this.backend.accountData(write); }
   memberDirections(directions?: unknown) { return this.backend.memberDirections(directions); }
   accountFile(hash: string, local: string, upload: boolean) { return this.backend.accountFile(hash, local, upload); }

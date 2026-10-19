@@ -1,3 +1,4 @@
+import { adminOperationSchema } from '../src/admin/types';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -237,4 +238,26 @@ test('local stub derives a Linux group name from a Chinese group name and keeps 
     const profile = memberProfile(x.admin.snapshot.profile!, x.admin.snapshot.state!, '李四', group.name);
     assert.equal(profile.username, '李四'); assert.equal(profile.mode, 'local');
   } finally { await x.clean(); }
+});
+
+
+test('new users default to 123456 and can replace it only with their own current password', async () => {
+  const x = await setup(), member = new LocalFileConnection(() => {});
+  try {
+    await x.admin.operation(adminOperationSchema.parse({ op: 'user_create', username: 'fresh', name: '新成员' }));
+    await member.connect(memberProfile(x.admin.snapshot.profile!, x.admin.snapshot.state!, 'fresh'), '123456', async () => false);
+    assert.equal((await member.passwordStatus()).required, true);
+    await assert.rejects(member.changePassword('wrong', 'new-secret'), /原密码错误/);
+    await member.changePassword('123456', '123456');
+    assert.equal((await member.passwordStatus()).required, false);
+    await member.changePassword('123456', 'x');
+    await member.changePassword('x', '123456');
+    await member.changePassword('123456', 'new-secret');
+    assert.equal((await member.passwordStatus()).required, false);
+    member.disconnect();
+    await assert.rejects(member.connect(memberProfile(x.admin.snapshot.profile!, x.admin.snapshot.state!, 'fresh'), '123456', async () => false), /密码错误/);
+    await member.connect(memberProfile(x.admin.snapshot.profile!, x.admin.snapshot.state!, 'fresh'), 'new-secret', async () => false);
+    await member.changePassword('new-secret', 'another-secret');
+    assert.equal((await member.passwordStatus()).required, false);
+  } finally { member.disconnect(); await x.clean(); }
 });

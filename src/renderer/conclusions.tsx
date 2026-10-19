@@ -1,3 +1,4 @@
+import { PERSONAL_PROJECT_ID } from '../shared/personal-workspace';
 import { canonicalCategory, matchesResultCategory, orderedResults, resultCategory, resultDefaultStatus, resultStateLabel, type ResultStatus } from '../shared/result-model';
 import { ResultCategoryDialog, ResultHistoryDrawer, ResultStatusSelect } from './result-lifecycle';
 import { resultPreview } from '../shared/result-reading';
@@ -139,7 +140,7 @@ export function ConclusionLibrary({ project, projects = [], sessions, notice, me
         {!value.archived && <button className="secondary compact" disabled={disabled} onClick={() => { setClassifying(value); setError(''); }}>修改分类</button>}
         {!!value.versions?.length && <button className="secondary compact" onClick={() => setHistoryItem(value)}>历史版本 · {value.versions.length}</button>}
         {!value.archived && <button className="secondary compact" disabled={disabled} onClick={() => { open(value); setEditing(true); }}>编辑</button>}
-        {!value.archived && <button className="secondary compact" disabled={disabled || uploadBlocked(uploadState)} title={uploadState.status === 'done' ? '当前版本已上传' : undefined} onClick={() => {
+        {project.id !== PERSONAL_PROJECT_ID && !value.archived && <button className="secondary compact" disabled={disabled || uploadBlocked(uploadState)} title={uploadState.status === 'done' ? '当前版本已上传' : undefined} onClick={() => {
           if (uploadState.status === 'error') { void (async () => { setBusy(true); try { await api.call('conclusion.publish', { id: value.id, version: value.version }); await load(); notice('已重试原上传'); } catch (error: any) { setError(error.message); } finally { setBusy(false); } })(); return; }
           setPublishing(value); setDisclosed([]); setError('');
         }}>{uploadAction(uploadState)}</button>}

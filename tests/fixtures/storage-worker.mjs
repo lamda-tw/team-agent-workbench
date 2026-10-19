@@ -2,6 +2,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import path from 'node:path';
 // Protocol fixture only: the real Linux worker is tested separately in Python/Linux.
 export function fixtureStorage(nodes, state, username, request) {
+  if (request.op === 'password_status') return { required: false };
   const dir = p => { if (!nodes.has(p)) nodes.set(p, { mode: 0o42750, uid: 0, gid: 100, data: Buffer.alloc(0) }); };
   const file = (p, data) => nodes.set(p, { mode: 0o100640, uid: 0, gid: 100, data: Buffer.from(typeof data === 'string' ? data : JSON.stringify(data)) });
   const json = (p, fallback) => nodes.has(p) ? JSON.parse(nodes.get(p).data.toString()) : fallback;

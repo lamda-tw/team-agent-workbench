@@ -10,16 +10,23 @@ import { systemUsername } from '../core/account-login';
 // Only a fixed, packaged program is executed. Request data (including passwords)
 // travels over encrypted stdin and never becomes command arguments.
 export class AdminConnection {
-  private client?: Client; private sudoPassword = ''; private code = ''; private rawReady = false;
+  private client?: Client; private sudoPassword = ''; private rawReady = false;
   snapshot: AdminSnapshot = { connected: false, verified: false, busy: false };
   constructor(private scriptPath: string, private changed: () => void) {}
   disconnect() { this.client?.end(); this.client = undefined; this.sudoPassword = ''; this.rawReady = false; this.snapshot = { profile: this.snapshot.profile, connected: false, verified: false, busy: false }; this.changed(); }
+  private async loadCode() {
+    // Rebuilds can replace the packaged scripts while SSH stays connected.
+    // Read the current files for each request so an update cannot reinstall a cached worker.
+    const directory = path.dirname(this.scriptPath);
+    const [acl, groupCode, content, admin] = await Promise.all([
+      fs.readFile(path.join(directory, 'acl_support.py')), fs.readFile(path.join(directory, 'group_ops.py')),
+      fs.readFile(path.join(directory, 'content.py')), fs.readFile(this.scriptPath),
+    ]);
+    const worker = deflateSync(Buffer.concat([acl, Buffer.from('\n'), groupCode, Buffer.from('\n'), content])).toString('base64');
+    return deflateSync(Buffer.concat([acl, Buffer.from('\n'), groupCode, Buffer.from('\n'), Buffer.from("CONTENT_WORKER_ZLIB_BASE64 = '" + worker + "'\n"), admin])).toString('base64');
+  }
   async connect(profile: AdminProfile, password: string, sudoPassword: string, trust: (key: string) => Promise<boolean>, login = profile.username): Promise<AdminProfile> {
     this.disconnect();
-    const acl = await fs.readFile(path.join(path.dirname(this.scriptPath), 'acl_support.py'));
-    const groupCode = await fs.readFile(path.join(path.dirname(this.scriptPath), 'group_ops.py'));
-    const worker = deflateSync(Buffer.concat([acl, Buffer.from('\n'), groupCode, Buffer.from('\n'), await fs.readFile(path.join(path.dirname(this.scriptPath), 'content.py'))])).toString('base64');
-    this.code = deflateSync(Buffer.concat([acl, Buffer.from("\n"), groupCode, Buffer.from("\n"), Buffer.from("CONTENT_WORKER_ZLIB_BASE64 = '" + worker + "'\n"), await fs.readFile(this.scriptPath)])).toString('base64');
     const client = new Client(); this.client = client; this.sudoPassword = sudoPassword || password;
     try {
       let fingerprint = '', identityChanged = false, firstConnectionCancelled = false;
@@ -71,9 +78,12 @@ export class AdminConnection {
       });
     });
   }
-  private execute(payload: object, useSudo: boolean, signal?: AbortSignal, timeoutMs = 90000): Promise<any> {
+  private async execute(payload: object, useSudo: boolean, signal?: AbortSignal, timeoutMs = 90000): Promise<any> {
     if (!this.rawReady || !this.client) return Promise.reject(new Error('请先连接服务器'));
     if (signal?.aborted) return Promise.reject(new Error('已取消空间统计'));
+    const client = this.client, code = await this.loadCode();
+    if (!this.rawReady || this.client !== client) throw new Error('服务器连接已改变，请重新连接');
+    if (signal?.aborted) throw new Error('已取消空间统计');
     // Only a small fixed loader goes in the SSH exec request. The packaged
     // program travels over stdin so feature growth cannot exceed packet limits.
     // Keep both code and JSON reads binary: TextIOWrapper can read ahead and
@@ -87,7 +97,7 @@ export class AdminConnection {
       const finish = (error?: Error, value?: unknown) => { if (settled) return; settled = true; clearTimeout(timer); signal?.removeEventListener('abort', abort); channel?.end(); error ? reject(error) : resolve(value); };
       const timer = setTimeout(() => { channel?.close(); finish(new Error('远端命令超时；可能已部分执行，请刷新状态后再决定是否重试')); }, timeoutMs);
       signal?.addEventListener('abort', abort, { once: true });
-      this.client!.exec(command, (error, stream) => {
+      client.exec(command, (error, stream) => {
         if (error) { finish(error); return; } channel = stream; stream.setEncoding('utf8'); stream.stderr.setEncoding('utf8');
         stream.stderr.on('data', (data: Buffer) => {
           diagnostic = (diagnostic + data.toString()).slice(-3000);
@@ -102,7 +112,7 @@ export class AdminConnection {
           let end: number;
           while ((end = buffer.indexOf('\n')) >= 0) {
             const line = buffer.slice(0, end).trim(); buffer = buffer.slice(end + 1);
-            if (!codeSent && line === 'WORKBENCH_CODE_READY') { codeSent = true; stream.write(this.code + '\n'); }
+            if (!codeSent && line === 'WORKBENCH_CODE_READY') { codeSent = true; stream.write(code + '\n'); }
             else if (codeSent && !ready && line === 'WORKBENCH_READY') { ready = true; stream.write(JSON.stringify(request) + '\n'); }
             else if (ready && line) { try { const message = JSON.parse(line); message.ok ? finish(undefined, message.value) : finish(new Error(message.error)); } catch { finish(new Error('远端返回格式异常')); } }
           }

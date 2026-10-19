@@ -1,3 +1,4 @@
+import { isPersonalBinding } from '../shared/personal-workspace';
 import { destinationLabel as projectDestinationLabel } from '../shared/submission';
 import { canonicalCategory } from '../shared/result-model';
 import { PreparationReview, type PreparationReviewHandle } from './preparation-review';
@@ -116,7 +117,7 @@ export function DraftEditor({ draft, projects = [], session, sourceTitle, source
     {!isMerge && !artifacts.length && transfer?.status === 'error' && <div className="inline-error" role="alert">上传失败：{transfer.error}<div className="row"><button className="secondary" onClick={() => void run(() => api.call('transfer.retry', { id: transfer.id }))}>重试原上传</button><button className="secondary" onClick={() => void run(async () => { await api.call('draft.revise', { id: draft.id }); notice('修订草稿已创建，可在上方草稿列表选择并补充后上传'); })}>生成修订草稿</button></div></div>}
     {!empty && !isMerge && <label className="field contribution-supplement">补充说明（可选）<textarea rows={2} aria-label="补充说明（可选）" placeholder="只有需要补充或更正时填写" disabled={locked} value={value.supplement} onChange={e => change({ supplement: e.target.value })}/></label>}
     {!empty && !isMerge && !locked && editor.status !== '已保存' && <div className="row small muted" role="status"><span>{editor.status}</span>{editor.status.startsWith('保存失败') && <button className="text-button" onClick={editor.retry}>重试保存</button>}</div>}
-    {!empty && !isMerge && !artifacts.length && <div className="upload-destination" aria-label="上传位置" title={ready ? draft.target : undefined}><span>上传位置</span>{draft.binding ? <b>{draft.binding.project.name} / {destinationLabel}</b> : <b>未绑定项目，无法上传</b>}</div>}
+    {!isPersonalBinding(draft.binding) && !empty && !isMerge && !artifacts.length && <div className="upload-destination" aria-label="上传位置" title={ready ? draft.target : undefined}><span>上传位置</span>{draft.binding ? <b>{draft.binding.project.name} / {destinationLabel}</b> : <b>未绑定项目，无法上传</b>}</div>}
     {empty ? <div className="draft-actions"><button className="secondary back-action" disabled={busy || leaving} onClick={back}>{backLabel}</button></div> : isMerge ? (<>
       <div className="draft-actions">
         <button className="secondary back-action" disabled={leaving} onClick={back}>{backLabel}</button>
@@ -174,7 +175,7 @@ export function DraftEditor({ draft, projects = [], session, sourceTitle, source
             notice(`已将 ${unsavedIds.length} 项成果保存到个人成果库；团队成员暂不可见`);
           } finally { setBusy(false); }
         })}><Check size={15}/>{unsavedIds.length ? `保存到个人成果库${unsavedIds.length > 1 ? `（${unsavedIds.length} 项）` : ''}` : '已保存到个人成果库'}</button>}
-        {!draft.submitted && !submitted ? <button className="primary" disabled={busy || leaving || !ready || !selectedIds.length || !draft.binding} onClick={() => void run(async () => {
+        {isPersonalBinding(draft.binding) ? <span className="muted small">保存在本机；迁入团队项目后可提交团队。</span> : !draft.submitted && !submitted ? <button className="primary" disabled={busy || leaving || !ready || !selectedIds.length || !draft.binding} onClick={() => void run(async () => {
           setBusy(true);
           try {
             await reviewRef.current?.flush(); await editor.flush();

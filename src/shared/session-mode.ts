@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 export type SessionMode = 'default' | 'plan' | 'ask';
 export interface SessionModeOption { id: SessionMode; name: string; description: string }
 export interface SessionModeCatalog { modes: SessionModeOption[]; current: SessionMode; error?: string }
@@ -7,6 +9,10 @@ export const modeOption = (id: SessionMode): SessionModeOption => ({ id,
   name: id === 'default' ? 'Agent' : id === 'plan' ? 'Plan' : 'Ask',
   description: id === 'default' ? '执行任务' : id === 'plan' ? '先研究并制定计划' : '回答问题，不修改代码',
 });
+// Codex plan items use protocol ids such as "plan-123", not session UUIDs.
+export const planMessageIdSchema = z.string().min(1).max(1000);
+export const planExecuteSchema = z.object({ id: z.string().uuid(), messageId: planMessageIdSchema });
+export const planReviseSchema = planExecuteSchema.extend({ text: z.string().trim().min(1).max(100000) });
 export function planSteps(value: unknown): PlanStep[] {
   return (Array.isArray(value) ? value : []).flatMap(item => {
     const text = item?.step || item?.content;
