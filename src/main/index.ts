@@ -1,3 +1,4 @@
+import { assertPersonalRelay } from '../core/personal-relay';
 import { PERSONAL_PROJECT_ID, isPersonalBinding } from '../shared/personal-workspace';
 import { newAccountPasswordSchema } from '../shared/accounts';
 import { clientWindowTitle } from '../shared/client-version';
@@ -93,16 +94,16 @@ async function alignPersonalRelay(team: DataContext, action: string, raw: any) {
   }
   const central = local.store.settings.egress?.viaSharedServer;
   const draft = local.store.drafts.find(item => item.id === raw?.id);
-  const session = local.store.sessions.find(item => item.id === (draft?.sessionId || raw?.id || raw?.parentId));
+  const session = local.store.sessions.find(item => item.id === (draft?.sessionId || raw?.id || raw?.parentId || raw?.sessionId));
   const route = raw?.networkRoute || session?.networkRoute || (local.store.settings.egress?.enabled ? 'management' : 'direct');
-  const executing = /^(session\.(create|send|retry|mode|model|network|permission)|draft\.(prepare|retry|reorganize)|provider\.|egress\.test)/.test(action);
+  const executing = /^(session\.(create|send|retry|mode|model|network|permission|native|codexDesktop|desktopSync)|draft\.(prepare|retry|reorganize)|conclusion\.merge\.prepare|subsession\.create|provider\.(auth|catalog|login$)|egress\.test)/.test(action);
   if (central && executing && route === 'management') {
-    if (!team.workbench.remote.connected || !team.workbench.remote.profile) throw new Error('此网络方式经中央节点转发，请先登录中央节点');
-    const identity = accountIdentity(team.workbench.remote.profile);
-    if (session?.relayAccount && session.relayAccount !== identity) throw new Error('请登录此会话原来使用的中央账号，或在空闲时切换为本机直连');
-    if (personalRelay && personalRelay !== team && local.store.sessions.some(item => item.networkRoute === 'management' && ['starting', 'running', 'approval'].includes(item.status))) throw new Error('本机会话正在使用另一个中央账号中转，请先结束任务');
+    const identity = team.workbench.remote.connected && team.workbench.remote.profile ? accountIdentity(team.workbench.remote.profile) : undefined;
+    assertPersonalRelay(route, central, identity, session);
+    if (personalRelay && personalRelay !== team && local.store.sessions.some(item => item.networkRoute === 'management' && (['starting', 'running', 'approval'].includes(item.status) || local.activity.busy))) throw new Error('本机会话正在使用另一个中央账号中转，请先结束任务');
+    personalRelay = team;
+    if (session && !session.relayAccount && session.networkRoute === 'management') { session.relayAccount = identity; await local.store.save(); }
   }
-  if (!personalRelay || personalRelay === team || !local.store.sessions.some(item => item.networkRoute === 'management' && ['starting', 'running', 'approval'].includes(item.status))) personalRelay = team;
   personalContext.egress.sharedServerConnectionChanged(!!personalRelay?.workbench.remote.connected);
 }
 const id = z.string().regex(/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}(?:-[1-5])?$/i), text = z.string().max(2 * 1024 * 1024), provider = z.enum(['codex', 'cursor', 'claude']);
@@ -195,7 +196,7 @@ async function dispatch(action: string, raw: unknown, owner: BrowserWindow, pref
     case 'session.permissions': { const p = z.object({ id, mode: z.enum(['inherit', 'review', 'auto', 'full']), stop: z.boolean().optional() }).parse(raw); return workbench.changePermissions(p.id, p.mode, p.stop); }
     case 'session.model': { const p = z.object({ id, model: z.string().trim().min(1).max(256).regex(/^[^\x00-\x1f\x7f]+$/), stop: z.boolean().optional() }).parse(raw); return workbench.changeModel(p.id, p.model, p.stop); }
     case 'session.reasoningEffort': { const p = z.object({ id, effort: z.string().regex(/^[A-Za-z0-9_-]{1,32}$/).nullable() }).parse(raw); return workbench.changeReasoningEffort(p.id, p.effort); }
-    case 'session.network': { const p = z.object({ id, networkRoute: z.enum(['direct', 'management']) }).parse(raw); return workbench.changeNetworkRoute(p.id, p.networkRoute); }
+    case 'session.network': { const p = z.object({ id, networkRoute: z.enum(['direct', 'management']) }).parse(raw); return workbench.changeNetworkRoute(p.id, p.networkRoute, workbench.personal && workbench.store.settings.egress?.viaSharedServer && active?.workbench.remote.profile ? accountIdentity(active.workbench.remote.profile) : undefined); }
     case 'choose.directory': return (await dialog.showOpenDialog(owner, { properties: ['openDirectory'] })).filePaths[0] || '';
     case 'choose.executable': return (await dialog.showOpenDialog(owner, { title: '选择 CLI 程序（不是编辑器）', properties: ['openFile'], filters: [{ name: 'CLI', extensions: ['exe', 'cmd', 'ps1'] }] })).filePaths[0] || '';
     case 'remote.connect': {
@@ -221,7 +222,7 @@ async function dispatch(action: string, raw: unknown, owner: BrowserWindow, pref
     case 'project.create': { const p = z.object({ name: z.string().min(1).max(180), groupName: z.string().optional(), brief: projectBriefSchema.optional() }).parse(raw); return workbench.createProject(p.name, p.groupName, p.brief); }
     case 'project.initialize': { const p = z.object({ name: z.string().min(1).max(180), groupName: z.string().min(1).max(80), contextKey: z.string().max(4096), brief: projectBriefSchema }).parse(raw); return workbench.initializeProject(p.name, p.groupName, p.brief, p.contextKey); }
     case 'remote.password': { const p = z.object({ oldPassword: z.string().min(1).max(4096), newPassword: newAccountPasswordSchema }).parse(raw); return workbench.remote.changePassword(p.oldPassword, p.newPassword); }
-    case 'remote.disconnect': if (personalRelay === active && personalContext?.workbench.store.sessions.some(session => session.networkRoute === 'management' && ['starting', 'running', 'approval'].includes(session.status))) throw new Error('请先结束使用中央中转的本机会话，再断开连接'); workbench.remote.disconnect(); return true;
+    case 'remote.disconnect': if (personalRelay === active && personalContext?.workbench.store.sessions.some(session => session.networkRoute === 'management' && (['starting', 'running', 'approval'].includes(session.status) || personalContext?.workbench.activity.busy))) throw new Error('请先结束使用中央中转的本机会话，再断开连接'); workbench.remote.disconnect(); return true;
     case 'group.control': return workbench.groupCommand(raw as any);
     case 'remote.manifest': return workbench.refreshGroups();
     case 'remote.list': { const p = z.object({ projectId: z.string(), path: text }).parse(raw); return workbench.remote.list(workbench.remote.binding(p.projectId), p.path); }
@@ -382,7 +383,7 @@ async function dispatch(action: string, raw: unknown, owner: BrowserWindow, pref
     case 'session.answer': { const p = z.object({ id, requestId: z.string(), option: z.string(), answers: z.record(z.string(), z.union([z.string(), z.array(z.string())])).optional() }).parse(raw); return workbench.answer(p.id, p.requestId, p.option, p.answers); }
     case 'session.attachLocal': { const p = sessionInput.parse(raw); return workbench.attachLocal(p.id, await chooseFiles(owner)); }
     case 'session.attachRemote': { const p = z.object({ id, projectId: z.string(), path: text }).parse(raw); return workbench.attachRemote(p.id, p.projectId, p.path); }
-    case 'session.autoUpload': { const p = z.object({ id, enabled: z.boolean() }).parse(raw); const s = workbench.session(p.id); if (p.enabled && (!s.binding || s.purpose !== 'work')) throw new Error('只有绑定远端项目的工作会话可开启自动上传'); if (p.enabled && s.sources.some(source => source.sourcePath.startsWith('session-handoff:') || source.sourcePath.startsWith('subsession-report:'))) throw new Error('当前会话引用了个人会话内容，不能开启轨迹自动上传；如需分享轨迹，请先预览并手动确认'); s.autoUpload = p.enabled; await workbench.store.save(); broadcast(); return true; }
+    case 'session.autoUpload': { const p = z.object({ id, enabled: z.boolean() }).parse(raw); const s = workbench.session(p.id); if (p.enabled && (workbench.personal || !s.binding || s.purpose !== 'work')) throw new Error('只有绑定远端项目的工作会话可开启自动上传'); if (p.enabled && s.sources.some(source => source.sourcePath.startsWith('session-handoff:') || source.sourcePath.startsWith('subsession-report:'))) throw new Error('当前会话引用了个人会话内容，不能开启轨迹自动上传；如需分享轨迹，请先预览并手动确认'); s.autoUpload = p.enabled; await workbench.store.save(); broadcast(); return true; }
     case 'session.history': return historyMarkdown(workbench.session(sessionInput.parse(raw).id));
     case 'session.uploadTrajectory': return workbench.archive(sessionInput.parse(raw).id);
     case 'handoff.read': return workbench.readHandoff(sessionInput.parse(raw).id);
@@ -498,7 +499,7 @@ async function storedWindowState(slot: number): Promise<{ profile?: import('../s
   catch (error: any) { if (error.code !== 'ENOENT') throw error; return {}; }
 }
 async function loginWindow(window: BrowserWindow, profile: import('../shared/types').ConnectionProfile, password: string, localPath: string, trust: (fingerprint: string) => Promise<boolean>, egressInput?: z.infer<typeof userEgressInputSchema>, newPassword?: string) {
-  if (personalRelay === contexts.get(window) && personalContext?.workbench.store.sessions.some(session => session.networkRoute === 'management' && ['starting', 'running', 'approval'].includes(session.status))) throw new Error('请先结束使用中央中转的本机会话，再更换登录账号');
+  if (personalRelay === contexts.get(window) && personalContext?.workbench.store.sessions.some(session => session.networkRoute === 'management' && (['starting', 'running', 'approval'].includes(session.status) || personalContext?.workbench.activity.busy))) throw new Error('请先结束使用中央中转的本机会话，再更换登录账号');
   if (switchingWindows.has(window)) throw new Error('正在登录，请等待结果');
   const previous = contexts.get(window)!;
   const currentProfile = previous.workbench.store.settings.workspaceSnapshot?.profile;
@@ -604,7 +605,7 @@ async function storedDatasetSlots() {
 function syncTaskbar(window: BrowserWindow, workbench: Workbench) {
   try {
     if (window.isDestroyed()) return;
-    const next = taskbarAttention(workbench.questions.view(), workbench.contentUpdates(), workbench.store.sessions);
+    const next = taskbarAttention(workbench.questions.view(), workbench.contentUpdates(), [...workbench.store.sessions, ...(personalContext?.workbench.store.sessions || [])]);
     const previous = taskbarSeen.get(window);
     taskbarSeen.set(window, next);
     if (taskbarShouldAlert(previous, next) && !window.isFocused()) window.flashFrame(true);
@@ -614,17 +615,17 @@ async function createDataContext(root: string, personal = false): Promise<DataCo
   let workbench: Workbench;
   const emit = (event: WorkbenchEvent) => { for (const [window, context] of contexts) if ((personal || context.workbench === workbench) && !window.isDestroyed()) window.webContents.send('workbench:event', event); };
   let emitTimer: NodeJS.Timeout | undefined;
-  const broadcast = () => { egress?.sharedServerConnectionChanged(personal ? !!personalRelay?.workbench.remote.connected : !!workbench?.remote.connected); if (!personal) personalContext?.egress.sharedServerConnectionChanged(!!personalRelay?.workbench.remote.connected); if (!emitTimer) emitTimer = setTimeout(() => { emitTimer = undefined; emit({ type: 'state' }); for (const [window, context] of contexts) if (context.workbench === workbench && !window.isDestroyed()) syncTaskbar(window, workbench); }, 80); };
+  const broadcast = () => { egress?.sharedServerConnectionChanged(personal ? !!personalRelay?.workbench.remote.connected : !!workbench?.remote.connected); if (!personal) personalContext?.egress.sharedServerConnectionChanged(!!personalRelay?.workbench.remote.connected); if (!emitTimer) emitTimer = setTimeout(() => { emitTimer = undefined; emit({ type: 'state' }); for (const [window, context] of contexts) if ((personal || context.workbench === workbench) && !window.isDestroyed()) syncTaskbar(window, context.workbench); }, 80); };
   const notice = (message: string) => { emit({ type: 'notice', message });
     if (/^(收到提问|收到问题答复|问题已关闭)：/.test(message) && Notification.isSupported()) {
       const notification = new Notification({ title: '团队工作台 · 提问', body: message });
       notification.on('click', () => { for (const [window, context] of contexts) if (context.workbench === workbench && !window.isDestroyed()) { window.show(); window.focus(); window.webContents.send('workbench:event', { type: 'questions' }); break; } });
       notification.show();
-    } if (message.startsWith('待授权：')) for (const [window, context] of contexts) if (context.workbench === workbench && !window.isDestroyed() && !window.isFocused()) window.flashFrame(true); };
+    } if (message.startsWith('待授权：')) for (const [window, context] of contexts) if ((personal || context.workbench === workbench) && !window.isDestroyed() && !window.isFocused()) window.flashFrame(true); };
   let egress: EgressClientProxy | undefined;
-  workbench = new Workbench(root, broadcast, notice, 10 * 60 * 1000, route => {
+  workbench = new Workbench(root, broadcast, notice, 10 * 60 * 1000, (route, session) => {
     if (route === 'direct') return {};
-    if (personal && workbench.store.settings.egress?.viaSharedServer && !personalRelay?.workbench.remote.connected) throw new Error('中央节点未连接，请先登录后使用中转');
+    if (personal) assertPersonalRelay(route || (workbench.store.settings.egress?.enabled ? 'management' : 'direct'), workbench.store.settings.egress?.viaSharedServer, personalRelay?.workbench.remote.connected && personalRelay.workbench.remote.profile ? accountIdentity(personalRelay.workbench.remote.profile) : undefined, session);
     const environment = egress?.environment() || {};
     if (route === 'management' && !environment.HTTPS_PROXY) throw new Error('该会话的管理端出口未启动，请先恢复管理端连接');
     return environment;

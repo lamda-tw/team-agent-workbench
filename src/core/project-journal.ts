@@ -61,6 +61,10 @@ export class ProjectJournal {
     await this.load();
     for (const id of this.records.keys()) if (!this.store.sessions.some(s => s.id === id)) { await this.request({ action: 'remove', sessionId: id }); this.records.delete(id); }
   }); }
+  exportSessions(ids: Set<string>) { return this.serial(async () => {
+    await this.load(); return structuredClone([...this.records.values()].filter(record => ids.has(record.sessionId)));
+  }); }
+  invalidate() { return this.serial(async () => { this.loaded = false; this.records.clear(); }); }
   commit(s: AgentSession, beforeHash: string, messageCount: number, summary: string, entry?: JournalEntry, allowClosed = false) {
     return this.serial(async () => {
       await this.load();

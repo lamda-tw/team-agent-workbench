@@ -2,12 +2,16 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { atomicJson, Store } from './store';
 import type { AgentSession, Draft, ProjectConclusion, SessionInput } from '../shared/types';
+import type { JournalRecord } from '../shared/project-journal';
 
 export interface PersonalMove {
-  version: 1; targetRoot: string; groupId?: string; retainedConclusions?: ProjectConclusion[];
+  version: 1; targetRoot: string; groupId?: string; retainedConclusions?: ProjectConclusion[]; journals?: JournalRecord[];
   sessions: AgentSession[]; drafts: Draft[]; conclusions: ProjectConclusion[]; inputs: Record<string, SessionInput>;
 }
 const journal = (root: string) => path.join(root, 'pending-personal-move.json');
+export class PersonalMovePendingError extends Error {
+  constructor() { super('迁移记录已保留，磁盘保存尚未完成；请检查磁盘后重启工作台恢复迁移，勿重复操作'); }
+}
 export function applyPersonalMove(store: Store, move: PersonalMove, target: boolean) {
   for (const key of ['sessions', 'drafts', 'conclusions'] as const) {
     const ids = new Set(move[key].map(item => item.id));
@@ -22,12 +26,20 @@ export function applyPersonalMove(store: Store, move: PersonalMove, target: bool
 export async function persistPersonalMove(source: Store, target: Store, move: PersonalMove) {
   await atomicJson(journal(source.root), move);
   applyPersonalMove(target, move, true); applyPersonalMove(source, move, false);
-  try { await target.save(); await source.save(); }
+  const save = async () => {
+    await target.save(); await source.save();
+    for (const record of move.journals || []) {
+      if (!move.sessions.some(session => session.id === record.sessionId)) throw new Error('迁移日志与会话不一致');
+      await atomicJson(path.join(target.root, 'project-journals', record.sessionId + '.json'), record);
+      await fs.rm(path.join(source.root, 'project-journals', record.sessionId + '.json'), { force: true });
+    }
+    await fs.rm(journal(source.root), { force: true });
+  };
+  try { await save(); }
   catch { // The journal makes a partially written pair recoverable, including app/OS interruption.
-    try { await target.save(); await source.save(); }
-    catch { throw new Error('迁移记录已保留，磁盘保存尚未完成；请检查磁盘后重启工作台恢复迁移，勿重复操作'); }
+    try { await save(); }
+    catch { throw new PersonalMovePendingError(); }
   }
-  await fs.rm(journal(source.root), { force: true });
 }
 export async function recoverPersonalMove(sourceRoot: string) {
   let move: PersonalMove;

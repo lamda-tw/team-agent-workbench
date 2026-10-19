@@ -1,5 +1,5 @@
-import { persistPersonalMove, recoverPersonalMove } from './personal-move';
-import { personalWorkspace, personalBinding, PERSONAL_PROJECT_ID, isPersonalBinding } from '../shared/personal-workspace';
+import { persistPersonalMove, recoverPersonalMove, PersonalMovePendingError } from './personal-move';
+import { personalWorkspace, personalBinding, personalFamilyIds, PERSONAL_PROJECT_ID, isPersonalBinding } from '../shared/personal-workspace';
 import { Questions } from './questions';
 import { groupCommandSchema, type GroupCommand } from '../shared/team-groups';
 import { assertCursorSharedSessionAvailable } from '../shared/cursor-session-consistency';
@@ -37,7 +37,7 @@ import { SharedFiles } from './shared-files';
 import { TransferQueue } from './transfers';
 import { AgentRuntime, clearStoppedNativeFork } from './agents';
 import { ClaudeRuntime } from './claude-runtime';
-import { prepareCodexStorage } from './codex-storage';
+import { findCodexRollout, prepareCodexStorage } from './codex-storage';
 import { userDesktopAppOpen } from './desktop-app-open';
 import type { McpMutation } from '../shared/mcp';
 import { CursorMcp } from './cursor-mcp';
@@ -150,7 +150,7 @@ export class Workbench {
   desktopAppOpen: (provider: 'codex' | 'cursor') => Promise<boolean> = userDesktopAppOpen;
   accounts: ProviderAccounts;
   accountSync: AccountSync;
-  constructor(root: string, private broadcast: () => void, private notice: (message: string) => void, private preparationTimeoutMs = 10 * 60 * 1000, private providerEnvironment: (route?: SessionNetworkRoute) => NodeJS.ProcessEnv = () => ({}), private connectionReport?: (session: AgentSession, value: import('../shared/cli-connection').CliConnection) => void, readonly codexDesktop: CodexDesktopIntegration = new CodexDesktopService(), readonly cursorDesktop: CursorDesktopIntegration = new CursorFileService(), readonly personal = false) {
+  constructor(root: string, private broadcast: () => void, private notice: (message: string) => void, private preparationTimeoutMs = 10 * 60 * 1000, private providerEnvironment: (route?: SessionNetworkRoute, session?: AgentSession) => NodeJS.ProcessEnv = () => ({}), private connectionReport?: (session: AgentSession, value: import('../shared/cli-connection').CliConnection) => void, readonly codexDesktop: CodexDesktopIntegration = new CodexDesktopService(), readonly cursorDesktop: CursorDesktopIntegration = new CursorFileService(), readonly personal = false) {
     this.assignmentUploads = new AssignmentUploads(root);
     this.store = new Store(root); this.remote = new SharedFiles(() => this.broadcast()); this.queue = new TransferQueue(this.store, this.remote, () => this.broadcast());
     this.journal = new ProjectJournal(this.store);
@@ -160,10 +160,10 @@ export class Workbench {
       steer: (id, text, agentNotice, runId) => this.steerQuestion(id, text, agentNotice, runId),
       changed: () => this.broadcast(), notice: text => this.notice(text),
     });
-    this.activity = new ActivityAssistant({ store: this.store, prepare: () => this.journal.ready(), owns: s => !this.configuring && this.ownsLocal(s.binding), connected: () => !this.closing && !this.configuring && this.remote.connected,
+    this.activity = new ActivityAssistant({ store: this.store, prepare: () => this.journal.ready(), owns: s => !this.configuring && !this.personalMoving && !this.migrationRecoveryRequired && this.ownsLocal(s.binding), connected: () => !this.closing && !this.configuring && this.remote.connected,
       content: s => { this.assertCanWork(s.binding); return this.remote.contentList(s.binding!); },
       commitSummary: (s, hash, count, summary, entry) => this.commitHandoff(s, hash, count, summary, entry), changed: () => this.broadcast(),
-    }, backgroundTextTask(root, s => this.store.settings.providerPaths[s.provider], s => this.providerEnvironment(s.networkRoute)));
+    }, backgroundTextTask(root, s => this.store.settings.providerPaths[s.provider], s => this.providerEnvironment(s.networkRoute, s)));
     this.accountSync = new AccountSync(this.store, this.remote, this.broadcast, () => {
       for (const draft of this.store.drafts) {
         const explicitlySaved = new Set(draft.personalSavedIds || []);
@@ -810,7 +810,7 @@ export class Workbench {
   }
   private ownsLocal(binding?: RemoteBinding) { return ownsBinding(this.localProfile(), binding); }
   private sessionNotice(session: AgentSession, message: string) { if (!this.configuring && this.ownsLocal(session.binding)) this.notice(message); }
-  assertAccountReady() { if (this.configuring) throw new Error('正在登录，请等待账号切换完成'); }
+  assertAccountReady() { if (this.migrationRecoveryRequired) throw new PersonalMovePendingError(); if (this.personalMoving) throw new Error('会话正在迁移，请稍候'); if (this.configuring) throw new Error('正在登录，请等待账号切换完成'); }
   async requireAuth(provider: Provider, cwd: string, route?: SessionNetworkRoute) {
     const prior = this.accounts.states[provider];
     const auth = prior.networkRoute === route && authReady(prior) && prior.cwd === cwd && Date.now() - Date.parse(prior.checkedAt || '') < 10000 ? prior : await this.accounts.check(provider, cwd, route);
@@ -843,6 +843,7 @@ export class Workbench {
     } finally { if (this.catalogJobs.get(key) === job) this.catalogJobs.delete(key); }
   }
   private async runtime(s: AgentSession) {
+    this.providerEnvironment(s.networkRoute, s);
     const pending = this.runtimeJobs.get(s.id); if (pending) return pending;
     const existing = this.runtimes.get(s.id);
     if (existing && (s.cursorNative || s.codexDesktop) && existing.session !== s) { this.runtimes.delete(s.id); await existing.close(); }
@@ -869,7 +870,7 @@ export class Workbench {
       finally { await this.store.save(); }
     }
     const executable = s.cursorNative ? 'CURSOR_NATIVE_NO_CLI' : await resolveProvider(s.provider, this.store.settings.providerPaths[s.provider]);
-    const storage = s.provider === 'codex' ? s.codexDesktop ? await this.codexDesktop.storage(s, executable, this.providerEnvironment(s.networkRoute)) : await prepareCodexStorage(this.store.root, s) : undefined;
+    const storage = s.provider === 'codex' ? s.codexDesktop ? await this.codexDesktop.storage(s, executable, this.providerEnvironment(s.networkRoute, s)) : await prepareCodexStorage(this.store.root, s) : undefined;
     if (this.closing || s.closedAt || epoch !== this.accountRevision) throw new Error('会话或账号已改变，未启动 CLI');
     if (s.codexPrivateFork) await this.store.save();
     const hooks = { changed: this.changed, event: (value: unknown) => this.event(s.id, value), done: () => void this.onDone(s.id).catch(e => this.sessionNotice(s, '运行结果保存失败：' + e.message)), authFailed: (error: unknown) => this.accounts.failed(s.provider, error, s.cwd, s.networkRoute), needsApproval: (kind: 'question' | 'approval') => this.sessionNotice(s, kind === 'question' ? `“${s.title}”有问题需要你回答。` : `待授权：“${s.title}”需要你确认 CLI 操作，请查看待授权提醒。`) };
@@ -879,7 +880,7 @@ export class Workbench {
         if (value.state === 'connected') this.activity.providerRecovered(s.provider, s.networkRoute, s.cwd);
       }
     } });
-    runtime = s.provider === 'claude' ? new ClaudeRuntime(s, executable, hooks, this.providerEnvironment(s.networkRoute)) : new AgentRuntime(s, executable, hooks, storage, this.providerEnvironment(s.networkRoute));
+    runtime = s.provider === 'claude' ? new ClaudeRuntime(s, executable, hooks, this.providerEnvironment(s.networkRoute, s)) : new AgentRuntime(s, executable, hooks, storage, this.providerEnvironment(s.networkRoute, s));
     this.runtimes.set(s.id, runtime);
     if (runtime instanceof AgentRuntime) runtime.rpc.on('closed', () => { if (this.runtimes.get(s.id) === runtime) this.runtimes.delete(s.id); });
     else runtime.onClosed = () => { if (this.runtimes.get(s.id) === runtime) this.runtimes.delete(s.id); };
@@ -911,7 +912,7 @@ export class Workbench {
       try { await (await this.runtime(s)).ensureStarted(); }
       catch(error:any) { if(!/未登录|尚未登录/.test(error.message))throw error; }
     }
-    await this.codexDesktop.open(s,executable,this.providerEnvironment(s.networkRoute));
+    await this.codexDesktop.open(s,executable,this.providerEnvironment(s.networkRoute, s));
     if (s.nativeId) await (await this.runtime(s)).ensureStarted();
     this.ensureNativeTranscriptSync(); await this.store.save(); this.broadcast(); return true;
   }
@@ -955,7 +956,7 @@ export class Workbench {
     if (s.cursorNative) throw new Error('请在 Cursor 原生窗口管理 MCP');
     if (s.closedAt || s.purpose !== 'work' || s.provider !== 'cursor') throw new Error('请在打开的 Cursor 工作会话中管理 MCP');
     const executable = await resolveProvider('cursor', this.store.settings.providerPaths.cursor);
-    return new CursorMcp(s.cwd, executable, this.providerEnvironment(s.networkRoute));
+    return new CursorMcp(s.cwd, executable, this.providerEnvironment(s.networkRoute, s));
   }
   async toolConfiguration(id: string, kind: 'mcp' | 'skill' | 'plugin') {
     const s = this.session(id); this.assertCanWork(s.binding);
@@ -1186,7 +1187,7 @@ export class Workbench {
       await this.store.save(); this.broadcast(); return s;
     } finally { this.changingSettings.delete(s.id); }
   }
-  async changeNetworkRoute(id: string, route: SessionNetworkRoute) {
+  async changeNetworkRoute(id: string, route: SessionNetworkRoute, relayAccount?: string) {
     const s = this.session(id);
     if(s.codexDesktop && route==='management')throw new Error('Codex 桌面联动当前仅支持本机网络；通过管理端访问请新建普通会话');
     if (s.cursorNative) throw new Error('Cursor 原生会话使用桌面程序的网络设置');
@@ -1196,7 +1197,7 @@ export class Workbench {
     if (s.status === 'starting') throw new Error('CLI 正在启动，请启动完成后重试');
     if ((s.networkRoute || 'direct') === route) return s;
     if (route === 'management' && !this.store.settings.egress?.enabled) throw new Error('请先应用并检测管理端网络出口');
-    return this.updateSessionSettings(s, () => { s.networkRoute = route; });
+    return this.updateSessionSettings(s, () => { s.networkRoute = route; if (route === 'management' && relayAccount) s.relayAccount = relayAccount; else delete s.relayAccount; });
   }
   async changeModel(id: string, model: string, _stop = false) {
     const s = this.session(id);
@@ -1241,7 +1242,7 @@ export class Workbench {
     await fs.mkdir(dir, { recursive: true });
     const handoffPath = path.join(dir, 'handoff.md');
     await fs.writeFile(handoffPath, '# 阶段摘要\n\n## 当前工作焦点与范围\n待补充。\n\n## 当前进展\n尚未整理。\n\n## 已确认的决定与依据\n尚无。\n\n## 改动、影响范围与验证\n记录文件、版本、受影响的流程或文档、检查结果；尚无时写“尚未验证”。\n\n## 阻塞与待确认事项\n尚无。\n\n## 下一步\n待补充。\n', { flag: 'wx' });
-    const session: AgentSession = { personalGroupId: purpose === 'prepare' && parentId ? this.session(parentId).personalGroupId : personalGroupId, id, title: purpose === 'prepare' ? '成果整理' : '新会话', provider, model, permissionMode, cwd, purpose, networkRoute: route || (this.store.settings.egress?.enabled ? 'management' : 'direct'), parentId, createdAt: new Date().toISOString(), status: 'idle', messages: [], approvals: [], sources: [], binding, autoUpload: false, handoffPath, ...(purpose === 'work' ? { followProjectBrief: includeBrief } : {}) };
+    const session: AgentSession = { relayAccount: parentId ? this.session(parentId).relayAccount : undefined, personalGroupId: parentId ? this.session(parentId).personalGroupId : personalGroupId, id, title: purpose === 'prepare' ? '成果整理' : '新会话', provider, model, permissionMode, cwd, purpose, networkRoute: route || (this.store.settings.egress?.enabled ? 'management' : 'direct'), parentId, createdAt: new Date().toISOString(), status: 'idle', messages: [], approvals: [], sources: [], binding, autoUpload: false, handoffPath, ...(purpose === 'work' ? { followProjectBrief: includeBrief } : {}) };
     if(desktopSync && provider==='codex')session.codexDesktop=true;
     this.store.sessions.unshift(session);
     const managed = cwd.startsWith(path.join(this.store.root, 'workspaces') + path.sep);
@@ -1255,8 +1256,10 @@ export class Workbench {
     this.store.settings.lastWorkspace = purpose === 'work' && !managed ? cwd : this.store.settings.lastWorkspace; await this.store.save(); this.broadcast(); return session;
   }
   private personalMoving = false;
+  private migrationRecoveryRequired = false;
   private movingIds = new Set<string>();
   async savePersonalGroup(name: string, id?: string) {
+    this.assertAccountReady();
     if (!this.personal || this.personalMoving) throw new Error('请等待会话迁移完成');
     const value = name.trim().normalize('NFC');
     if (!value || value.length > 60) throw new Error('分组名称需为 1–60 个字符');
@@ -1270,6 +1273,7 @@ export class Workbench {
     this.broadcast(); return group;
   }
   async dissolvePersonalGroup(groupId: string) {
+    this.assertAccountReady();
     if (!this.personal || this.personalMoving) throw new Error('请等待会话迁移完成');
     const groups = this.store.settings.personalGroups || [];
     if (!groups.some(group => group.id === groupId)) throw new Error('分组已不存在');
@@ -1279,17 +1283,7 @@ export class Workbench {
     try { await this.store.save(); } catch (error) { this.store.settings.personalGroups = groups; previous.forEach(session => session.personalGroupId = groupId); throw error; }
     this.broadcast(); return true;
   }
-  private personalFamily(ids: string[]) {
-    const selected = new Set(ids);
-    let changed = true;
-    while (changed) {
-      changed = false;
-      for (const session of this.store.sessions) if ((session.parentId && selected.has(session.parentId) || session.parentId && selected.has(session.id)) && isPersonalBinding(session.binding)) {
-        for (const id of [session.id, session.parentId!]) if (!selected.has(id)) { selected.add(id); changed = true; }
-      }
-    }
-    return selected;
-  }
+  private personalFamily(ids: string[]) { return personalFamilyIds(this.store.sessions, ids); }
   async assignPersonalGroup(id: string, groupId?: string) {
     const session = this.session(id);
     if (!this.personal || this.personalMoving || session.purpose !== 'work') throw new Error('当前会话不能调整分组');
@@ -1301,6 +1295,9 @@ export class Workbench {
     this.broadcast(); return true;
   }
   async movePersonalTo(target: Workbench, projectId: string, selection: { sessionId?: string; groupId?: string }) {
+    this.assertAccountReady(); target.assertAccountReady();
+    await this.edits;
+    this.assertAccountReady(); target.assertAccountReady();
     if (!this.personal || target.personal || this.personalMoving || !!selection.sessionId === !!selection.groupId) throw new Error('请选择一个会话或整个个人分组');
     if (!target.remote.connected) throw new Error('请先登录中央节点，再迁移到团队项目');
     if (selection.groupId && !this.store.settings.personalGroups?.some(group => group.id === selection.groupId)) throw new Error('个人分组已不存在');
@@ -1308,34 +1305,52 @@ export class Workbench {
     if (!initial.length) throw new Error('没有可迁移的会话');
     const ids = this.personalFamily(initial.map(session => session.id));
     const sessions = this.store.sessions.filter(session => ids.has(session.id)), drafts = this.store.drafts.filter(draft => ids.has(draft.sessionId));
-    const busy = sessions.find(session => ['starting', 'running', 'approval'].includes(session.status) || this.sending.has(session.id) || this.changingSettings.has(session.id) || this.preparing.has(session.id));
+    const busy = sessions.find(session => ['starting', 'running', 'approval'].includes(session.status) || this.sending.has(session.id) || this.changingSettings.has(session.id) || this.preparing.has(session.id) || this.reorganizing.has(session.id));
     if (busy || drafts.some(draft => draft.generation === 'running')) throw new Error(`请先结束“${busy?.title || '成果整理'}”中的任务，再整体迁移`);
     if (sessions.some(session => !isPersonalBinding(session.binding))) throw new Error('会话归属已改变，请刷新后重试');
+    const originIds = new Set([...ids, ...drafts.flatMap(draft => [draft.id, ...(draft.artifacts || []).map(item => item.id)])]);
     const conclusionIds = new Set(drafts.flatMap(draft => draft.personalSavedIds || []));
-    for (const item of this.store.conclusions) if (item.sources.some(source => source.kind === 'session' && ids.has(source.id))) conclusionIds.add(item.id);
+    for (const item of this.store.conclusions) if (item.sources.some(source => source.kind === 'session' && originIds.has(source.id))) conclusionIds.add(item.id);
     // Preserve local references already attached to a moving session.
     for (const session of sessions) for (const source of session.sources) if (source.contentRef?.projectId === PERSONAL_PROJECT_ID) conclusionIds.add(source.contentRef.id);
     for (const session of sessions) for (const source of session.sources) { const match = source.sourcePath.match(/^local-conclusion:([^:]+):v/); if (match) conclusionIds.add(match[1]); }
     let moreResults = true;
     while (moreResults) { moreResults = false; for (const item of this.store.conclusions) if (conclusionIds.has(item.id)) for (const source of item.derivedFrom || []) if (source.projectId === PERSONAL_PROJECT_ID && !conclusionIds.has(source.id)) { conclusionIds.add(source.id); moreResults = true; } }
     const conclusions = this.store.conclusions.filter(item => conclusionIds.has(item.id));
-    const retained = conclusions.filter(item => this.store.sessions.some(session => !ids.has(session.id) && session.sources.some(source => source.sourcePath.startsWith('local-conclusion:' + item.id + ':'))) || this.store.drafts.some(draft => !ids.has(draft.sessionId) && draft.personalSavedIds?.includes(item.id)) || item.sources.some(source => source.kind === 'session' && !ids.has(source.id)));
+    const retained = conclusions.filter(item => this.store.sessions.some(session => !ids.has(session.id) && session.sources.some(source => source.sourcePath.startsWith('local-conclusion:' + item.id + ':'))) || this.store.drafts.some(draft => !ids.has(draft.sessionId) && draft.personalSavedIds?.includes(item.id)) || item.sources.some(source => source.kind === 'session' && !originIds.has(source.id)) || this.store.conclusions.some(other => !conclusionIds.has(other.id) && other.derivedFrom?.some(ref => ref.projectId === PERSONAL_PROJECT_ID && ref.id === item.id)));
+    const retainedIds = new Set(retained.map(item => item.id));
+    for (let index = 0; index < retained.length; index++) for (const ref of retained[index].derivedFrom || []) { const dependency = conclusions.find(item => item.id === ref.id); if (ref.projectId === PERSONAL_PROJECT_ID && dependency && !retainedIds.has(dependency.id)) { retained.push(dependency); retainedIds.add(dependency.id); } }
 
     this.personalMoving = true; ids.forEach(id => this.movingIds.add(id));
     try {
+      await this.activity.pause();
       const profile = target.remote.profile!;
       await target.remote.loadManifest();
       if (target.remote.profile !== profile) throw new Error('中央账号已改变，请重新选择目标');
       const binding = target.remote.binding(projectId); target.assertCanWork(binding);
+      target.personalMoving = true; await target.activity.pause();
+      await target.edits;
+      await target.journal.ready();
       if (sessions.some(session => session.networkRoute === 'management' && session.relayAccount && session.relayAccount !== accountIdentity(binding))) throw new Error('这些会话仍使用另一中央账号中转，请先切换网络方式后再迁移');
-      if (conclusions.some(item => target.store.conclusions.some(existing => existing.id === item.id && (existing.version !== item.version || existing.content !== item.content)))) throw new Error('目标项目存在不同版本的关联成果，请先核对后再迁移');
+      if (conclusions.some(item => target.store.conclusions.some(existing => existing.id === item.id && (existing.projectId !== projectId || existing.version !== item.version || existing.content !== item.content)))) throw new Error('目标项目存在不同版本的关联成果，请先核对后再迁移');
       if (sessions.some(session => target.store.sessions.some(item => item.id === session.id)) || drafts.some(draft => target.store.drafts.some(item => item.id === draft.id))) throw new Error('目标存在同名会话记录，请刷新核对');
       for (const session of sessions) { const runtime = this.runtimes.get(session.id); if (runtime) { await runtime.close(); this.runtimes.delete(session.id); } }
       await Promise.all(sessions.map(session => this.eventWrites.get(session.id)));
+      const journals = await this.journal.exportSessions(ids);
+      for (const record of journals) { record.owner = accountIdentity(binding); record.projectId = projectId; }
       const moved = structuredClone(sessions);
       for (const session of moved) {
         session.binding = structuredClone(binding); delete session.personalGroupId;
-        if (session.provider === 'codex' && session.nativeId && session.codexStorage === 'workbench') session.codexNeedsRegistration = true;
+        if (session.provider === 'codex' && session.nativeId && session.codexStorage === 'workbench') {
+          const home = path.join(this.store.root, 'codex-home');
+          const rollout = await findCodexRollout(home, session.nativeId);
+          if (!rollout) throw new Error('找不到原 Codex 会话记录，请恢复记录后再迁移');
+          const relative = path.relative(home, rollout);
+          if (path.isAbsolute(relative) || relative.startsWith('..' + path.sep)) throw new Error('原 Codex 会话记录路径无效');
+          const destination = path.join(target.store.root, 'codex-home', relative);
+          await fs.mkdir(path.dirname(destination), { recursive: true }); await fs.copyFile(rollout, destination);
+          session.nativePath = destination; session.codexNeedsRegistration = true;
+        }
         for (const file of session.sources) if (file.contentRef?.projectId === PERSONAL_PROJECT_ID) file.contentRef.projectId = projectId;
         const events = this.store.sessionDir(session.id);
         if (await fs.stat(events).catch(() => undefined)) await fs.cp(events, target.store.sessionDir(session.id), { recursive: true, force: true });
@@ -1346,11 +1361,16 @@ export class Workbench {
         if (draft.conclusionMergeProjectId === PERSONAL_PROJECT_ID) draft.conclusionMergeProjectId = projectId;
         for (const item of draft.artifacts || []) item.target = contributionCategoryDirectory(binding, item.category);
       }
-      const movedConclusions = structuredClone(conclusions);
+      // A previously retained reference may already exist in the target. Preserve its publication receipts.
+      const movedConclusions = structuredClone(conclusions.map(item => target.store.conclusions.find(existing => existing.id === item.id) || item));
       for (const item of movedConclusions) { item.projectId = projectId; item.accountOwner = accountIdentity(binding); for (const source of item.derivedFrom || []) if (source.projectId === PERSONAL_PROJECT_ID && conclusionIds.has(source.id)) source.projectId = projectId; }
-      await persistPersonalMove(this.store, target.store, { version: 1, targetRoot: target.store.root, groupId: selection.groupId, retainedConclusions: retained, sessions: moved, drafts: movedDrafts, conclusions: movedConclusions, inputs: Object.fromEntries([...ids].flatMap(id => this.store.inputs[id] ? [[id, this.store.inputs[id]]] : [])) });
-      this.broadcast(); target.broadcast(); return { count: initial.length, projectId, sessionId: initial[0].id };
-    } finally { this.personalMoving = false; this.movingIds.clear(); }
+      await persistPersonalMove(this.store, target.store, { version: 1, targetRoot: target.store.root, groupId: selection.groupId, retainedConclusions: retained, journals, sessions: moved, drafts: movedDrafts, conclusions: movedConclusions, inputs: Object.fromEntries([...ids].flatMap(id => this.store.inputs[id] ? [[id, this.store.inputs[id]]] : [])) });
+      await this.journal.invalidate(); await target.journal.invalidate();
+      this.broadcast(); target.broadcast(); return { count: sessions.filter(session => session.purpose === 'work').length, projectId, sessionId: initial[0].id };
+    } catch (error) {
+      if (error instanceof PersonalMovePendingError) { this.migrationRecoveryRequired = true; target.migrationRecoveryRequired = true; }
+      throw error;
+    } finally { this.personalMoving = false; target.personalMoving = false; this.movingIds.clear(); if (!this.migrationRecoveryRequired) { this.activity.resume(); target.activity.resume(); } }
   }
   async researchWorkspace() { const directory = path.join(this.store.root, 'workspaces', randomUUID()); await fs.mkdir(directory, { recursive: true }); return directory; }
   async selectAssignmentFiles(projectId: string, taskId: string, filenames: string[], selectionId = taskId) {
@@ -1456,6 +1476,7 @@ export class Workbench {
     if (this.changingSettings.has(id)) throw new Error('正在切换会话设置，请稍后发送');
     if (!userText.trim()) throw new Error('请输入任务内容');
     const s = this.session(id); this.assertCanWork(s.binding);
+    this.providerEnvironment(s.networkRoute, s);
     if (!questionRunId) { const autoPeer = this.questions.lockedPeer(id); if (autoPeer) throw new Error(`这个 Session 正在与${autoPeer}自动对话，不能手动发送`); }
     if (s.cursorNative) {
       assertCursorSharedSessionAvailable(s);
@@ -2616,7 +2637,7 @@ export class Workbench {
     const job = this.createTrajectory(id, automatic).finally(() => this.archiving.delete(id)); this.archiving.set(id, job); return job;
   }
   private async createTrajectory(id: string, automatic: boolean) {
-    const s = this.session(id); if (!s.binding) throw new Error('会话没有绑定远端项目'); this.assertCanWork(s.binding);
+    const s = this.session(id); if (this.personal) throw new Error('请先将会话迁移到团队项目，再上传轨迹'); if (!s.binding) throw new Error('会话没有绑定远端项目'); this.assertCanWork(s.binding);
     if (automatic && s.sources.some(isPersonalHandoffSource)) {
       s.autoUpload = false; clearTimeout(this.trajectoryTimers.get(id)); this.trajectoryTimers.delete(id);
       await this.store.save(); this.broadcast(); return;

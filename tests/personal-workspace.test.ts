@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { Workbench } from '../src/core/workbench';
 import { LocalAdminConnection } from '../src/admin/local-connection';
 import { memberProfile } from './fixtures/member-profile';
@@ -65,7 +65,14 @@ test('whole-group migration checks all members and preserves session/draft/resul
     f.local.store.inputs[a.id] = { text: '尚未发送', sourceIds: [], answers: {} };
     const result = await f.local.createConclusion(PERSONAL_PROJECT_ID, '本机结论', '内容保留');
     const draft = { id: randomUUID(), sessionId: a.id, binding: structuredClone(a.binding), personalSavedIds: [result.id], title: '待审阅草稿', body: '草稿内容', files: [], inputDir: f.cwd, outputPath: path.join(f.cwd, 'draft.md'), createdAt: new Date().toISOString(), generation: 'ready' as const, artifacts: [{ id: randomUUID(), category: 'finding' as const, title: '发现', body: '正文', fields: { statement: '正文' }, target: '/personal/results', selected: true }] };
+    draft.personalSavedIds = [draft.artifacts[0].id];
+    result.sources = [{ id: draft.artifacts[0].id, kind: 'session', title: '来源整理', updatedAt: a.createdAt }];
     f.local.store.drafts.push(draft); await fs.writeFile(draft.outputPath, '草稿内容');
+    const beforeSummary = await fs.readFile(a.handoffPath, 'utf8');
+    assert(await f.local.journal.commit(a, createHash('sha256').update(beforeSummary).digest('hex'), 1, '保留的摘要', { turnId: a.messages[0].id, at: a.createdAt, text: '保留的轮次日志' }));
+    a.nativeId = randomUUID(); a.codexStorage = 'workbench';
+    const rollout = path.join(f.local.store.root, 'codex-home', 'sessions', `rollout-${a.nativeId}.jsonl`);
+    await fs.mkdir(path.dirname(rollout), { recursive: true }); await fs.writeFile(rollout, 'original native tool and chat history'); a.nativePath = rollout;
     await assert.rejects(f.local.movePersonalTo(f.team, 'missing', { groupId: group.id }), /登录中央节点/);
     const project = await f.connect();
     b.status = 'running';
@@ -81,6 +88,11 @@ test('whole-group migration checks all members and preserves session/draft/resul
     assert.equal(f.team.conclusions(project.id)[0].id, result.id); assert.equal(f.team.conclusions(project.id)[0].accountOwner, accountIdentity(f.team.session(a.id).binding!));
     assert.equal(await fs.readFile(draft.outputPath, 'utf8'), '草稿内容');
     assert.equal(f.team.store.transfers.length, 0);
+    assert.equal(f.local.store.conclusions.length, 0, 'saved artifact IDs resolve to their actual results');
+    assert.equal(await fs.readFile(f.team.session(a.id).nativePath!, 'utf8'), 'original native tool and chat history');
+    assert.notEqual(f.team.session(a.id).nativePath, rollout); assert(f.team.session(a.id).codexNeedsRegistration);
+    assert.equal(await fs.readFile(f.team.session(a.id).handoffPath, 'utf8'), '保留的摘要');
+    assert.match((await f.team.journal.project(f.team.session(a.id))).text, /保留的轮次日志/);
     const disk = new Store(f.team.store.root); await disk.init(); assert.equal(disk.sessions.length, 2);
     const personalDisk = new Store(f.local.store.root); await personalDisk.init(); assert.equal(personalDisk.sessions.length, 0);
   } finally { await f.close(); }
@@ -100,5 +112,63 @@ test('interrupted group migration recovers once without duplicate sessions or lo
     assert.deepEqual(local.sessions.map(item => item.id), [remaining.id]); assert.deepEqual(team.sessions.map(item => item.id), [source.id]); assert.equal(local.settings.personalGroups!.length, 0);
     // Do not overwrite recovered disk state when fixture engines close.
     f.local.store.sessions = local.sessions; f.local.store.settings = local.settings; f.team.store.sessions = team.sessions;
+  } finally { await f.close(); }
+});
+
+
+test('single-session migration retains a result used by an unmoved session and rejects a foreign relay identity', async () => {
+  const f = await fixture();
+  try {
+    const project = await f.connect();
+    const a = await f.local.createSession('claude', f.cwd), b = await f.local.createSession('cursor', f.cwd);
+    const result = await f.local.createConclusion(PERSONAL_PROJECT_ID, '共用参考', '仍在个人区引用');
+    await f.local.attachConclusion(a.id, result.id); await f.local.attachConclusion(b.id, result.id);
+    a.networkRoute = 'management'; a.relayAccount = 'different-account';
+    await assert.rejects(f.local.movePersonalTo(f.team, project.id, { sessionId: a.id }), /另一中央账号/);
+    assert.equal(f.local.store.sessions.length, 2); assert.equal(f.team.store.sessions.length, 0);
+    a.networkRoute = 'direct';
+    await f.local.movePersonalTo(f.team, project.id, { sessionId: a.id });
+    assert.deepEqual(f.local.store.sessions.map(item => item.id), [b.id]);
+    assert.equal(f.local.conclusions(PERSONAL_PROJECT_ID)[0].id, result.id);
+    assert.equal(f.team.conclusions(project.id)[0].id, result.id);
+    assert.equal(await fs.readFile(f.team.session(a.id).sources[0].localPath, 'utf8'), await fs.readFile(b.sources[0].localPath, 'utf8'));
+    f.team.conclusions(project.id)[0].publication = { version: 1, files: '[]', path: '/published/result.md', at: a.createdAt, sha256: 'a'.repeat(64) };
+    await f.local.movePersonalTo(f.team, project.id, { sessionId: b.id });
+    assert.equal(f.team.conclusions(project.id)[0].publication?.path, '/published/result.md');
+  } finally { await f.close(); }
+});
+
+test('persistent disk failure blocks further edits until the migration journal is recovered', async () => {
+  const f = await fixture();
+  try {
+    const project = await f.connect(), group = await f.local.savePersonalGroup('事务恢复');
+    const session = await f.local.createSession('claude', f.cwd); await f.local.assignPersonalGroup(session.id, group.id);
+    const save = f.team.store.save.bind(f.team.store);
+    f.team.store.save = async () => { throw new Error('disk full'); };
+    await assert.rejects(f.local.movePersonalTo(f.team, project.id, { groupId: group.id }), /重启工作台恢复/);
+    await assert.rejects(f.local.createSession('claude', f.cwd), /重启工作台恢复/);
+    assert.throws(() => f.team.session(session.id), /重启工作台恢复/);
+    f.team.store.save = save;
+    await recoverPersonalMove(f.local.store.root);
+    const source = new Store(f.local.store.root), target = new Store(f.team.store.root); await source.init(); await target.init();
+    assert.equal(source.sessions.length, 0); assert.equal(target.sessions.filter(item => item.id === session.id).length, 1);
+    assert.equal(source.settings.personalGroups!.length, 0);
+    await assert.rejects(fs.stat(path.join(f.local.store.root, 'pending-personal-move.json')), { code: 'ENOENT' });
+  } finally { await f.close(); }
+});
+
+
+test('a parent and its subsessions move together with an accurate work-session count', async () => {
+  const f = await fixture();
+  try {
+    const group = await f.local.savePersonalGroup('关联探索');
+    const parent = await f.local.createSession('claude', f.cwd);
+    const child = await f.local.createSession('claude', f.cwd, PERSONAL_PROJECT_ID, 'work', parent.id);
+    await f.local.assignPersonalGroup(child.id, group.id);
+    assert.equal(parent.personalGroupId, group.id); assert.equal(child.personalGroupId, group.id);
+    const project = await f.connect();
+    const result = await f.local.movePersonalTo(f.team, project.id, { sessionId: child.id });
+    assert.equal(result.count, 2); assert.equal(f.team.session(child.id).parentId, parent.id);
+    assert.equal(f.local.store.sessions.length, 0);
   } finally { await f.close(); }
 });
