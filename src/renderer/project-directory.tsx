@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { FolderOpen } from 'lucide-react';
 import type { Project } from '../shared/types';
 import { ProjectBriefSettings } from './project-brief-editor';
+import { RsiShadowSettings } from './rsi-shadow-settings';
 
 export function ProjectDirectoryForm({ projectId, projectName, contextKey, directory = '', initial = false, embedded = false, saved }: { projectId: string; projectName: string; contextKey: string; directory?: string; initial?: boolean; embedded?: boolean; saved: () => Promise<void> }) {
   const [value, setValue] = useState(directory), [busy, setBusy] = useState(false), [error, setError] = useState('');
@@ -32,6 +33,6 @@ export function ProjectDirectoryDialog(props: React.ComponentProps<typeof Projec
 export function ProjectSettingsDialog({ project, admin, contextKey, directory, close, directorySaved, briefSaved }: { project: Project; admin: boolean; contextKey: string; directory?: string; close: () => void; directorySaved: () => Promise<void>; briefSaved: (revision: number) => Promise<void> }) {
   return <div className="modal-backdrop"><section className="modal wide" role="dialog" aria-label={'项目设置 · ' + project.name}>
     <header><h2>项目设置 · {project.name}</h2><button className="icon" aria-label="关闭窗口" onClick={close}>×</button></header>
-    <ProjectBriefSettings project={project} admin={admin} cancel={close} saveLabel="保存项目设置" saved={briefSaved} localSettings={<ProjectDirectoryForm projectId={project.id} projectName={project.name} contextKey={contextKey} directory={directory} saved={directorySaved} embedded/>}/>
+    <ProjectBriefSettings project={project} admin={admin} cancel={close} saveLabel="保存项目设置" saved={briefSaved} localSettings={<><ProjectDirectoryForm projectId={project.id} projectName={project.name} contextKey={contextKey} directory={directory} saved={directorySaved} embedded/><RsiShadowSettings key={contextKey} projectId={project.id} projectName={project.name}/></>}/>
   </section></div>;
 }

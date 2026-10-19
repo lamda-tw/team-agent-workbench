@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { atomicJson } from './store';
 import type { TextTask } from './background-text';
 import type { AgentSession } from '../shared/types';
-import { rsiAnswerSchema, rsiCaseSchema, rsiConfigSchema, rsiDefaultRules, rsiPolicySchema, rsiReactionSchema,
+import { rsiAnswerSchema, rsiCaseSchema, rsiConfigSchema, rsiDefaultRules, rsiPolicySchema, rsiReactionSchema, rsiShadowSettingsSchema,
   type RsiAnswer, type RsiCase, type RsiConfig, type RsiEvaluation, type RsiEvidence, type RsiObservation,
   type RsiPolicy, type RsiProject, type RsiScope, type RsiScore, type RsiView } from '../shared/rsi';
 
@@ -158,9 +158,16 @@ export class RsiEngine {
   }
   async configure(projectId: string, input: unknown) {
     const config = rsiConfigSchema.parse(input);
-    const result = await this.edit(projectId, project => { project.config = config; project.revision++; return config; });
-    if (!config.enabled) { this.pending.delete(projectId); this.jobs.get(this.host.scope(projectId).key)?.controller.abort(); }
-    await this.observe(projectId, [{ source: 'configuration', sourceId: 'explicit-project-settings', factKey: 'explicit-project-settings', version: hash(config), eventAt: iso(), actor: this.host.scope(projectId).user, assertion: 'explicit', text: JSON.stringify(config) }]);
+    return this.updateConfig(projectId, () => config);
+  }
+  async configureShadow(projectId: string, input: unknown) {
+    const patch = rsiShadowSettingsSchema.parse(input);
+    return this.updateConfig(projectId, config => ({ ...config, ...patch, quiet: false }));
+  }
+  private async updateConfig(projectId: string, update: (config: RsiConfig) => RsiConfig) {
+    const result = await this.edit(projectId, project => { project.config = update(project.config); project.revision++; return project.config; });
+    if (!result.enabled) { this.pending.delete(projectId); this.jobs.get(this.host.scope(projectId).key)?.controller.abort(); }
+    await this.observe(projectId, [{ source: 'configuration', sourceId: 'explicit-project-settings', factKey: 'explicit-project-settings', version: hash(result), eventAt: iso(), actor: this.host.scope(projectId).user, assertion: 'explicit', text: JSON.stringify(result) }]);
     return result;
   }
   async observe(projectId: string, inputs: RsiObservation[]) {
@@ -317,7 +324,7 @@ export class RsiEngine {
         const suggestion = { ...item, fingerprint, id: randomUUID(), runId, policyId: policy.id, createdAt: iso(), sessionId: session.id, projectId };
         current.suggestions.push(suggestion); run.suggestions.push(suggestion.id);
       }
-      run.decision = run.suggestions.length ? '建议可查看，不自动执行' : '没有新的适用建议';
+      run.decision = run.suggestions.length ? '影子分析已保存，仅作后台记录' : '没有新的适用建议';
     });
   }
   private async learn(projectId: string, session: AgentSession, signal: AbortSignal) {

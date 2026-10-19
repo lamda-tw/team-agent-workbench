@@ -35,14 +35,20 @@ test('other project/session histories and unknown accounts do not enter the curr
   assert(!JSON.stringify(await workbench.rsi.view(offlineProjectId)).includes('ALICE_PROJECT_A'));
   profile.projects = []; await assert.rejects(workbench.rsi.collect(offlineProjectId), /项目/);
 }));
-test('normal session completion schedules recommendations asynchronously and does not treat assistant assertions as outcomes', async () => fixture(async (workbench, root) => {
+test('shadow analysis stays asynchronous and records suggestions without changing the conversation or fabricating feedback', async () => fixture(async (workbench, root) => {
   const session = await workbench.createSession('codex', root, offlineProjectId, 'work', undefined, 'fixture-model');
-  await workbench.rsi.configure(offlineProjectId, { enabled: true });
+  await workbench.rsi.configureShadow(offlineProjectId, { enabled: true, dailyCalls: 2 });
   let release!: () => void; const waiting = new Promise<void>(resolve => { release = resolve; });
-  workbench.rsi.runText = async (_s, prompt) => { await waiting; const data = JSON.parse(prompt.split('REFERENCE_DATA=')[1]); return JSON.stringify({ state: { progress: '等待测试', blockers: [], unknowns: ['F1'], evidenceIds: [data.evidence[0].id] }, suggestions: [] }); };
+  workbench.rsi.runText = async (_s, prompt) => { await waiting; const data = JSON.parse(prompt.split('REFERENCE_DATA=')[1]); return JSON.stringify({ state: { progress: '等待测试', blockers: [], unknowns: ['F1'], evidenceIds: [data.evidence[0].id] }, suggestions: [{ title: '验证指标', action: '独立评估 F1', reason: '只有模型自述', evidenceIds: [data.evidence[0].id], conditions: [], uncertainty: '效果未知', priority: 0.8 }] }); };
   session.messages.push({ id: randomUUID(), role: 'assistant', text: '实验成功', createdAt: new Date().toISOString() });
+  const before = structuredClone(session), inputs = structuredClone(workbench.store.inputs), results = structuredClone(workbench.store.conclusions);
   await workbench.rsi.completed(offlineProjectId);
   for (let index = 0; index < 30 && !workbench.rsi.busy; index++) await new Promise(resolve => setTimeout(resolve, 10));
   assert.equal(session.status, 'idle'); assert.equal(workbench.rsi.busy, true);
-  release(); await workbench.rsi.settled(); assert.equal((await workbench.rsi.view(offlineProjectId)).events.length, 0);
+  release(); await workbench.rsi.settled(); const view = await workbench.rsi.view(offlineProjectId);
+  assert.equal(view.events.length, 0); assert.equal(view.suggestions.length, 1);
+  assert.match(view.runs.at(-1)!.decision!, /仅作后台记录/);
+  assert.deepEqual(session, before); assert.deepEqual(workbench.store.inputs, inputs); assert.deepEqual(workbench.store.conclusions, results);
+  const saved = JSON.parse(await fs.readFile(path.join(workbench.store.root, 'rsi-v2.json'), 'utf8'));
+  assert.equal(saved.projects[view.scope.key].suggestions.length, 1);
 }));

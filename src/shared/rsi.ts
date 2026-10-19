@@ -9,6 +9,11 @@ export const rsiConfigSchema = z.object({
   quiet: z.boolean().default(false),
 });
 export type RsiConfig = z.infer<typeof rsiConfigSchema>;
+export const rsiShadowSettingsSchema = rsiConfigSchema.pick({ enabled: true, dailyCalls: true }).required().strict();
+export interface RsiShadowSettings {
+  config: RsiConfig;
+  sourceSession?: { title: string; provider: string; model?: string };
+}
 export const rsiPolicySchema = z.object({
   guidance: z.string().trim().min(1).max(6000),
   cooldownMinutes: z.number().int().min(0).max(1440),

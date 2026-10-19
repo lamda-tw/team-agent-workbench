@@ -13,3 +13,10 @@ release/
 artifacts/
 __pycache__/
 *.pyc
+
+# RSI end-to-end experiments and run reports stay local.
+/scripts/rsi-research.ts
+/scripts/rsi-research-fixture.ts
+/scripts/rsi-ui-smoke.ts
+/docs/rsi-v2-validation.md
+/docs/verification/rsi-v2-*.json

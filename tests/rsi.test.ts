@@ -49,6 +49,25 @@ test('observations deduplicate exact source revisions but preserve corroborating
   await engine.observe('p1', [{ ...a, source: 'execution', sourceId: 'tool', assertion: 'observed' }]);
   const view = await engine.view('p1'); assert.equal(view.evidence.length, 2); assert.equal(new Set(view.evidence.map(item => item.factKey)).size, 1); assert.equal(view.events.length, 0);
 }));
+
+test('shadow controls preserve project configuration, resume a paused project, and enforce the call budget', async () => fixture(async ({ engine, session, calls }) => {
+  await engine.configure('p1', { enabled: true, quiet: true, autoLearn: true, goals: '研究实体边界', acceptance: '保留集独立验证', role: '算法研究', preference: '先看反例', contextChars: 6000 });
+  await engine.configureShadow('p1', { enabled: true, dailyCalls: 1 });
+  assert.equal((await engine.view('p2')).config.enabled, false);
+  const config = (await engine.view('p1')).config;
+  assert.equal(config.quiet, false); assert.equal(config.autoLearn, true);
+  assert.equal(config.goals, '研究实体边界'); assert.equal(config.acceptance, '保留集独立验证');
+  assert.equal(config.role, '算法研究'); assert.equal(config.preference, '先看反例'); assert.equal(config.contextChars, 6000);
+  const before = structuredClone(session);
+  await recommend(engine); await recommend(engine);
+  assert.equal(calls.length, 1); assert.match((await engine.view('p1')).lastError!, /预算/);
+  assert.deepEqual(session, before);
+  await assert.rejects(engine.configureShadow('p1', { enabled: true, dailyCalls: 0 }));
+  await assert.rejects(engine.configureShadow('p1', { enabled: true, dailyCalls: 2, goals: 'unexpected' }));
+  assert.equal((await engine.view('p1')).config.dailyCalls, 1);
+  await engine.configureShadow('p1', { enabled: false, dailyCalls: 1 });
+  await engine.completed('p1'); await engine.settled(); assert.equal(calls.length, 1);
+}));
 test('display, visibility and acceptance remain distinct from execution and success', async () => fixture(async ({ engine }) => {
   await engine.configure('p1', { enabled: true }); let view = await recommend(engine); const suggestion = view.suggestions[0];
   for (const kind of ['presented', 'visible', 'accepted'] as const) { await engine.feedback('p1', { suggestionId: suggestion.id, kind, requestId: kind }); await engine.feedback('p1', { suggestionId: suggestion.id, kind, requestId: kind }); }

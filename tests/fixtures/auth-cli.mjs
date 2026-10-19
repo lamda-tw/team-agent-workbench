@@ -66,12 +66,7 @@ else if (command === 'login') {
         body: item.body || Object.values(item.fields || {}).join(' '),
         evidenceIds: item.evidenceIds || evidenceIds.slice(0, 1) })) });
     };
-    const rsiAnswer = () => {
-      const data = JSON.parse(promptText.split('REFERENCE_DATA=')[1]);
-      if (promptText.startsWith('RSI_PROTOCOL_V2:learn')) return JSON.stringify({ hypothesis: '先定位实体边界，再检查泛化', evidenceIds: data.evidence.filter(item => item.source === 'interface').map(item => item.id), rules: { guidance: '建议先检查最小反例与字符偏移，等待时不打扰。', cooldownMinutes: 10, maxSuggestions: 2, retrieval: 'goal-first' } });
-      return JSON.stringify({ state: { progress: '开发集边界待验证', blockers: [], unknowns: ['保留集效果'], evidenceIds: data.evidence.map(item => item.id) }, suggestions: [{ title: '先核对实体边界', action: '在开发集构造最小反例，并检查字符偏移。', reason: '现有规则未覆盖多词姓名', evidenceIds: [data.evidence[0].id], conditions: ['保留集保持冻结'], uncertainty: '需要独立评测', priority: 0.8 }] });
-    };
-    const answer = provider => current.rsi && promptText.startsWith('RSI_PROTOCOL_V2:') ? rsiAnswer() : semanticMerge
+    const answer = provider => semanticMerge
       ? current.mergeRaw ?? strictResult(current.mergeResult || { title: '统一整理的结论', overview: '已根据多条来源形成统一结论。', consensus: ['材料共同支持继续验证。'], conflicts: [], evidence: [], scope: '当前项目阶段', unresolved: [] })
       : preparation ? current.preparationRaw ?? strictResult(current.preparationResult || { title: '模型验证结果', body: '已根据阶段摘要整理。测试已通过。', repoUrl: 'https://github.com/owner/repo', destinationId: 'default' })
         : provider === 'codex' ? '# 模型验证结果\n已根据阶段摘要整理。测试已通过。' : '# Cursor 验证结果\n已完成。';
