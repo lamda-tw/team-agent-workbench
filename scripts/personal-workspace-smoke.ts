@@ -38,7 +38,7 @@ try {
   await page.getByLabel('登录密码', { exact: true }).fill('wrong');
   await page.getByRole('button', { name: '登录', exact: true }).click();
   await expect(page.getByRole('alert')).toContainText('密码');
-  await page.getByRole('button', { name: '跳过，暂不登录' }).click();
+  await page.getByRole('button', { name: '跳过' }).click();
   await expect(page.getByLabel('空白工作台')).toBeVisible();
   assert.equal((await snapshot()).sessions.length, 0);
   await page.screenshot({ path: path.join(output, 'empty.png') });
@@ -67,7 +67,7 @@ try {
   const reference = await page.evaluate(async ({ id, conclusionId }) => window.workbench.call<any>('session.attachConclusion', { id, conclusionId }), { id: originals[1].id, conclusionId: results[0].id });
   assert(reference.localPath);
   await app.close(); await launch();
-  await page.getByRole('button', { name: '跳过，暂不登录' }).click();
+  await page.getByRole('button', { name: '跳过' }).click();
   await expect.poll(async () => (await snapshot()).sessions.filter((item: any) => item.purpose === 'work').length).toBe(2);
   await page.locator('.topbar').getByRole('button', { name: '连接团队账号', exact: true }).click();
   await page.getByLabel('登录密码', { exact: true }).fill('123456');

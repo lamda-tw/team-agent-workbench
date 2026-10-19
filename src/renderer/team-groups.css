@@ -1,4 +1,5 @@
 .group-overview { display:flex; flex-wrap:wrap; align-items:center; gap:16px; color:#60776a; margin-bottom:18px; font-size:12px; }
+.group-permissions-note { color:#60776a; font-size:12px; line-height:1.7; margin:0 0 16px; }.admin-group-overview>.group-permissions-note { margin:12px 0 0; }
 .group-members-table { width:100%; border-collapse:collapse; font-size:12px; }
 .group-members-table th,.group-members-table td { padding:12px 8px; text-align:left; border-bottom:1px solid #e6ece8; }
 .group-members-table small { display:block; color:#819187; margin-top:4px; }
