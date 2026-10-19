@@ -1,13 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import { groupRoleLabels, type GroupCommand, type TeamGroup } from '../shared/team-groups';
-import './team-groups.css';
 
 type Directory = {username:string;name:string}[];
-type Props = { groupId?: string; system?: boolean; accounts?: Directory; call: (command:GroupCommand)=>Promise<any>; close:()=>void; changed:()=>Promise<void> };
+type Props = { groupId?: string; system?: boolean; embedded?: boolean; accounts?: Directory; call: (command:GroupCommand)=>Promise<any>; close:()=>void; changed:()=>Promise<void> };
 const sizeLabel = (bytes:number) => bytes < 1024 ? bytes+' B' : bytes < 1024**2 ? (bytes/1024).toFixed(1)+' KB' : bytes < 1024**3 ? (bytes/1024**2).toFixed(1)+' MB' : (bytes/1024**3).toFixed(1)+' GB';
 
-export function TeamGroupDialog({ groupId, system=false, accounts=[], call, close, changed }: Props) {
+export function TeamGroupDialog({ groupId, system=false, embedded=false, accounts=[], call, close, changed }: Props) {
   const [group,setGroup] = useState<TeamGroup>(), [directory,setDirectory] = useState<Directory>(accounts);
   const [label,setLabel] = useState(''), [selected,setSelected] = useState(''), [newRole,setNewRole] = useState<'manager'|'member'>('member'), [successor,setSuccessor] = useState('');
   const [busy,setBusy] = useState(false), [error,setError] = useState(''), [pending,setPending] = useState<GroupCommand>();
@@ -30,8 +29,8 @@ export function TeamGroupDialog({ groupId, system=false, accounts=[], call, clos
   const available = directory.filter(user=>!group?.members.some(member=>member.username===user.username));
   const refresh = async()=>{setBusy(true);setError('');setPending(undefined);try{await load();}catch(e:any){setError(e.message);}finally{setBusy(false);}};
   const transferOptions = system ? directory : group?.members.filter(user=>user.enabled).map(user=>({username:user.username,name:user.name})) || [];
-  return <div className="modal-backdrop"><section className="modal wide team-group-dialog" role="dialog" aria-modal="true" aria-label={groupId?(system?'项目组管理':'成员与权限'):'创建项目组'}>
-    <header><h2>{groupId ? `${system ? '项目组管理' : '成员与权限'}${group ? ' · ' + group.label : ''}` : '创建项目组'}{group?.deletedAt && <span className="badge">已删除</span>}</h2><span className="spacer"/>{groupId && <button className="secondary compact" disabled={busy} onClick={()=>void refresh()}>刷新组信息</button>}<button className="icon" aria-label="关闭项目组窗口" disabled={busy} onClick={close}><X size={19}/></button></header>
+  const panel = <section className={embedded ? 'project-members-panel team-group-dialog' : 'modal wide team-group-dialog'} role={embedded ? undefined : 'dialog'} aria-modal={embedded ? undefined : true} aria-label={groupId?(system?'项目组管理':'成员与权限'):'创建项目组'}>
+    <header><h2>{groupId ? `${embedded ? '所属项目组' : system ? '项目组管理' : '成员与权限'}${group ? ' · ' + group.label : ''}` : '创建项目组'}{group?.deletedAt && <span className="badge">已删除</span>}</h2><span className="spacer"/>{groupId && <button className="secondary compact" disabled={busy} onClick={()=>void refresh()}>刷新组信息</button>}{!embedded && <button className="icon" aria-label="关闭项目组窗口" disabled={busy} onClick={close}><X size={19}/></button>}</header>
     <div className="modal-body">
       {error && <div className="inline-error" role="alert">{error}</div>}
       {!groupId ? <>
@@ -53,7 +52,8 @@ export function TeamGroupDialog({ groupId, system=false, accounts=[], call, clos
       </> : <p className="muted">{busy?'正在读取项目组…':'暂无法读取，请重试。'}</p>}
     </div>
     <footer>{group && canManage && !pending && <>{group.provisioning ? system && <button className="primary" disabled={busy} onClick={()=>void execute({action:'resume',group:group.id,revision:group.revision})}>继续创建项目组</button> : group.deletedAt ? system && <><button className="secondary" disabled={busy || !!group.purgeStartedAt} onClick={()=>void execute({action:'restore',group:group.id,revision:group.revision})}>恢复项目组</button><button className="secondary danger" disabled={busy} onClick={()=>setPending({action:'purge',group:group.id,revision:group.revision})}>彻底清理</button></> : <button className="secondary danger" disabled={busy} onClick={()=>setPending({action:'delete',group:group.id,revision:group.revision})}>删除项目组</button>}</>}<span className="spacer"/><button className="secondary" disabled={busy} onClick={close}>关闭</button>{!groupId && <button className="primary" disabled={busy || !label.trim() || system && !selected} onClick={()=>void execute({action:'create',label,...(system?{creator:selected}:{})})}>{busy?'正在创建…':'创建项目组'}</button>}</footer>
-  </section></div>;
+  </section>;
+  return embedded ? panel : <div className="modal-backdrop">{panel}</div>;
 }
 
 export function AdminGroupOverview({ accounts, enabled, changed }: {accounts:Directory;enabled:boolean;changed:()=>Promise<void>}) {

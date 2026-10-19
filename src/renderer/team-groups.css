@@ -11,3 +11,13 @@
 .group-projects,.group-view-tabs { margin:18px 0; }
 .group-projects p { margin:8px 0; font-size:12px; }
 .admin-group-overview { padding:24px; background:white; border:1px solid #e0e8e2; border-radius:10px; }
+.project-settings-tabs { display:flex; gap:20px; padding:0 25px; border-bottom:1px solid #e5ece7; flex:none; }
+.project-settings-tabs button { padding:13px 2px 11px; background:transparent; border-bottom:2px solid transparent; color:#7b8f82; font-size:12px; }
+.project-settings-tabs button[aria-selected=true] { border-bottom-color:#287554; color:#287554; font-weight:600; }
+.project-settings-pane,.project-members-panel { display:flex; flex-direction:column; flex:1; min-height:0; }
+.project-settings-pane[hidden] { display:none; }
+.project-members-scope { margin:0; padding:15px 26px 0; color:#60776a; font-size:12px; line-height:1.7; }
+.project-members-panel>header { display:flex; align-items:center; gap:12px; padding:16px 26px 0; }
+.project-members-panel>header h2 { font-size:13px; margin:0; }
+.project-members-panel>.modal-body { padding-top:14px; }
+.project-settings-pane>footer,.project-members-panel>footer { display:flex; gap:10px; align-items:center; justify-content:flex-end; flex:none; border-top:1px solid #e9ede9; padding:18px 25px; }

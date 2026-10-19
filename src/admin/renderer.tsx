@@ -7,6 +7,7 @@ import { Users, ShieldCheck, Settings, Plus, RefreshCw, Server, X, UserRound, Fo
 import type { AdminProfile, AdminSnapshot, ManagedUser, ManagedGroup } from './types';
 import { PeopleManagement, MembershipDialog } from './people';
 import '../renderer/styles.css';
+import '../renderer/team-groups.css';
 import './styles.css';
 import './egress-monitor.css';
 import './egress-tests.css';
