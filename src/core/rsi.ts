@@ -86,6 +86,9 @@ export class RsiEngine {
         this.projects = saved.projects;
         this.preferences = saved.preferences || {};
         for (const project of Object.values(this.projects)) {
+          // Older releases also persisted untouched defaults while collecting evidence.
+          // Upgrade those defaults, but preserve explicit settings and quiet mode.
+          if (project.config.enabled === false && !project.settingsConfigured && !project.config.quiet && !project.evidence.some(item => item.source === 'configuration' && item.sourceId === 'explicit-project-settings' && item.assertion === 'explicit')) project.config.enabled = true;
           project.config = rsiConfigSchema.parse(project.config);
           for (const policy of project.policies) rsiPolicySchema.parse(policy.rules);
           for (const run of project.runs) if (run.status === 'running') { run.status = 'interrupted'; run.error = '上次运行已中断，可重新分析；不会自动重复调用。'; }
@@ -165,7 +168,7 @@ export class RsiEngine {
     return this.updateConfig(projectId, config => ({ ...config, ...patch, quiet: false }));
   }
   private async updateConfig(projectId: string, update: (config: RsiConfig) => RsiConfig) {
-    const result = await this.edit(projectId, project => { project.config = update(project.config); project.revision++; return project.config; });
+    const result = await this.edit(projectId, project => { project.config = update(project.config); project.settingsConfigured = true; project.revision++; return project.config; });
     if (!result.enabled) { this.pending.delete(projectId); this.jobs.get(this.host.scope(projectId).key)?.controller.abort(); }
     await this.observe(projectId, [{ source: 'configuration', sourceId: 'explicit-project-settings', factKey: 'explicit-project-settings', version: hash(result), eventAt: iso(), actor: this.host.scope(projectId).user, assertion: 'explicit', text: JSON.stringify(result) }]);
     return result;

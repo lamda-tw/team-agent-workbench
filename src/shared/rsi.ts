@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 export const rsiConfigSchema = z.object({
-  enabled: z.boolean().default(false), autoLearn: z.boolean().default(false),
+  enabled: z.boolean().default(true), autoLearn: z.boolean().default(false),
   contextChars: z.number().int().min(2000).max(24000).default(12000),
   dailyCalls: z.number().int().min(1).max(100).default(24),
   role: z.string().trim().max(2000).default(''), preference: z.string().trim().max(2000).default(''),
@@ -85,6 +85,7 @@ export interface RsiEvaluation {
 export interface RsiRelease { id: string; at: string; from: string; to: string; actor: string; evaluationId?: string; reason: string }
 export interface RsiProject {
   scope: RsiScope; config: RsiConfig; revision: number; evidence: RsiEvidence[];
+  settingsConfigured?: true;
   events: RsiEvent[]; suggestions: RsiSuggestion[]; runs: RsiRun[]; policies: RsiPolicy[];
   activePolicyId: string; cases: RsiCase[]; evaluations: RsiEvaluation[]; releases: RsiRelease[];
   calls: { at: string; purpose: string; model: string }[]; lastError?: string;

@@ -37,11 +37,43 @@ async function prepareLearning(engine: RsiEngine) {
   await pause(); await engine.start('p1', 'learn'); await engine.settled(); view = await engine.view('p1');
   assert.equal(view.lastError, undefined); return view.policies.find(item => item.status === 'candidate')!;
 }
-test('project assistant is opt-in, scopes data to account/project, and rejects unauthorized projects', async () => fixture(async ({ engine, calls, owner }) => {
+test('project assistant defaults on, supports an explicit opt-out, and scopes data to account/project', async () => fixture(async ({ engine, calls, owner }) => {
+  assert.equal((await engine.view('p1')).config.enabled, true);
+  await engine.configureShadow('p1', { enabled: false, dailyCalls: 24 });
+  await engine.completed('p1'); assert.equal((await engine.view('p1')).queued, false);
   await assert.rejects(engine.start('p1', 'recommend'), /开启/); assert.equal(calls.length, 0);
   await engine.observe('p1', [observation('a')]); assert.equal((await engine.view('p2')).evidence.length, 0);
-  owner.name = 'bob'; assert.equal((await engine.view('p1')).evidence.length, 0);
+  assert.equal((await engine.view('p2')).config.enabled, true);
+  owner.name = 'bob'; assert.equal((await engine.view('p1')).evidence.length, 0); assert.equal((await engine.view('p1')).config.enabled, true);
   await assert.rejects(engine.view('forbidden'), /不可访问/);
+}));
+
+test('restart upgrades untouched legacy defaults but preserves explicit disable and quiet mode', async () => fixture(async ({ engine, root, session }) => {
+  const untouched = structuredClone(await engine.view('p1')); untouched.config.enabled = false;
+  await engine.configureShadow('p2', { enabled: false, dailyCalls: 7 });
+  const disabled = structuredClone(await engine.view('p2'));
+  assert.equal(disabled.settingsConfigured, true);
+  const legacyDisabled = structuredClone(disabled); delete legacyDisabled.settingsConfigured; legacyDisabled.scope = { ...legacyDisabled.scope, key: 'alice:legacy', projectId: 'legacy' };
+  disabled.evidence = []; // The atomic settings marker survives an interruption before the evidence write.
+  const quiet = structuredClone(untouched); quiet.scope = { ...quiet.scope, key: 'alice:quiet', projectId: 'quiet' }; quiet.config.quiet = true;
+  await engine.close();
+  await fs.writeFile(path.join(root, 'rsi-v2.json'), JSON.stringify({ version: 2, projects: { 'alice:p1': untouched, 'alice:p2': disabled, 'alice:quiet': quiet, 'alice:legacy': legacyDisabled } }));
+  const reopened = new RsiEngine(root, {
+    scope: projectId => ({ key: 'alice:' + projectId, account: 'alice', user: 'alice', projectId }),
+    session: () => session, collect: async () => [], changed() {},
+  }, async () => { throw new Error('Opening settings must not call the model'); });
+  try {
+    assert.equal((await reopened.view('p1')).config.enabled, true);
+    assert.equal((await reopened.view('p2')).config.enabled, false);
+    assert.equal((await reopened.view('p2')).config.dailyCalls, 7);
+    assert.equal((await reopened.view('legacy')).config.enabled, false);
+    assert.equal((await reopened.view('quiet')).config.enabled, false);
+    assert.equal((await reopened.view('quiet')).config.quiet, true);
+    await reopened.observe('p1', [observation('persist-migration')]);
+    const saved = JSON.parse(await fs.readFile(path.join(root, 'rsi-v2.json'), 'utf8'));
+    assert.equal(saved.projects['alice:p1'].config.enabled, true);
+    assert.equal(saved.projects['alice:p2'].config.enabled, false);
+  } finally { await reopened.close(); }
 }));
 test('observations deduplicate exact source revisions but preserve corroborating channels and unknown outcomes', async () => fixture(async ({ engine }) => {
   const a = observation('fact'); const first = await engine.observe('p1', [a]); assert.equal(first.length, 1);
@@ -51,6 +83,7 @@ test('observations deduplicate exact source revisions but preserve corroborating
 }));
 
 test('shadow controls preserve project configuration, resume a paused project, and enforce the call budget', async () => fixture(async ({ engine, session, calls }) => {
+  await engine.configureShadow('p2', { enabled: false, dailyCalls: 24 });
   await engine.configure('p1', { enabled: true, quiet: true, autoLearn: true, goals: '研究实体边界', acceptance: '保留集独立验证', role: '算法研究', preference: '先看反例', contextChars: 6000 });
   await engine.configureShadow('p1', { enabled: true, dailyCalls: 1 });
   assert.equal((await engine.view('p2')).config.enabled, false);
