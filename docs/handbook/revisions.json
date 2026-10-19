@@ -557,7 +557,7 @@
     {
       "updated_at": "2026-10-19T09:52:38+08:00",
       "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257",
-      "document_commit": null,
+      "document_commit": "da5fbe759c7e64ed73a6b8613fe8d23ca0fe5cfb",
       "summary": "发布 v0.7.8：合入远端 54bc8f3；恢复 10 月 8 日最后一版的三类整理、每类补充提示词及再次整理，更新成员提问、动态推荐和实际界面配图。",
       "content_sha256": "8c0ee8565b98ec1a8d97174c608cdfe59527fba440b568ac48283b1c1c968bc1"
     }
