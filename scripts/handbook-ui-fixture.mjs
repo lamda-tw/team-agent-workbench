@@ -1,6 +1,8 @@
 // Example data for screenshots of the production renderers. No server or model calls.
+import { questionFixture } from './handbook-question-fixture.mjs';
+import { activityFixture } from './handbook-activity-fixture.mjs';
 export function makeFixture(id, step, paneIndex, pane, stage = '') {
-  const at = '2026-10-10T01:30:00.000Z';
+  const at = '2026-10-16T01:30:00.000Z';
   const ocr = id === 'case-first-session';
   const username = pane.actor.includes('Alice') ? 'alice' : pane.actor.includes('Carol') ? 'carol' : pane.actor.includes('成员 A') ? 'member-a' : pane.actor.includes('成员 B') ? 'member-b' : 'bob';
   const admin = username === 'alice';
@@ -114,7 +116,7 @@ export function makeFixture(id, step, paneIndex, pane, stage = '') {
       adminSnapshot.setupIssues=['缺少 ACL 支持，需要安装 acl 软件包以设置团队目录权限。'];
     }
   }
-  return {id,step,paneIndex,pane,stage,at,project,profile,workspace,directory,binding,source,brief,session,content,conclusions,updates,task,submissionFiles,draft,snapshot,adminSnapshot,beforeProject,admin,username};
+  return activityFixture(questionFixture({id,step,paneIndex,pane,stage,at,project,profile,workspace,directory,binding,source,brief,session,content,conclusions,updates,task,submissionFiles,draft,snapshot,adminSnapshot,beforeProject,admin,username}));
 }
 
 export function installFixture(data) {
@@ -126,6 +128,11 @@ export function installFixture(data) {
   const call = async (action, payload={}) => {
     window.__handbook.calls.push(action);
     if(action==='snapshot') return copy(data.snapshot);
+    if(action==='activity.project') return;
+    if(action==='activity.presented') {for(const job of data.snapshot.activity.jobs)if(payload.jobIds.includes(job.id))job.presentedAt=data.at;return;}
+    if(action==='question.members') return [{username:'bob',name:'Bob'},{username:'carol',name:'Carol'}].filter(member=>member.username!==data.username);
+    if(action==='question.read') {data.snapshot.questions.read[payload.id]=payload.revision;return;}
+    if(action==='question.files.stage') return [{id:'sample-list',name:'样本清单.csv',size:2300}];
     if(action==='assignment.list') return copy(data.id==='case-first-session' && data.step>=5 ? [data.task] : []);
     if(action==='assignment.members') return [{username:'alice',name:'Alice'},{username:'bob',name:'Bob'},{username:'carol',name:'Carol'}];
     if(action==='content.list') return copy(data.id==='case-first-session' && data.step<10 ? data.content.filter((item,i)=>i===0 || data.step===9 && data.username==='bob' && item.author==='bob') : data.content);

@@ -77,9 +77,10 @@ for (const deleteRecord of [false, true]) for (const deleteResult of [false, tru
     assert.equal(next.baseDraftId, draft.id);
     assert.deepEqual(JSON.parse(await fs.readFile(path.join(next.inputDir, 'conversation.json'), 'utf8')).map((item: any) => item.id), ['new']);
     await until(() => next.generation === 'ready');
-    assert.equal(next.organizationFormat,'project-profile-v1');
-    assert.equal(restored.preparationCheckpoint?.draftId,next.id,'a completed project profile advances its own frozen snapshot');
-    await assert.rejects(wb.confirmEmptyPreparation(next.id),/没有新成果/);
+    assert.equal(next.organizationFormat,undefined);
+    assert.equal(restored.preparationCheckpoint?.draftId,draft.id,'an empty result does not advance progress before confirmation');
+    await wb.confirmEmptyPreparation(next.id);
+    assert.equal(restored.preparationCheckpoint?.draftId,next.id,'confirming an empty result advances its frozen snapshot');
     assert.equal(wb.conclusions(offlineProjectId).length, deleteResult ? 0 : 1);
     const full = await wb.reorganizePreparation(next.id,'full');
     assert.deepEqual(JSON.parse(await fs.readFile(path.join(full.inputDir, 'conversation.json'), 'utf8')).map((item: any) => item.id), ['old', 'new']);

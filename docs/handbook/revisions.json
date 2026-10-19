@@ -511,6 +511,55 @@
       "document_commit": "c113ac04cccd4d4c25d5ff3c10142ee9116f2f73",
       "summary": "为三种连接方式补充选择依据和场景对照表；截图步骤只保留具体操作。",
       "content_sha256": "7d4d2b05b78c7be4ecf9e552abdf26fef7aeee183f4b3c91a178d739600d5576"
+    },
+    {
+      "updated_at": "2026-10-16T14:48:57+08:00",
+      "base_commit": "7c146faeddacf3166429e0bab49d81feb118c99f",
+      "document_commit": null,
+      "summary": "同步 v0.7.6（7c146fa）；新增成员提问与答复采用的完整界面示例，更新项目组权限、项目整理和桌面联动说明。",
+      "content_sha256": "d0c2df2bfce522eabdab441a0ed5dbbd723d2703b16c94a9b9196d7f50239375"
+    },
+    {
+      "updated_at": "2026-10-16T14:51:15+08:00",
+      "base_commit": "7c146faeddacf3166429e0bab49d81feb118c99f",
+      "document_commit": null,
+      "summary": "同步 v0.7.6（7c146fa）；新增成员提问与答复采用的完整界面示例，更新项目组权限、项目整理和桌面联动说明。",
+      "content_sha256": "df2677eb51683b1b1debc50d43410acb53a01225976733c013f58227d45e2194"
+    },
+    {
+      "updated_at": "2026-10-16T16:47:29+08:00",
+      "base_commit": "7c146faeddacf3166429e0bab49d81feb118c99f",
+      "document_commit": null,
+      "summary": "补全会话相关动态自动推荐：触发时机、推荐依据、独立采用选择、忽略与跳过，并新增四张标注界面图。",
+      "content_sha256": "b274f8bad1e86a643647007af92f3ca2bd684ee1073faefd7f5e68b032f84a6b"
+    },
+    {
+      "updated_at": "2026-10-16T17:08:38+08:00",
+      "base_commit": "7c146faeddacf3166429e0bab49d81feb118c99f",
+      "document_commit": null,
+      "summary": "将动态推荐贯穿团队协作、首次协作、个人与团队成果管理、会话创建和提问教程；更新三张配图，说明成员看到什么及采用后的结果。",
+      "content_sha256": "b75610e20ed8cab707d6612c40c87b673192ab8720e512360f5420632c75af20"
+    },
+    {
+      "updated_at": "2026-10-16T17:15:43+08:00",
+      "base_commit": "7c146faeddacf3166429e0bab49d81feb118c99f",
+      "document_commit": null,
+      "summary": "核对 v0.7.6 整理成果代码，修正首次整理配图标题，明确完整会话读取、四项结果和人工修改后的限制。",
+      "content_sha256": "82783597aa2f7ca2ef9ca65eb0b5efae2adb7a7a9f66ffd368327830192e9259"
+    },
+    {
+      "updated_at": "2026-10-16T17:36:05+08:00",
+      "base_commit": "7c146faeddacf3166429e0bab49d81feb118c99f",
+      "document_commit": null,
+      "summary": "按用户选择恢复 4addaeb（10 月 8 日最后一版）的三类整理、每类补充 prompt、50 条上限及增量/完整对话流程；更新实际界面配图。编辑后可再次整理，旧项目概览继续可读。",
+      "content_sha256": "8ea7fa63d35a1f7a532d19d6361214e26600bcafa052fd98588ec57b10fcb1e6"
+    },
+    {
+      "updated_at": "2026-10-19T09:52:38+08:00",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257",
+      "document_commit": null,
+      "summary": "发布 v0.7.8：合入远端 54bc8f3；恢复 10 月 8 日最后一版的三类整理、每类补充提示词及再次整理，更新成员提问、动态推荐和实际界面配图。",
+      "content_sha256": "8c0ee8565b98ec1a8d97174c608cdfe59527fba440b568ac48283b1c1c968bc1"
     }
   ]
 }

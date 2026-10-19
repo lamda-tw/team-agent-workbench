@@ -29,7 +29,7 @@ import { preparationPrompt } from './preparation-prompt';
 import { emptyPreparationResult, isEmptyPreparation } from '../shared/preparation-review';
 import { preparationCheckpoint, rememberPreparationProgress } from '../shared/preparation-progress';
 import { preparationCategories, preparationRuleSnapshot, type ResultRuleSnapshot } from '../shared/result-rules';
-import { isProjectOrganizationDraft, organizationRefusal, projectOrganizationBody, sameProjectOrganization, type ProjectOrganization } from '../shared/project-organization';
+import { isProjectOrganizationDraft, projectOrganizationBody, sameProjectOrganization, type ProjectOrganization } from '../shared/project-organization';
 import { selectedPreparationDirections, type PreparationDirections } from '../shared/preparation-directions';
 import { SharedFiles } from './shared-files';
 import { TransferQueue } from './transfers';
@@ -1972,7 +1972,6 @@ export class Workbench {
     this.assertCanWork(parent.binding);
     if (!parent.binding) throw new Error('请先绑定项目');
     const sourceSessionTitle = parent.title, binding = structuredClone(parent.binding);
-    this.assertProjectOrganizationOpen(parent.binding.project.id, source?.id);
     const resultRules = this.preparationRules(parent.binding.project.id, requestedCategories);
     const preparationDirections = selectedPreparationDirections(resultRules.categories, directions);
     const checkpoint = preparationCheckpoint(parent, this.store.drafts);
@@ -1984,7 +1983,6 @@ export class Workbench {
     prepared.binding = parent.binding ? structuredClone(parent.binding) : undefined;
     const draft: Draft = { sourceSessionTitle, id: draftId, sessionId: id, snapshot, preparationScope: scope, baseDraftId: checkpoint?.draftId, git, includeGit: source?.includeGit ?? !!git, prepareSessionId: prepared.id, preparationVersion: 3, concise: true, requestedCategories, supplement: source?.supplement || '', repoUrlOverride: source?.repoUrlOverride || '', title: sourceSessionTitle + (scope === 'incremental' ? ' · 增量成果' : ' · 成果'), body: '', files, binding, inputDir, outputPath: path.join(base, 'draft.md'), createdAt: new Date().toISOString() };
     draft.resultRules = resultRules;
-    draft.organizationFormat = !source || isProjectOrganizationDraft(source) ? 'project-profile-v1' : undefined;
     draft.preparationDirections = preparationDirections;
     this.store.drafts.unshift(draft); await this.runPreparation(draft); return draft;
   }
@@ -2093,13 +2091,8 @@ export class Workbench {
     if (s) { s.closedAt = d.generationFinishedAt; s.approvals = []; const runtime = this.runtimes.get(s.id); this.runtimes.delete(s.id); if (runtime) await runtime.close(); }
     await this.store.save(); this.broadcast(); this.notice('成果整理失败：' + d.generationError);
   }
-  private assertProjectOrganizationOpen(projectId: string, resumeId?: string) {
-    const message = organizationRefusal(this.store.drafts, projectId, resumeId);
-    if (message) throw new Error(message);
-  }
   async retryPreparation(id: string) {
     const d = this.draft(id); if (d.mergeCompletedAt || d.submitted || d.personalSavedIds?.length || this.submittingDrafts.has(id) || d.generation === 'running') throw new Error('此草稿已保存、已提交或正在整理；请从原会话再次整理');
-    if (!d.mergeSources?.length && d.binding) this.assertProjectOrganizationOpen(d.binding.project.id, d.id);
     if (!d.mergeSources?.length) this.preparationRules(d.binding!.project.id, [...new Set((d.resultRules?.categories || d.requestedCategories || preparationCategories).map(category => canonicalCategory(category)!))]);
     // Reserve before the first await. Retry uses the same frozen inputs but a fresh CLI context.
     const refreshInputs = d.generation === 'ready';

@@ -2,6 +2,7 @@
 import re
 from handbook_network_guidance import network_guidance
 from handbook_product_guidance import product_guidance
+from handbook_current_guidance import current_guidance
 
 
 def replace_section(source, anchor, next_anchor, body):
@@ -75,4 +76,9 @@ CMD 能打开 CLI，说明该入口可以启动。工作台还会检查账号状
         '| CLI 未登录 | 点击“登录个人账号”，完成授权后重新检测。 |')
     source = source.replace('各窗口分别保存连接、会话、草稿和传输记录。',
         '各窗口分别保存连接、会话、草稿和传输记录。同一窗口切换团队账号后，只显示当前账号的本地会话、输入草稿、个人成果和传输记录；原账号的数据保留，切回后可继续使用。')
-    return product_guidance(network_guidance(source))
+    source = product_guidance(network_guidance(source))
+    if source.startswith('# 项目组与角色'):
+        source = source.replace('系统管理员', '总管理员').replace('最初创建人的历史记录不变', '创建记录保留')
+    source = source.replace('详见[会话相关动态提醒](activity-recommendations.md)。', '候选条目会说明关联理由并显示原文片段；发送前核对需要加入会话或保存个人库的内容。')
+    source = source.replace('详见[桌面联动使用与验证记录](codex-desktop-sync.md#在现有工作台中使用)。', '设置和使用范围见[Beta 功能](#beta-features)。')
+    return current_guidance(source)

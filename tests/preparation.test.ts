@@ -47,7 +47,7 @@ test('result names stay in the draft until personal save and never rewrite submi
   const wb = new Workbench(path.join(root, 'data'), () => {}, () => {});
   try {
     await wb.store.init(); grantTestWorkspace(wb, root); wb.store.settings.providerPaths.codex = fixture.launcher;
-    const session = await wb.createSession('codex', root, offlineProjectId), draft = await wb.prepare(session.id);
+    const session = await wb.createSession('codex', root, offlineProjectId), draft = await wb.prepare(session.id, [], ['exploration']);
     await until(() => draft.generation === 'ready');
     assert(wb.session(draft.prepareSessionId!).messages.some(message => message.role === 'user' && message.text.includes(preparationWritingGuide)));
     const artifact = draft.artifacts![0], body = artifact.body, selected = artifact.selected;
@@ -56,7 +56,7 @@ test('result names stay in the draft until personal save and never rewrite submi
     assert.equal(artifact.body, body); assert.equal(artifact.selected, selected);
     assert.equal(wb.conclusions(offlineProjectId).length, 0);
     await wb.saveDraftPersonal(draft.id, [artifact.id]);
-    assert(wb.conclusions(offlineProjectId).some(item => item.title === contributionTitle('finding','人工修改的短名称')));
+    assert(wb.conclusions(offlineProjectId).some(item => item.title === contributionTitle('exploration','人工修改的短名称')));
     assert.throws(() => wb.renameDraftResult(draft.id, '  ', artifact.id), /名称/);
     await assert.rejects(wb.renameDraftResult(draft.id, '名字', 'missing'), /不存在/);
     const originalTitle = artifact.title; draft.submitted = artifact.submitted = 'frozen-transfer';

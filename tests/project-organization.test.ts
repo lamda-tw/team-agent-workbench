@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isProjectOrganizationDraft, organizationEditedMessage, organizationExistsMessage, organizationRefusal, organizationTags, prepareProjectOrganization, type OrganizationDraftRef } from '../src/shared/project-organization';
+import { isProjectOrganizationDraft, organizationTags, prepareProjectOrganization } from '../src/shared/project-organization';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
@@ -16,20 +16,6 @@ test('legacy category drafts and earlier project profiles with the same contract
     assert.equal(isProjectOrganizationDraft(reopened.drafts[0]),false);
     assert.equal(reopened.drafts[1].organizationFormat,'project-profile-v1');assert.equal(reopened.drafts[2].organizationFormat,'project-profile-v1');
   }finally{await fs.rm(root,{recursive:true,force:true});}
-});
-
-const draft = (patch: Partial<OrganizationDraftRef> = {}): OrganizationDraftRef => ({
-  id: 'draft', binding: { project: { id: 'p' } }, organizationFormat: 'project-profile-v1', resultRules: { contract: 4 }, generation: 'ready', ...patch,
-});
-
-test('a project keeps one automatic organization until a person edits it', () => {
-  assert.equal(organizationRefusal([draft()], 'p'), organizationExistsMessage);
-  assert.equal(organizationRefusal([draft()], 'p', 'draft'), undefined);
-  assert.equal(organizationRefusal([draft({ generation: 'error' })], 'p'), undefined);
-  const edited = draft({ organizationEdited: true });
-  assert.equal(organizationRefusal([edited], 'p', edited.id), organizationEditedMessage);
-  assert.equal(organizationRefusal([draft({ id: 'other', organizationFormat: undefined, resultRules: { contract: 2 } })], 'p'), undefined);
-  assert.equal(organizationRefusal([draft({ organizationFormat: undefined })], 'p'), undefined,'a legacy category draft must not reserve the project profile');
 });
 
 test('the project sentence stays one sentence and the other fields stay readable', () => {

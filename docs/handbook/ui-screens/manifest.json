@@ -1,9 +1,9 @@
 {
-  "digest": null,
-  "count": 64,
+  "digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+  "count": 75,
   "renderer": "production-react",
   "path_display": "relative-with-directory-placeholders",
-  "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5",
+  "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257",
   "viewport": {
     "width": 1440,
     "height": 1000
@@ -15,6 +15,10 @@
       "edition": "admin",
       "entry": "start-admin-dev.cmd",
       "screen": "管理员版 › 管理员服务器连接",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
@@ -85,15 +89,19 @@
         ]
       },
       "guide_sha256": "b4f9205148b10b9e9a326128ff75305afb472feb0e0768dd83a558a11b1004bf",
-      "image_sha256": "1b6447648a0212c643ded52c70ec79d4a4d7149aafc32d7fcf17307f9e92bfba",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "353c926ae638864f1974965c34ae733777a67ed5e4333070f0e5b0a2b420bf26",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "case-team-setup-01-2.png",
       "edition": "admin",
       "entry": "start-admin-dev.cmd",
       "screen": "管理员版 › 用户管理 › 环境检查",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
@@ -132,15 +140,19 @@
         ]
       },
       "guide_sha256": "7f1f6fe6ede9dff9215fba5899d84b3ad5cb4df334180f965abb4ecbeeef8169",
-      "image_sha256": "5c79d82ba238a5bdc3215897e70b4d109e1e9757c59f98dba90f213b62fd8c12",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "3d2a1cb54c85ef4d14af0ce09c44d4f9e3c92de024e5e9f5e9a556865f906a36",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "case-team-setup-02-1.png",
       "edition": "admin",
       "entry": "start-admin-dev.cmd",
       "screen": "管理员版 › 修复远端服务器环境 › 选择安装方式",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
@@ -179,15 +191,19 @@
         ]
       },
       "guide_sha256": "ca2bf14d36d9362cb34a57d6c9088348ea7cf5619ec0976e87af9e02d3b27ebe",
-      "image_sha256": "7146596c3403d4c037cdec2ff615725ba5201deac1d6543626d5513cca0b0718",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "d8411ec662455911e9c02dc1ed176e176b1d19e8fdbba31792d0a2ac5877cab8",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "case-team-setup-03-1.png",
       "edition": "admin",
       "entry": "start-admin-dev.cmd",
       "screen": "管理员版 › 用户管理 › 首次初始化入口",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
@@ -226,15 +242,19 @@
         ]
       },
       "guide_sha256": "c591a2aac623e612b829375427fcd875bb3c2dcc2cf7652eef72388bb75f84d5",
-      "image_sha256": "d7942b0c6c92d09aec303d2964dea508ec17aab1175ce4e3993909ffd43dcc07",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "7012223e6b543f711e9be8d5fb567dac57c4d551958954814d49b7204dd23ff9",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "case-team-setup-03-2.png",
       "edition": "admin",
       "entry": "start-admin-dev.cmd",
       "screen": "管理员版 › 初始化团队空间 › 核对服务器与团队目录",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
@@ -289,15 +309,19 @@
         ]
       },
       "guide_sha256": "c5b16c38bcf7a4b6ee4b8caa8d10b283800bf46913a533571d71393a5aeed643",
-      "image_sha256": "ad3572b3a2cae007e8b2c120afdf0e09bae8642f926b61866d26f0186c8cf01f",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "092893ace4497e2c980a33d1fecfb3ddba54444f633d2c06b02c6732d4702f4d",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "case-team-setup-04-1.png",
       "edition": "admin",
       "entry": "start-admin-dev.cmd",
       "screen": "管理员版 › 用户管理 › 初始化完成",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
@@ -336,15 +360,19 @@
         ]
       },
       "guide_sha256": "50642ae661c6ee69e949c391f1763746daca79d2f34253be4310a4dd6be61eac",
-      "image_sha256": "c53e86a48d0d2cc161930d9f92831e92b17d9ed12e4dea602e6a592840d40fad",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "dd9ab3b63724914d38a547c85e6964f747309468424bb55d43361cd80feac45e",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "example-01-1.png",
       "edition": "user",
       "entry": "start-user-dev.cmd",
       "screen": "我的工作组 › 量化转换项目 › 项目资料",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
@@ -383,15 +411,19 @@
         ]
       },
       "guide_sha256": "069239e19cfe26902e19f53f81578c27b8616a9a2086777e24c4a3b7294fb2c4",
-      "image_sha256": "93410b8d0ef902b53c5ba59483d279ec66c33fd74db9aad0615a5954adaf8e3f",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "a601d7cb0e595a3e7cf8c0e372db8b204f485dcb161e3c504a2f453bc29a4087",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "example-03-1.png",
       "edition": "user",
       "entry": "start-user-dev.cmd",
       "screen": "工作会话 › 格式 A 验证 › 发起成果整理",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
@@ -430,78 +462,102 @@
         ]
       },
       "guide_sha256": "16ddba654d91d6b8f0a5575e89955c830d738d135b8b7cd036cdb90e1dccd213",
-      "image_sha256": "1c131d139e57216838d97320bec8d0e80e10a7f9ea590edff64eb30d88d0d40b",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "712f3a5a57514e0db0d462f1e9e6d4485b666696fe134f0645f68d896185a5f4",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "example-03-2.png",
       "edition": "user",
       "entry": "start-user-dev.cmd",
       "screen": "工作会话 › 整理选项",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
           {
             "number": 1,
-            "text": "确认来源为“格式 A 验证”，本次整理读取这段会话。",
+            "text": "核对来源会话及本次读取的消息数量。",
             "box": {
               "x": 196,
-              "y": 323.65625,
+              "y": 263.65625,
               "width": 1048,
               "height": 17
             },
             "badge": {
-              "x": 1249,
-              "y": 320.65625,
+              "x": 165,
+              "y": 260.65625,
               "width": 26,
               "height": 26
             }
           },
           {
             "number": 2,
-            "text": "本例只选“探索记录”，保留本轮实验的观察、依据和适用范围。",
+            "text": "本例勾选探索记录，也可同时选择其他整理方面。",
             "box": {
-              "x": 215,
-              "y": 408.65625,
-              "width": 1010,
-              "height": 201
+              "x": 216,
+              "y": 402.65625,
+              "width": 1008,
+              "height": 41
             },
             "badge": {
-              "x": 184,
-              "y": 405.65625,
+              "x": 185,
+              "y": 399.65625,
               "width": 26,
               "height": 26
             }
           },
           {
             "number": 3,
-            "text": "点击后等待整理完成，再打开生成的成果核对内容。",
+            "text": "每类独立填写整理要求，留空使用默认提示词。",
+            "box": {
+              "x": 230,
+              "y": 505.65625,
+              "width": 980,
+              "height": 96
+            },
+            "badge": {
+              "x": 199,
+              "y": 502.65625,
+              "width": 26,
+              "height": 26
+            }
+          },
+          {
+            "number": 4,
+            "text": "确认类别和要求后开始整理。",
             "box": {
               "x": 1143,
-              "y": 720.34375,
+              "y": 780.34375,
               "width": 102,
               "height": 36
             },
             "badge": {
               "x": 1140,
-              "y": 689.34375,
+              "y": 749.34375,
               "width": 26,
               "height": 26
             }
           }
         ]
       },
-      "guide_sha256": "28c4fd05b12f05ac17b2b911b331860c3d677ba2ad401badc22381bbf7b8e988",
-      "image_sha256": "e2c434e4b929eb1ebd70189879dc45430ae6547df56347a68c6af11df6f72c73",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "guide_sha256": "123eec8cd2c43e9178bc6a17a224a0403d5b5b14b3ad8645c173912c0a841e22",
+      "image_sha256": "7e83c9e323e458f1832b8407d2c165138873c5fb2a60d09e65aa0dcb972e4d81",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "example-04-1.png",
       "edition": "user",
       "entry": "start-user-dev.cmd",
       "screen": "成果整理 › 格式 A 验证结论",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
@@ -540,109 +596,137 @@
         ]
       },
       "guide_sha256": "ace07c601046e35eb00528bea91a48994ba90ced61ffffba77117022d6d8602d",
-      "image_sha256": "5ab8836f8a1ef9031e48e2a6ad6c7ee88d5bcecb0b3965edf7c098503db4c6c7",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "793762650a95d6d6c12af685e7f9f5f94be94460e1015dcd44c5f052d0fb7685",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "example-04-2.png",
       "edition": "user",
       "entry": "start-user-dev.cmd",
-      "screen": "团队动态 › 待处理",
+      "screen": "工作会话 › 格式 B 验证 › 相关动态",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
           {
             "number": 1,
-            "text": "同步或刷新后，核对 Alice 上传的成果标题和版本。",
+            "text": "结合本会话工作内容，核对推荐理由和原文片段。",
             "box": {
-              "x": 449,
-              "y": 269.6875,
-              "width": 788,
-              "height": 96
+              "x": 406.1875,
+              "y": 611.203125,
+              "width": 963.625,
+              "height": 169.796875
             },
             "badge": {
-              "x": 418,
-              "y": 266.6875,
+              "x": 375.1875,
+              "y": 608.203125,
               "width": 26,
               "height": 26
             }
           },
           {
             "number": 2,
-            "text": "打开这一条动态对应的成果详情。",
+            "text": "本例同时选择加入会话与保存个人副本。",
             "box": {
-              "x": 1251,
-              "y": 284.1875,
-              "width": 134,
-              "height": 29
+              "x": 406.1875,
+              "y": 735,
+              "width": 963.625,
+              "height": 33
             },
             "badge": {
-              "x": 1248,
-              "y": 253.1875,
+              "x": 375.1875,
+              "y": 732,
+              "width": 26,
+              "height": 26
+            }
+          },
+          {
+            "number": 3,
+            "text": "执行本次选中的操作。",
+            "box": {
+              "x": 1199.8125,
+              "y": 792,
+              "width": 78,
+              "height": 36
+            },
+            "badge": {
+              "x": 1168.8125,
+              "y": 789,
               "width": 26,
               "height": 26
             }
           }
         ]
       },
-      "guide_sha256": "5a0d16bd48e16a5e4b02a2ab3d50c1e76391982aae60c72ced20f17ef068a2ec",
-      "image_sha256": "5b1bf21af3dd48abb489bb2855f65d315177d44215578a61eca04960bb8996eb",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "guide_sha256": "62bbb849254ba94de1bd316922ea5382a5e07749cd6373618fbb37a5b71783c7",
+      "image_sha256": "9ecd5dfbf16e9dd3789f5956f320bcfb6665935af59578af43bc00cd01254e4f",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "example-05-2.png",
       "edition": "user",
       "entry": "start-user-dev.cmd",
-      "screen": "项目成果库 › 个人 › 格式 A 验证结论",
+      "screen": "工作会话 › 格式 B 验证 › 待发送的成果引用",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
           {
             "number": 1,
-            "text": "展开查看这份个人副本的来源与版本。",
+            "text": "已选入下一条消息的参考资料，发送时带给 AI。",
             "box": {
-              "x": 391,
-              "y": 814.921875,
-              "width": 994,
-              "height": 15
+              "x": 391.1875,
+              "y": 816,
+              "width": 993.625,
+              "height": 26
             },
             "badge": {
-              "x": 360,
-              "y": 811.921875,
+              "x": 360.1875,
+              "y": 813,
               "width": 26,
               "height": 26
             }
           },
           {
             "number": 2,
-            "text": "从“更多”进入“加入会话”，选择本次要使用成果的会话。",
+            "text": "补充本轮复测要求，再发送任务。",
             "box": {
-              "x": 1349,
-              "y": 416.5,
-              "width": 42,
-              "height": 30
+              "x": 392.1875,
+              "y": 849,
+              "width": 991.625,
+              "height": 70
             },
             "badge": {
-              "x": 1346,
-              "y": 385.5,
+              "x": 361.1875,
+              "y": 846,
               "width": 26,
               "height": 26
             }
           }
         ]
       },
-      "guide_sha256": "bcaf01f6f1beed3ab2d636a511456dd242c2374109b85813ed1a64447d6fef3b",
-      "image_sha256": "1a5318b501a0b7e7722a32d435bac246fd743c5de24d87ca940edcc028639208",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "guide_sha256": "5a70049b4ccfc27ee8a045cde24f7bf53ed57c495b77a0a87be8952beaf70f68",
+      "image_sha256": "964f4a3a7691eee032143ea193a59fa15318c0aea017a5286a5bfd26630eeaa4",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "example-06-1.png",
       "edition": "user",
       "entry": "start-user-dev.cmd",
       "screen": "工作会话 › 整理成果",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
@@ -681,15 +765,19 @@
         ]
       },
       "guide_sha256": "f5506e64e330e1bf70a8818286c16f48b17b97cd10b299b09bddb599d73cd089",
-      "image_sha256": "2fee3fadcebdd3acdae3413d35ea9f804891184e2ee8921aeb96d4c4c1abbf2d",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "808c7fb7ff0ce942516ef1e5c73ef096969a83ad9cfb92143025e4509f5cbf52",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "example-07-1.png",
       "edition": "user",
       "entry": "start-user-dev.cmd",
       "screen": "项目成果库 › 团队 › Bob 的格式 B 实验",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
@@ -728,15 +816,19 @@
         ]
       },
       "guide_sha256": "eee26100897d1951bff1ccd8c5bd94f8f5eafa7bf107bc26b2d7761044b93385",
-      "image_sha256": "ebd457ad747ff42f6098d9448e680241541c500bab6ea3fb2ae11ae0dce5a24b",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "cc9be94116d319f397a096094404e0bf6acf98fc232b5afab863023ca85d662c",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "example-07-2.png",
       "edition": "user",
       "entry": "start-user-dev.cmd",
       "screen": "工作会话 › 格式 A 验证",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
@@ -791,15 +883,19 @@
         ]
       },
       "guide_sha256": "9db9c4204242359e746ef4a8d01d904cd275eea1a2e7df69b5eb237cd25db10d",
-      "image_sha256": "a63574dd01d6280379e3fa522e33a68c82081f1cc04fcdd5595d0980221831d7",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "365f4ab12c2dba7ada66317f36aedd0a6ddfd7c16a0a6294c7d2dd1d3fa69c85",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "example-08-1.png",
       "edition": "user",
       "entry": "start-user-dev.cmd",
       "screen": "成果整理 › 综合结果确认",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
@@ -854,15 +950,19 @@
         ]
       },
       "guide_sha256": "916164ff457ecb94c033deaccee4e826031b40698b5f73ed18b11813aef15aba",
-      "image_sha256": "8a72a14f9acc7bf4d59b23688db1f22e4a3544c8f980bee3c9a3970c2703adaf",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "14f0379ddf10a4edc82bbab9731f24b517f72401ce4d11e337070a6796d71a13",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "example-08-2.png",
       "edition": "user",
       "entry": "start-user-dev.cmd",
       "screen": "团队动态 › 综合结果更新",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
@@ -871,13 +971,13 @@
             "text": "这里显示合并后的成果及其来源。",
             "box": {
               "x": 449,
-              "y": 269.6875,
+              "y": 375.375,
               "width": 788,
               "height": 121
             },
             "badge": {
               "x": 418,
-              "y": 266.6875,
+              "y": 372.375,
               "width": 26,
               "height": 26
             }
@@ -887,13 +987,13 @@
             "text": "打开合并结果，核对新的适用范围与后续验证要求。",
             "box": {
               "x": 1251,
-              "y": 296.6875,
+              "y": 402.375,
               "width": 134,
               "height": 29
             },
             "badge": {
               "x": 1220,
-              "y": 293.6875,
+              "y": 399.375,
               "width": 26,
               "height": 26
             }
@@ -901,15 +1001,19 @@
         ]
       },
       "guide_sha256": "ab621d7d321512f0adff9858eb2377bb0c904d17022ba499d6d01981fe8986c9",
-      "image_sha256": "8aeb5a28473a4564f97f6bc47ec115c5fd1610519bb81d2e573f8d71d72f20e6",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "c87c32ec1fc12252ad90563a338a54f466baf4d723d9f21f2ace3517ad18a50b",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "case-admin-results-01-1.png",
       "edition": "user",
       "entry": "start-user-dev.cmd",
       "screen": "项目成果库 › 团队 › 格式 B 大输入性能反例",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
@@ -948,15 +1052,19 @@
         ]
       },
       "guide_sha256": "9aad3c223746dcabbf7655d8a72371fcc42b90ad12b6190fe7eac58944710c6e",
-      "image_sha256": "0428cb531458009c578f4f65dbb23400e97d5a55c2f75bfb7a7fdd417ca6f15d",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "764fac7891886d30b3199e36d04627bdaf999ecc6acd3517f18b9efa37bbe693",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "case-admin-results-02-1.png",
       "edition": "user",
       "entry": "start-user-dev.cmd",
       "screen": "项目成果库 › 团队 › 编辑成果",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
@@ -1011,15 +1119,19 @@
         ]
       },
       "guide_sha256": "efc61ea671040b5bf4fc43512c1184edd9afbaa5941878ebdd6a7d96e559366b",
-      "image_sha256": "a6c54f9b5ce5fe0781a4b83b1998e71878f9a2ca1c076bc3c3699bed86424cb4",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "0dbdce040ec0976288025b48f883d79e910848a7b4e04c254bc96144ffa89b80",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "case-admin-results-03-1.png",
       "edition": "user",
       "entry": "start-user-dev.cmd",
       "screen": "项目成果库 › 团队 › 合并整理",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
@@ -1074,15 +1186,19 @@
         ]
       },
       "guide_sha256": "bc52a53cc956712ab19200405985b8e8765b4d090ba3c64b2fb5b394004779c6",
-      "image_sha256": "4385e0f64711d187c9208ed7c43944386178a3b0716897694e486edb1f05df44",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "a3f64789346b490e855bca15d43a96488a1f97e64d4bc4cb580883d4ef7999a9",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "case-admin-results-04-1.png",
       "edition": "user",
       "entry": "start-user-dev.cmd",
       "screen": "成果整理 › 综合结果确认",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
@@ -1137,15 +1253,19 @@
         ]
       },
       "guide_sha256": "916164ff457ecb94c033deaccee4e826031b40698b5f73ed18b11813aef15aba",
-      "image_sha256": "b0b96b50059598337be11b5dd2c0b86e4cf4a48cea37ae35b989d798a6675932",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "0584156b801e3049f8a5ba2a307b2aa34d7e988665fd71bb0cb77e9c84103349",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "case-admin-results-04-2.png",
       "edition": "user",
       "entry": "start-user-dev.cmd",
       "screen": "团队动态 › 合并成果",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
@@ -1154,13 +1274,13 @@
             "text": "展开查看这份综合结果引用了哪些原成果。",
             "box": {
               "x": 449,
-              "y": 375.6875,
+              "y": 481.375,
               "width": 788,
               "height": 15
             },
             "badge": {
               "x": 418,
-              "y": 372.6875,
+              "y": 478.375,
               "width": 26,
               "height": 26
             }
@@ -1170,13 +1290,13 @@
             "text": "打开合并成果，阅读共同结论与适用范围。",
             "box": {
               "x": 1251,
-              "y": 296.6875,
+              "y": 402.375,
               "width": 134,
               "height": 29
             },
             "badge": {
               "x": 1220,
-              "y": 293.6875,
+              "y": 399.375,
               "width": 26,
               "height": 26
             }
@@ -1184,15 +1304,19 @@
         ]
       },
       "guide_sha256": "27819b6e5e606cbaf3dbd642db80f27a25bfcdc053fd4e8bc1f9aa33156c7278",
-      "image_sha256": "adb85ce5ce0b4a07fb77597b8364d238b14e7460615ae1f07d0ded28dcc63f26",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "69fcfd9552b3ac0e2c044907ae4a5afbace1b3b8dd5099b6698365f5649f17fe",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "case-admin-results-05-1.png",
       "edition": "user",
       "entry": "start-user-dev.cmd",
       "screen": "项目成果库 › 团队 › 批量删除",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
@@ -1231,15 +1355,19 @@
         ]
       },
       "guide_sha256": "50a03f4743c64a63405e20115a703a1189fbd83409236b7fe1143cacb250f066",
-      "image_sha256": "08bb42b846987e1c1af8b44930d315d5ffa2de94d9f125c5e4a1028530e8f3d2",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "dfce61c8484c6620ceddf760e3d5bc0c559014299943f62a4fd7faa61b877aa9",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "case-admin-results-05-2.png",
       "edition": "user",
       "entry": "start-user-dev.cmd",
       "screen": "团队动态 › 删除成果",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
@@ -1248,13 +1376,13 @@
             "text": "查看移除对象及与个人副本的关联。",
             "box": {
               "x": 1251,
-              "y": 297.03125,
+              "y": 402.71875,
               "width": 134,
               "height": 29
             },
             "badge": {
               "x": 1220,
-              "y": 294.03125,
+              "y": 399.71875,
               "width": 26,
               "height": 26
             }
@@ -1264,13 +1392,13 @@
             "text": "核对后标记该条动态已处理。",
             "box": {
               "x": 1251,
-              "y": 333.03125,
+              "y": 438.71875,
               "width": 134,
               "height": 31
             },
             "badge": {
               "x": 1220,
-              "y": 330.03125,
+              "y": 435.71875,
               "width": 26,
               "height": 26
             }
@@ -1278,62 +1406,70 @@
         ]
       },
       "guide_sha256": "a91c84ebba619911ccc1d6ca387074078391f9414cf7a12aa0a5a25891d3cf89",
-      "image_sha256": "993e7b6c27dffb23bd9e60243f4790ca3d2300199704c7d21838f1f1ab66ede5",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "318c9eb6b815cda1e17d652a0f1fddf575f85cec00facdd4aa5bad4c6d90ce46",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "case-personal-results-01-1.png",
       "edition": "user",
       "entry": "start-user-dev.cmd",
-      "screen": "团队动态 › 动态结果 › 格式 A 验证结论",
+      "screen": "工作会话 › 相关动态",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
           {
             "number": 1,
-            "text": "阅读团队成果的结论、证据与适用范围。",
+            "text": "只勾选存入个人成果库；需要用于当前对话时再勾选加入会话。",
             "box": {
-              "x": 395,
-              "y": 500.6875,
-              "width": 986,
-              "height": 254.0625
+              "x": 406.1875,
+              "y": 735,
+              "width": 963.625,
+              "height": 33
             },
             "badge": {
-              "x": 364,
-              "y": 497.6875,
+              "x": 375.1875,
+              "y": 732,
               "width": 26,
               "height": 26
             }
           },
           {
             "number": 2,
-            "text": "点击保存；后续在“个人”页管理这份副本。",
+            "text": "确认所选范围后保存副本。",
             "box": {
-              "x": 391,
-              "y": 316,
-              "width": 136,
+              "x": 1199.8125,
+              "y": 792,
+              "width": 78,
               "height": 36
             },
             "badge": {
-              "x": 360,
-              "y": 313,
+              "x": 1168.8125,
+              "y": 789,
               "width": 26,
               "height": 26
             }
           }
         ]
       },
-      "guide_sha256": "d0d5b2502e27ddab5deb1b538f38ef017fb33e25187e129b5d90b25ef1331930",
-      "image_sha256": "7b314e5f030fed7e91aca3f3d310e74a97bf6e8edc38cfa7c75bb6a25379e419",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "guide_sha256": "abca365f1635062c5a8a76bf4def30fbeb0f4ae03ea1e19f3d3a6489a70ae490",
+      "image_sha256": "dab8db1f5ce53275958e7f9e20755f4eeb7f816e849b8f488d1bee551b2370e4",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "case-personal-results-02-1.png",
       "edition": "user",
       "entry": "start-user-dev.cmd",
       "screen": "项目成果库 › 个人 › 新建成果",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
@@ -1388,15 +1524,19 @@
         ]
       },
       "guide_sha256": "fa12797626eaff7cbf9b599c5b42ee9db8f6cc305ea4643afeeccf66e458d998",
-      "image_sha256": "84243573e2f7558d8a7a84a2b7515ef3d7dfbb9bf71f15e8a113e64db5020084",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "c49b03e59f5f9f10461cda37d3f38237edcaa97d1994f8f6a3adbf995dd3ed9f",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "case-personal-results-03-1.png",
       "edition": "user",
       "entry": "start-user-dev.cmd",
       "screen": "项目成果库 › 个人 › 设置本地别名",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
@@ -1435,15 +1575,19 @@
         ]
       },
       "guide_sha256": "90b6202cfe61bd79c9b983b7b7c8864fcb7cc93b26c135988d2c0c4303cab137",
-      "image_sha256": "71ef872571bc3cf94d9d04812697ba87b6e6c5ee6d0e66b0265c3c454f388093",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "e3f56b6c8f382b37b8dd759fab077b3e882f16f0533147d82ed0b6e9c04a4321",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "case-personal-results-04-1.png",
       "edition": "user",
       "entry": "start-user-dev.cmd",
       "screen": "项目成果库 › 个人 › 选择使用成果的会话",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
@@ -1482,15 +1626,19 @@
         ]
       },
       "guide_sha256": "673b4bfc4cf0d5a2d312c993d6241c2258a70c887010e021d32b93bbb183140d",
-      "image_sha256": "4ded89e00482bab645148130c4c5531dc13a4608f5d0f03a44fa629709ce4067",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "bfcd03c97fd5f443febe34ab5a675e7a8dcfeeba24de9c5634f2271c50264081",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "case-personal-results-04-2.png",
       "edition": "user",
       "entry": "start-user-dev.cmd",
       "screen": "工作会话 › AI 参考内容",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
@@ -1498,13 +1646,13 @@
             "number": 1,
             "text": "这里列出本轮可用的 AI 参考内容，核对刚加入的成果。",
             "box": {
-              "x": 727,
+              "x": 656,
               "y": 103,
               "width": 300,
               "height": 95
             },
             "badge": {
-              "x": 696,
+              "x": 625,
               "y": 100,
               "width": 26,
               "height": 26
@@ -1545,15 +1693,19 @@
         ]
       },
       "guide_sha256": "1badcf02e330761388fb1cdd7146e8fa1a41012bc95584949a3a2b7a9144a20b",
-      "image_sha256": "9036a17a3f33d6b91c3819259a185af3a860dcddd22cb5f4b1eff5495fcad32b",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "527f2ad37ef1714010b662f57d627ab8f76c3d46800aedd87437e4c796bbeed6",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "case-personal-results-05-1.png",
       "edition": "user",
       "entry": "start-user-dev.cmd",
       "screen": "项目成果库 › 个人 › 选择处理",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
@@ -1608,15 +1760,19 @@
         ]
       },
       "guide_sha256": "19c13029332cea1cf3fbe5555ee8a3d9fa216e0c8239d22824d5bef727e93c17",
-      "image_sha256": "e45687f58bfbe454b8c4e02398ba62d26dbbb1a5653931a531f682e24e883d39",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "37aff1c798bdb9ea37e20eef0c712b9c3d8d4564f63fea597cf0ac1472f06bc8",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "case-personal-results-05-2.png",
       "edition": "user",
       "entry": "start-user-dev.cmd",
       "screen": "成果整理 › 个人成果处理",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
@@ -1671,15 +1827,19 @@
         ]
       },
       "guide_sha256": "b9c064f86365ad6b8377d656272f53feb516876fe4776df05ca497bb5054ff02",
-      "image_sha256": "b062fc081fc9c65620dc3b14e22cff5c4bba646fe8618dad7e11159665bbbd21",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "4290829fa7e606fae3532fe9d84944efb20db9981aa425ad2f050ec6139d1814",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "case-personal-results-06-1.png",
       "edition": "user",
       "entry": "start-user-dev.cmd",
       "screen": "项目成果库 › 个人 › 历史成果",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
@@ -1718,15 +1878,19 @@
         ]
       },
       "guide_sha256": "efcced29d429ee023304b692683f033a6f15c70c35bc240687c5afd5cd3df3ae",
-      "image_sha256": "294d25cf22297d4c1afb9e49e64f10dc9d87504eda304d80f55201349ea409bd",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "c30b81060c9781aacafaa0d3b4bc0824c348685bdde0617b80d27982bdaf1f60",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "case-personal-results-06-2.png",
       "edition": "user",
       "entry": "start-user-dev.cmd",
       "screen": "项目成果库 › 个人 › 删除确认",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
@@ -1765,15 +1929,19 @@
         ]
       },
       "guide_sha256": "4ee62385b8199ba401df10e9e6ed16b6bad375633aa75b731ed62efdb5b1945f",
-      "image_sha256": "bb13911a501924c9960f71efaf314f64b7c181c806cc606242a8d3f8d66a4a6b",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "228b95f4eb3b13cf0778bb4c7483b1b9d62f6483d7f9550d987d57587a6233f7",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "case-session-routes-01-1.png",
       "edition": "user",
       "entry": "start-user-dev.cmd",
       "screen": "用户版 › 新建工作会话 › 本机直连",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
@@ -1812,15 +1980,19 @@
         ]
       },
       "guide_sha256": "6507a2167847f0d9d562a2242c13eebccf3c7cbcb39f715cd833bce96ce4a1f8",
-      "image_sha256": "3deb99912ce5555cd5e9953d0ac01457a593974eff428e673aff76f7c39a2f3c",
-      "source_digest": "a7e58646850093b19adea15e0f320eda5845c08decca99961fce749bec93ca82",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "9805295aa2aeaffde4356c85b4bad15f073dec7ead433e7bc235f7710bf48fc7",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "case-session-routes-02-1.png",
       "edition": "user",
       "entry": "start-user-dev.cmd",
       "screen": "用户版 › 新建工作会话 › 直连管理端",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
@@ -1891,15 +2063,19 @@
         ]
       },
       "guide_sha256": "f1ebdf80e409d68433cda5334401487edcf6c1ae4a81c63e2acfc506c4097ca3",
-      "image_sha256": "92c541827daba184746c758d7a0131d0735d0e51bf5899ba63decaab5a3c966f",
-      "source_digest": "a7e58646850093b19adea15e0f320eda5845c08decca99961fce749bec93ca82",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "d0bdc7db43af08b3547bf896b65ef8e97dd1a726644270cee21cf810c627de41",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "case-session-routes-03-1.png",
       "edition": "user",
       "entry": "start-user-dev.cmd",
       "screen": "用户版 › 新建工作会话 › 共享服务器中转",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
@@ -1970,15 +2146,19 @@
         ]
       },
       "guide_sha256": "a30640f7f20d923b58ab453b5494f8a34f567bbf260a07f46c8c65e7a8839984",
-      "image_sha256": "0efbf8a528fb0372a799f159d19e7c730157419a054961d69af94e4d6f18e75b",
-      "source_digest": "a7e58646850093b19adea15e0f320eda5845c08decca99961fce749bec93ca82",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "34c780ea3b62f85720f7226dd53d6a8d0ea0c9674a82e03fa3b479080cb887be",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "case-egress-mixed-01-1.png",
       "edition": "admin",
       "entry": "start-admin-dev.cmd",
       "screen": "管理员版 › 网络出口 › 出口设置",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
@@ -2049,15 +2229,70 @@
         ]
       },
       "guide_sha256": "32788a4553a2c477f668b474c4ac8257a9b41bc80ebe922d2221b9c741ccd316",
-      "image_sha256": "25df6e688cf6cfc9a6fd3a60abe2be39eb2acfc240213d1b6d46a6cbb0bfb42f",
-      "source_digest": "a7e58646850093b19adea15e0f320eda5845c08decca99961fce749bec93ca82",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "8af55c99da3659484e54d53d5d0ce9ab3e21c4edaf722bf11d0acbb950092758",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
+    },
+    {
+      "file": "case-session-admin-direct.png",
+      "edition": "admin",
+      "entry": "start-admin-dev.cmd",
+      "screen": "管理员版 › 网络出口 › 成员接入 › 直连管理端",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "annotation": {
+        "kind": "instruction",
+        "callouts": [
+          {
+            "number": 1,
+            "text": "成员可直接访问管理端地址时选择这条路线。",
+            "box": {
+              "x": 274,
+              "y": 399.1875,
+              "width": 557,
+              "height": 84.5
+            },
+            "badge": {
+              "x": 243,
+              "y": 396.1875,
+              "width": 26,
+              "height": 26
+            }
+          },
+          {
+            "number": 2,
+            "text": "复制直连接入码，交给成员在新建会话时使用。",
+            "box": {
+              "x": 1266,
+              "y": 694.6875,
+              "width": 113,
+              "height": 36
+            },
+            "badge": {
+              "x": 1235,
+              "y": 691.6875,
+              "width": 26,
+              "height": 26
+            }
+          }
+        ]
+      },
+      "guide_sha256": "3c4722da693d90337776852d552f797baa8bea8c29a3b63ed282e52b25eb4768",
+      "image_sha256": "9f92ec76ab7113d439dedd903ec4ec95d7239c38d25a420b647f760a131b1691",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "case-egress-mixed-tunnel-enable.png",
       "edition": "admin",
       "entry": "start-admin-dev.cmd",
       "screen": "管理员版 › 网络出口 › 成员接入 › 经共享服务器",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
@@ -2080,15 +2315,19 @@
         ]
       },
       "guide_sha256": "ea3af38add86f2d33c54fac3768c33b2aad205ae95b6400700295d20b680bc64",
-      "image_sha256": "df73033173a0bd256f28fa6d584b8e26f1c59872de081a743b52903e7b2a0924",
-      "source_digest": "a7e58646850093b19adea15e0f320eda5845c08decca99961fce749bec93ca82",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "204d342d793c559c4c3af9e5586fc22309b43bf66992b320a761e31f8d3854a5",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "case-egress-mixed-02-1.png",
       "edition": "admin",
       "entry": "start-admin-dev.cmd",
       "screen": "管理员版 › 网络出口 › 成员接入 › 经共享服务器",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
@@ -2143,172 +2382,19 @@
         ]
       },
       "guide_sha256": "2c6773d2d40466f0d26a92f8472fb4f2fb987491094c57735ab86dc8bc8b6937",
-      "image_sha256": "898ec3604f8471c5cf7fb74f26f1db6f04489a397d1a6e4ba95f1fd72d94bb74",
-      "source_digest": "a7e58646850093b19adea15e0f320eda5845c08decca99961fce749bec93ca82",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
-    },
-    {
-      "file": "case-egress-mixed-04-2.png",
-      "edition": "user",
-      "entry": "start-user-dev.cmd",
-      "screen": "工作会话 › Codex / Cursor",
-      "annotation": {
-        "kind": "instruction",
-        "callouts": [
-          {
-            "number": 1,
-            "text": "此处显示“管理端出口”；打开可核对网络路径和个人模型账号。",
-            "box": {
-              "x": 507.1875,
-              "y": 925,
-              "width": 116.421875,
-              "height": 27
-            },
-            "badge": {
-              "x": 504.1875,
-              "y": 894,
-              "width": 26,
-              "height": 26
-            }
-          },
-          {
-            "number": 2,
-            "text": "填写本轮任务要求，按需加入参考资料。",
-            "box": {
-              "x": 392.1875,
-              "y": 849,
-              "width": 991.625,
-              "height": 70
-            },
-            "badge": {
-              "x": 361.1875,
-              "y": 846,
-              "width": 26,
-              "height": 26
-            }
-          },
-          {
-            "number": 3,
-            "text": "发送后核对模型回复和处理结果；失败时记录提示及发生时间。",
-            "box": {
-              "x": 1341.8125,
-              "y": 922,
-              "width": 33,
-              "height": 33
-            },
-            "badge": {
-              "x": 1338.8125,
-              "y": 891,
-              "width": 26,
-              "height": 26
-            }
-          }
-        ]
-      },
-      "guide_sha256": "8de7cab9a34703a42d5356766078ae76ab429d4f488d189528145fb0d0be943b",
-      "image_sha256": "107cd5344b542a63153bde1486cb9ed4ca145fc803d6276ab0bafb36ae04d350",
-      "source_digest": "a7e58646850093b19adea15e0f320eda5845c08decca99961fce749bec93ca82",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
-    },
-    {
-      "file": "case-egress-mixed-05-1.png",
-      "edition": "user",
-      "entry": "start-user-dev.cmd",
-      "screen": "工作会话 › 网络与登录设置",
-      "annotation": {
-        "kind": "instruction",
-        "callouts": [
-          {
-            "number": 1,
-            "text": "重新检查管理端网络路径和模型登录状态。",
-            "box": {
-              "x": 373,
-              "y": 435.890625,
-              "width": 161,
-              "height": 38
-            },
-            "badge": {
-              "x": 342,
-              "y": 432.890625,
-              "width": 26,
-              "height": 26
-            }
-          },
-          {
-            "number": 2,
-            "text": "模型账号尚未登录时，从这里完成本人的账号登录。",
-            "box": {
-              "x": 390,
-              "y": 570.484375,
-              "width": 109,
-              "height": 31
-            },
-            "badge": {
-              "x": 359,
-              "y": 567.484375,
-              "width": 26,
-              "height": 26
-            }
-          }
-        ]
-      },
-      "guide_sha256": "c295fa156c0114e89eabb05b215fdbecb1050b3fa1482ecba38c13d3ff2d6c49",
-      "image_sha256": "6a2fb4f2c4433b4071a0b885d341e17ce5e27506e48a78424a52ea96301617f2",
-      "source_digest": "a7e58646850093b19adea15e0f320eda5845c08decca99961fce749bec93ca82",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
-    },
-    {
-      "file": "case-egress-mixed-05-2.png",
-      "edition": "admin",
-      "entry": "start-admin-dev.cmd",
-      "screen": "管理员版 › 网络出口 › 连接诊断",
-      "annotation": {
-        "kind": "instruction",
-        "callouts": [
-          {
-            "number": 1,
-            "text": "连接测试通过后，让成员发送一次实际任务，核对模型回复。",
-            "box": {
-              "x": 313,
-              "y": 548.1875,
-              "width": 319.328125,
-              "height": 38
-            },
-            "badge": {
-              "x": 282,
-              "y": 545.1875,
-              "width": 26,
-              "height": 26
-            }
-          },
-          {
-            "number": 2,
-            "text": "使用 Cursor 时检查对应连接，再由成员发送任务验证。",
-            "box": {
-              "x": 678.328125,
-              "y": 548.1875,
-              "width": 319.328125,
-              "height": 38
-            },
-            "badge": {
-              "x": 647.328125,
-              "y": 545.1875,
-              "width": 26,
-              "height": 26
-            }
-          }
-        ]
-      },
-      "guide_sha256": "4a84a1a5daa6c9a794bd263ba79154003569bb0851dc0cf89c45872f26cf7368",
-      "image_sha256": "4d5f9fabe34dcd0a2db699d1cc5c0bb4a922cd4786af449d559189711ad7db74",
-      "source_digest": "a7e58646850093b19adea15e0f320eda5845c08decca99961fce749bec93ca82",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "5f94b26c685e4b3551d917a6463faf7695cff0c0139132c719239fa718ccf0d5",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "case-first-session-01-1.png",
       "edition": "admin",
       "entry": "start-admin-dev.cmd",
       "screen": "管理员版 › 用户管理 › 创建项目组",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
@@ -2347,15 +2433,19 @@
         ]
       },
       "guide_sha256": "9a88d703dfafdc2c3888c4fdf237375ad90d859a04d37745f170d5da4b9b23f9",
-      "image_sha256": "8bb69bf89b3866a8d49641d69fe0cfb471a9a63c042828b0fa3dfe67ac083e9d",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "7f921193dd5f5f2c95706c7630e250492fd2492294564b7cf9b8be32137387ef",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "case-first-session-02-1.png",
       "edition": "admin",
       "entry": "start-admin-dev.cmd",
       "screen": "管理员版 › 用户管理 › 组与组管理员",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
@@ -2410,29 +2500,37 @@
         ]
       },
       "guide_sha256": "e3bbaac760024cbcfc48f4ef48b0cd16bbc6c42059bc465601902849d44fc672",
-      "image_sha256": "6121e1c358c45cfbdba4edc9fc3efc982a80163006b4df11139d0460ef5edd0d",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "bf11e31b32977f852c0b5a75364c03912fc96d921c2f290f8f06725604043f9d",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "case-first-session-02-2.png",
       "edition": "admin",
       "entry": "start-admin-dev.cmd",
       "screen": "管理员版 › 用户管理 › 按组查看",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "display",
         "callouts": []
       },
       "guide_sha256": "7a88062af9078b6f9cb560bb912036658bcd0d416c8ecdf59fd7590049231fd5",
-      "image_sha256": "0e4715a20e3ac1f68929519d8dea9db85f6391f07f916052807d8de673b99bbf",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "dbf91085e73954790dec09f25f70e349fdcf40fc4da2acbf5d7435ffc37e4b09",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "case-first-session-03-1.png",
       "edition": "user",
       "entry": "start-user-dev.cmd",
       "screen": "用户版 › 连接团队空间",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
@@ -2487,15 +2585,19 @@
         ]
       },
       "guide_sha256": "5213f9d21490a89298d9ccdc30044b5a0fd68fa81e757a3a550882be290d7427",
-      "image_sha256": "71dd8842dfb55e117ff945d74c66c1a9280a0471137c9d03f220b6bee4d8b1f2",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "8769e07899786280ecc2d786a189cd9290954b8daed05902933993d0d006fcb3",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "case-first-session-04-1.png",
       "edition": "user",
       "entry": "start-user-dev.cmd",
       "screen": "我的工作组 › 建立第一个项目",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
@@ -2550,15 +2652,19 @@
         ]
       },
       "guide_sha256": "9d17e8b2fcd7294979c66e82281d535d7cbbf690d2ee2c60585b94dbee9ded7e",
-      "image_sha256": "96e19c988dcd2dfaf35b323ac74f87f86f44960099fc13319ab254b9afffd6fa",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "7c6279fc54ffe0ef4fc90fa939d7d5954f0bb92de49815719ae6de275d99f41f",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "case-first-session-04-2.png",
       "edition": "user",
       "entry": "start-user-dev.cmd",
       "screen": "我的工作组 › 票据 OCR 优化",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
@@ -2597,15 +2703,19 @@
         ]
       },
       "guide_sha256": "51847c353d30fdac6f508bac499bc847ead90011208f14d9daf3305e768d1b47",
-      "image_sha256": "46c2dc8d92ce89ab2748251009aecf65b0117268a934500fe53c7ed00e3e3acc",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "973210c3c94251667fbd1a846910f4c50cc44502e9f964c99f0a859d9469da10",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "case-first-session-05-1.png",
       "edition": "user",
       "entry": "start-user-dev.cmd",
       "screen": "项目任务 › 派发任务",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
@@ -2660,15 +2770,19 @@
         ]
       },
       "guide_sha256": "1fb1d6726154876c33b1a8ca5c76aee45f22f879dd68f1b0bce0e83a8d872be6",
-      "image_sha256": "6bf838533ee6ac87a0f73ff8961f6c46b591ed3fa6f0f5dcc105b5851d91742b",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "a168aa399b52cf31fe1a3c1ac030ee16840d969c2928fa49d6a56bf52183e731",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "case-first-session-05-2.png",
       "edition": "user",
       "entry": "start-user-dev.cmd",
       "screen": "我的任务 › 任务详情",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
@@ -2707,15 +2821,19 @@
         ]
       },
       "guide_sha256": "ec1cf0988926631c50e3e20a641d584d86fa3031e74afbad31659be3249af19d",
-      "image_sha256": "6d5f11c8c019a5d966667b41f83c4cb2cb6a578445756db1e18fee3305d76901",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "4a2470d29c7e8d06b704643dc904e57dd0ee80c3ee3b46bd285440c6eb31f5dc",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "case-first-session-06-1.png",
       "edition": "user",
       "entry": "start-user-dev.cmd",
       "screen": "工作会话 › 新建工作会话",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
@@ -2786,15 +2904,19 @@
         ]
       },
       "guide_sha256": "d64e9b0cf465b50d10440ce83d05e4bbba2606b691889d01bdea4162a2f41da8",
-      "image_sha256": "89e643a0764aa74460e16a83a2eebbca80bf11044f6f0264b105a1bb97abcabe",
-      "source_digest": "338dedb23f77c94b5fdaa9c53eceaf0b526d13a4d9e92f1ef024c180f98774bb",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "dde5e8e82fa8f7a697f41319100f2d697185f957c8aa56223cccc5f02748acd6",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "case-first-session-08-2.png",
       "edition": "user",
       "entry": "start-user-dev.cmd",
       "screen": "工作会话 › 首次输入",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
@@ -2849,15 +2971,19 @@
         ]
       },
       "guide_sha256": "3d5e2fa0b2feb488cce18fa4dc3443d0843cd47be645149c7b6b7d84ea2cbd98",
-      "image_sha256": "e5999dc19e4a672a34d667ab052557ca8c7b139e9f635639e485cb5a557079ee",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "1ce2f19a34cdf1a19baad87c8eb3f7f289dabe1e60c0470e7391895eb775a503",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "case-first-session-07-1.png",
       "edition": "user",
       "entry": "start-user-dev.cmd",
       "screen": "我的任务 › 新建工作会话",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
@@ -2896,15 +3022,19 @@
         ]
       },
       "guide_sha256": "dacaa44f14ff4b4f1e896d514b635c7c7b84fb7bb6646ca9434c664740fb4fe6",
-      "image_sha256": "48c3bc7125b6cd91a4c73121c201404897fb1324f0846d94c28a08b16652afdb",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "3d372772f98a44e7f7f9e89e082c6bd5b1bb90e1e3e9e39f537cb21182ce607f",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "case-first-session-07-2.png",
       "edition": "user",
       "entry": "start-user-dev.cmd",
       "screen": "工作会话 › 首次输入",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
@@ -2959,15 +3089,19 @@
         ]
       },
       "guide_sha256": "3165edcfe31e53adad6ee06265bc0f1be4d4a0ba66de7863dbe5c641a7c70209",
-      "image_sha256": "ac6f63c3d4607517222a41b6815677b6fc7383317f43939ccd9442e6c3408922",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "39f01f5906d63655c2a5689216c3ca7aa3d1b739a05eb24c6d17464070938efa",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "case-first-session-09-1.png",
       "edition": "user",
       "entry": "start-user-dev.cmd",
       "screen": "我的任务 › 提交验收",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
@@ -3022,15 +3156,19 @@
         ]
       },
       "guide_sha256": "7e0b13631c5333fb8d8b0f466614649b63f0f98897466264c9dcdf9182e9aec9",
-      "image_sha256": "e5ef1eb35ab830e3b681ec1825f24e2f0d064e903ca943aabf49ca1c53eceb65",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "195d6e84176eb882ac2506475db59f0e152a0f3b2f06c61a8562e2c0fa4bbcba",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "case-first-session-09-2.png",
       "edition": "user",
       "entry": "start-user-dev.cmd",
       "screen": "成果整理 › 提交到团队",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
@@ -3069,15 +3207,19 @@
         ]
       },
       "guide_sha256": "5a4fcfcb3f4350d9b077b168e9bce81103865d5ec0c8173f5dc1b074094ee8e7",
-      "image_sha256": "3cd80b45d7f0866bdb70e032fed1206b0a9b6d54f323fc4c741f27e7ac4d9e00",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "2aadf84e08332a24ade8b16118c469c88ed8bd97cca767f7101761b0b8ce2daa",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "case-first-session-10-1.png",
       "edition": "user",
       "entry": "start-user-dev.cmd",
       "screen": "项目任务 › 验收结果",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
@@ -3132,15 +3274,19 @@
         ]
       },
       "guide_sha256": "32df49cedc25b00981037a380f6ad7fb0f022f1c1129a1a56eeec0c59ae01820",
-      "image_sha256": "ff72d5b7ea0cda887ff56d977ff039c7364da1e857efc1948151b27dc4aff192",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "d74615931736f41d7100cd57dd5629ae1a69927395805f6c0caa09f064eca766",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "case-first-session-10-2.png",
       "edition": "user",
       "entry": "start-user-dev.cmd",
       "screen": "团队动态 › 上传成果",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
@@ -3149,13 +3295,13 @@
             "text": "核对 Carol 上传的成果名称与版本。",
             "box": {
               "x": 449,
-              "y": 269.6875,
+              "y": 375.375,
               "width": 788,
               "height": 96
             },
             "badge": {
               "x": 418,
-              "y": 266.6875,
+              "y": 372.375,
               "width": 26,
               "height": 26
             }
@@ -3165,13 +3311,13 @@
             "text": "打开标注质量检查成果，阅读证据并安排后续工作。",
             "box": {
               "x": 1251,
-              "y": 284.1875,
+              "y": 389.875,
               "width": 134,
               "height": 29
             },
             "badge": {
               "x": 1248,
-              "y": 253.1875,
+              "y": 358.875,
               "width": 26,
               "height": 26
             }
@@ -3179,15 +3325,19 @@
         ]
       },
       "guide_sha256": "71536798f9565bf05990faf6f710e94e94f530a75289df54ff99f8f1984c6bbe",
-      "image_sha256": "5a239e423057c91d787851d07307d31072a68a0fac387b135209ba30d77744ed",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "9be787e73d232fa9771b41545e0b0ba299de0dc7f2317e9e0034a1469a792abc",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "case-project-cleanup-01-1.png",
       "edition": "admin",
       "entry": "start-admin-dev.cmd",
       "screen": "管理员版 › 共享空间",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
@@ -3226,15 +3376,19 @@
         ]
       },
       "guide_sha256": "c751bd7ea96d8745f3c478419d67abe2af331c9346d6e711e6430bcc44f54315",
-      "image_sha256": "0267bb8b47ce96e6b70eb39088d6dad44c3e3150d2929952d886b82f68250f6a",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "fca296d82d02683b08cdbee0a5979065e1eafe547babae36898c93d432a554a0",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "case-project-cleanup-02-1.png",
       "edition": "admin",
       "entry": "start-admin-dev.cmd",
       "screen": "管理员版 › 共享空间 › 清理项目",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
       "annotation": {
         "kind": "instruction",
         "callouts": [
@@ -3289,9 +3443,739 @@
         ]
       },
       "guide_sha256": "ddc1502fa6ad1f39b72cd5be820b98a75155adc31ee4f306095ef3f5f4584317",
-      "image_sha256": "fceb1259279817e4d8d25388769808a1b4fe36c4e75091bcbe6e11798570cb22",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "84cf55ab25c79ef81dc69c8652cdeae7f659a7ac0a827aaaf92b85c8f8d6baa9",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
+    },
+    {
+      "file": "case-egress-mixed-04-2.png",
+      "edition": "user",
+      "entry": "start-user-dev.cmd",
+      "screen": "工作会话 › Codex / Cursor",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "annotation": {
+        "kind": "instruction",
+        "callouts": [
+          {
+            "number": 1,
+            "text": "此处显示“管理端出口”；打开可核对网络路径和个人模型账号。",
+            "box": {
+              "x": 502.46875,
+              "y": 925,
+              "width": 116.421875,
+              "height": 27
+            },
+            "badge": {
+              "x": 499.46875,
+              "y": 894,
+              "width": 26,
+              "height": 26
+            }
+          },
+          {
+            "number": 2,
+            "text": "填写本轮任务要求，按需加入参考资料。",
+            "box": {
+              "x": 392.1875,
+              "y": 849,
+              "width": 991.625,
+              "height": 70
+            },
+            "badge": {
+              "x": 361.1875,
+              "y": 846,
+              "width": 26,
+              "height": 26
+            }
+          },
+          {
+            "number": 3,
+            "text": "发送后核对模型回复和处理结果；失败时记录提示及发生时间。",
+            "box": {
+              "x": 1341.8125,
+              "y": 922,
+              "width": 33,
+              "height": 33
+            },
+            "badge": {
+              "x": 1338.8125,
+              "y": 891,
+              "width": 26,
+              "height": 26
+            }
+          }
+        ]
+      },
+      "guide_sha256": "8de7cab9a34703a42d5356766078ae76ab429d4f488d189528145fb0d0be943b",
+      "image_sha256": "fae94bdd15ef80efcbea8a833137be253ae0653fd1d098de4e6b7665c4492cfb",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
+    },
+    {
+      "file": "case-egress-mixed-05-1.png",
+      "edition": "user",
+      "entry": "start-user-dev.cmd",
+      "screen": "工作会话 › 网络与登录设置",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "annotation": {
+        "kind": "instruction",
+        "callouts": [
+          {
+            "number": 1,
+            "text": "重新检查管理端网络路径和模型登录状态。",
+            "box": {
+              "x": 373,
+              "y": 482.78125,
+              "width": 161,
+              "height": 38
+            },
+            "badge": {
+              "x": 342,
+              "y": 479.78125,
+              "width": 26,
+              "height": 26
+            }
+          },
+          {
+            "number": 2,
+            "text": "模型账号尚未登录时，从这里完成本人的账号登录。",
+            "box": {
+              "x": 390,
+              "y": 617.375,
+              "width": 109,
+              "height": 31
+            },
+            "badge": {
+              "x": 359,
+              "y": 614.375,
+              "width": 26,
+              "height": 26
+            }
+          }
+        ]
+      },
+      "guide_sha256": "c295fa156c0114e89eabb05b215fdbecb1050b3fa1482ecba38c13d3ff2d6c49",
+      "image_sha256": "3256eb73174313a33b5804baa8cd9c7d0ee021a1fb09406f61260d4ccdc40274",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
+    },
+    {
+      "file": "case-egress-mixed-05-2.png",
+      "edition": "admin",
+      "entry": "start-admin-dev.cmd",
+      "screen": "管理员版 › 网络出口 › 连接诊断",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "annotation": {
+        "kind": "instruction",
+        "callouts": [
+          {
+            "number": 1,
+            "text": "连接测试通过后，让成员发送一次实际任务，核对模型回复。",
+            "box": {
+              "x": 313,
+              "y": 548.1875,
+              "width": 319.328125,
+              "height": 38
+            },
+            "badge": {
+              "x": 282,
+              "y": 545.1875,
+              "width": 26,
+              "height": 26
+            }
+          },
+          {
+            "number": 2,
+            "text": "使用 Cursor 时检查对应连接，再由成员发送任务验证。",
+            "box": {
+              "x": 678.328125,
+              "y": 548.1875,
+              "width": 319.328125,
+              "height": 38
+            },
+            "badge": {
+              "x": 647.328125,
+              "y": 545.1875,
+              "width": 26,
+              "height": 26
+            }
+          }
+        ]
+      },
+      "guide_sha256": "4a84a1a5daa6c9a794bd263ba79154003569bb0851dc0cf89c45872f26cf7368",
+      "image_sha256": "961a65a796ee19e56ae64c99a5e7d4665bb7bb9c0cbcaf4a217f6eb7e0af200f",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
+    },
+    {
+      "file": "case-member-questions-compose.png",
+      "edition": "user",
+      "entry": "start-user-dev.cmd",
+      "screen": "用户版 › 工作会话 › 提问",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "annotation": {
+        "kind": "instruction",
+        "callouts": [
+          {
+            "number": 1,
+            "text": "写清需要对方确认的范围。",
+            "box": {
+              "x": 1047,
+              "y": 255,
+              "width": 377,
+              "height": 90
+            },
+            "badge": {
+              "x": 1016,
+              "y": 252,
+              "width": 26,
+              "height": 26
+            }
+          },
+          {
+            "number": 2,
+            "text": "附上本次问题需要的资料。",
+            "box": {
+              "x": 1047,
+              "y": 480,
+              "width": 377,
+              "height": 39
+            },
+            "badge": {
+              "x": 1016,
+              "y": 477,
+              "width": 26,
+              "height": 26
+            }
+          },
+          {
+            "number": 3,
+            "text": "选择 Carol，再发送问题。",
+            "box": {
+              "x": 1047,
+              "y": 647.375,
+              "width": 377,
+              "height": 36
+            },
+            "badge": {
+              "x": 1016,
+              "y": 644.375,
+              "width": 26,
+              "height": 26
+            }
+          }
+        ]
+      },
+      "guide_sha256": "dd31606bbf13bacd412af262e1d43453011bc01bfe6b0ddaccee5a53ab4bf56c",
+      "image_sha256": "f47b4df85ef7430c8269583e0de2cae86c820cf9021e0a0b9eb0122c67520b08",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
+    },
+    {
+      "file": "case-member-questions-received.png",
+      "edition": "user",
+      "entry": "start-user-dev.cmd",
+      "screen": "用户版 › 团队动态 › 提问动态",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "annotation": {
+        "kind": "instruction",
+        "callouts": [
+          {
+            "number": 1,
+            "text": "点击问题卡片，阅读问题和资料。",
+            "box": {
+              "x": 360,
+              "y": 138,
+              "width": 1056,
+              "height": 70
+            },
+            "badge": {
+              "x": 329,
+              "y": 135,
+              "width": 26,
+              "height": 26
+            }
+          }
+        ]
+      },
+      "guide_sha256": "cf086a3e33820d3df1bfe15544f6ec84523a2004b21999298b26fc7aa00aba73",
+      "image_sha256": "dd81c69a6d2e13132d478edd428b77dcb06bff05039c5830e498d35ade5e35e7",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
+    },
+    {
+      "file": "case-member-questions-reply.png",
+      "edition": "user",
+      "entry": "start-user-dev.cmd",
+      "screen": "用户版 › 工作会话 › 提问",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "annotation": {
+        "kind": "instruction",
+        "callouts": [
+          {
+            "number": 1,
+            "text": "可预览或下载随问题发送的资料。",
+            "box": {
+              "x": 1047,
+              "y": 267.875,
+              "width": 377,
+              "height": 33
+            },
+            "badge": {
+              "x": 1016,
+              "y": 264.875,
+              "width": 26,
+              "height": 26
+            }
+          },
+          {
+            "number": 2,
+            "text": "填写答复后点击发送。",
+            "box": {
+              "x": 1048,
+              "y": 848,
+              "width": 375,
+              "height": 72
+            },
+            "badge": {
+              "x": 1017,
+              "y": 845,
+              "width": 26,
+              "height": 26
+            }
+          },
+          {
+            "number": 3,
+            "text": "将答复发给 Bob。",
+            "box": {
+              "x": 1375,
+              "y": 922,
+              "width": 42,
+              "height": 29
+            },
+            "badge": {
+              "x": 1372,
+              "y": 891,
+              "width": 26,
+              "height": 26
+            }
+          }
+        ]
+      },
+      "guide_sha256": "88203145d30384c3cbaac99cad407b3507984cb07ec50bb228b21dda7485ca4d",
+      "image_sha256": "c7c0ef5ae238d88e3024e9242e14813913487ab2f515a5e3bcbe22fc66b87425",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
+    },
+    {
+      "file": "case-member-questions-imported.png",
+      "edition": "user",
+      "entry": "start-user-dev.cmd",
+      "screen": "用户版 › 工作会话 › 提问",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "annotation": {
+        "kind": "instruction",
+        "callouts": [
+          {
+            "number": 1,
+            "text": "引入后，正文出现在 Bob 的工作会话中。",
+            "box": {
+              "x": 1070,
+              "y": 470.75,
+              "width": 109.859375,
+              "height": 33
+            },
+            "badge": {
+              "x": 1039,
+              "y": 467.75,
+              "width": 26,
+              "height": 26
+            }
+          },
+          {
+            "number": 2,
+            "text": "核对会话中的答复内容。",
+            "box": {
+              "x": 370.6875,
+              "y": 453.4375,
+              "width": 609.625,
+              "height": 106.375
+            },
+            "badge": {
+              "x": 339.6875,
+              "y": 450.4375,
+              "width": 26,
+              "height": 26
+            }
+          }
+        ]
+      },
+      "guide_sha256": "ff695b4aae0b541f802e2400a826b541d49b93ff08f50e5d6c44ccda8e07c3ac",
+      "image_sha256": "20ce5262743cdd4414f65611c5a99097df3a19796fb2ed7d92d88efd897095bb",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
+    },
+    {
+      "file": "case-member-questions-receiver-auto.png",
+      "edition": "user",
+      "entry": "start-user-dev.cmd",
+      "screen": "用户版 › 工作会话 › 提问",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "annotation": {
+        "kind": "instruction",
+        "callouts": [
+          {
+            "number": 1,
+            "text": "当前会话用于回答 Bob 的问题。",
+            "box": {
+              "x": 354,
+              "y": 62.5,
+              "width": 84,
+              "height": 19
+            },
+            "badge": {
+              "x": 323,
+              "y": 59.5,
+              "width": 26,
+              "height": 26
+            }
+          },
+          {
+            "number": 2,
+            "text": "自动期间输入框锁定；需要手动回复时点击停止自动。",
+            "box": {
+              "x": 1098,
+              "y": 925,
+              "width": 66,
+              "height": 26
+            },
+            "badge": {
+              "x": 1095,
+              "y": 894,
+              "width": 26,
+              "height": 26
+            }
+          }
+        ]
+      },
+      "guide_sha256": "74bbebccd2181263485e2a7a12d540e8f0ea41dba04150e30477c4ac358318d0",
+      "image_sha256": "be7032cb2134f74d6448b48e35324df65ab367ee84a69cb121c09e1e0fe4ab69",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
+    },
+    {
+      "file": "case-member-questions-author-auto.png",
+      "edition": "user",
+      "entry": "start-user-dev.cmd",
+      "screen": "用户版 › 工作会话 › 提问",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "annotation": {
+        "kind": "instruction",
+        "callouts": [
+          {
+            "number": 1,
+            "text": "Bob 当前只与 Carol 自动往返。",
+            "box": {
+              "x": 1060,
+              "y": 369.5625,
+              "width": 351,
+              "height": 19
+            },
+            "badge": {
+              "x": 1029,
+              "y": 366.5625,
+              "width": 26,
+              "height": 26
+            }
+          },
+          {
+            "number": 2,
+            "text": "停止自动后可恢复手动沟通。",
+            "box": {
+              "x": 1098,
+              "y": 925,
+              "width": 66,
+              "height": 26
+            },
+            "badge": {
+              "x": 1095,
+              "y": 894,
+              "width": 26,
+              "height": 26
+            }
+          }
+        ]
+      },
+      "guide_sha256": "0255ce30ccaeddbca2dc5722aba1e09596696e7b16eddd28a0d793999cd7f1f2",
+      "image_sha256": "58d13eaf595295145f27b70e09544d8362edc6d4566695f25e1b68e538589f80",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
+    },
+    {
+      "file": "case-member-questions-closed.png",
+      "edition": "user",
+      "entry": "start-user-dev.cmd",
+      "screen": "用户版 › 工作会话 › 提问",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "annotation": {
+        "kind": "instruction",
+        "callouts": [
+          {
+            "number": 1,
+            "text": "结束后保留历史往来，不再接收新答复。",
+            "box": {
+              "x": 1047,
+              "y": 325.875,
+              "width": 377,
+              "height": 64
+            },
+            "badge": {
+              "x": 1016,
+              "y": 322.875,
+              "width": 26,
+              "height": 26
+            }
+          }
+        ]
+      },
+      "guide_sha256": "5bf8f512f44e6e8919d51a348b1615d35d5035ff42a3d430049bca5b2c923115",
+      "image_sha256": "a1dbf8fd2f6484f633ef1fe519b5b2f450b5a9f2f1d20ef791a79356c21ffca1",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
+    },
+    {
+      "file": "case-activity-recommendations-notice.png",
+      "edition": "user",
+      "entry": "start-user-dev.cmd",
+      "screen": "用户版 › 工作会话 › 相关动态",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "annotation": {
+        "kind": "instruction",
+        "callouts": [
+          {
+            "number": 1,
+            "text": "当前轮次结束后，在输入框上方查看新推荐。",
+            "box": {
+              "x": 406.1875,
+              "y": 796,
+              "width": 963.625,
+              "height": 33
+            },
+            "badge": {
+              "x": 375.1875,
+              "y": 793,
+              "width": 26,
+              "height": 26
+            }
+          },
+          {
+            "number": 2,
+            "text": "展开推荐，输入草稿继续保留。",
+            "box": {
+              "x": 1347.8125,
+              "y": 796,
+              "width": 22,
+              "height": 33
+            },
+            "badge": {
+              "x": 1316.8125,
+              "y": 793,
+              "width": 26,
+              "height": 26
+            }
+          }
+        ]
+      },
+      "guide_sha256": "bb40d491e45b9db371bf59d1a38ce2e1315141bc9e95de7041178ecc03e89a29",
+      "image_sha256": "385eb4f3a88213c71a51b2ac99e15d55ff2412da1ebdf44b7829506785578276",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
+    },
+    {
+      "file": "case-activity-recommendations-choose.png",
+      "edition": "user",
+      "entry": "start-user-dev.cmd",
+      "screen": "用户版 › 工作会话 › 相关动态",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "annotation": {
+        "kind": "instruction",
+        "callouts": [
+          {
+            "number": 1,
+            "text": "先核对关联理由和原文片段。",
+            "box": {
+              "x": 406.1875,
+              "y": 611.203125,
+              "width": 963.625,
+              "height": 169.796875
+            },
+            "badge": {
+              "x": 375.1875,
+              "y": 608.203125,
+              "width": 26,
+              "height": 26
+            }
+          },
+          {
+            "number": 2,
+            "text": "本例同时加入当前会话并保存个人副本；也可只选其中一项。",
+            "box": {
+              "x": 406.1875,
+              "y": 735,
+              "width": 963.625,
+              "height": 33
+            },
+            "badge": {
+              "x": 375.1875,
+              "y": 732,
+              "width": 26,
+              "height": 26
+            }
+          },
+          {
+            "number": 3,
+            "text": "确认后执行所选操作。",
+            "box": {
+              "x": 1199.8125,
+              "y": 792,
+              "width": 78,
+              "height": 36
+            },
+            "badge": {
+              "x": 1168.8125,
+              "y": 789,
+              "width": 26,
+              "height": 26
+            }
+          }
+        ]
+      },
+      "guide_sha256": "a56aecd860af8536ad87ec1d3a731017817b67358a35e1f6e02403b0e3b03049",
+      "image_sha256": "c468cca82de8264c9fa63b8d6c7d1ac15700ef565e212dd81413e30fcee82f85",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
+    },
+    {
+      "file": "case-activity-recommendations-attached.png",
+      "edition": "user",
+      "entry": "start-user-dev.cmd",
+      "screen": "用户版 › 工作会话 › 相关动态",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "annotation": {
+        "kind": "instruction",
+        "callouts": [
+          {
+            "number": 1,
+            "text": "成果已选入下一条消息，发送时带给 AI。",
+            "box": {
+              "x": 391.1875,
+              "y": 816,
+              "width": 993.625,
+              "height": 26
+            },
+            "badge": {
+              "x": 360.1875,
+              "y": 813,
+              "width": 26,
+              "height": 26
+            }
+          },
+          {
+            "number": 2,
+            "text": "原输入保留，可继续修改后发送。",
+            "box": {
+              "x": 392.1875,
+              "y": 849,
+              "width": 991.625,
+              "height": 70
+            },
+            "badge": {
+              "x": 361.1875,
+              "y": 846,
+              "width": 26,
+              "height": 26
+            }
+          }
+        ]
+      },
+      "guide_sha256": "a494dd9777058e12ffdde3c4ea4abd99b17ead8e2968cc779221aeb9dadc0591",
+      "image_sha256": "7a097adc3f9132d86a976a0e709f1844c8657b2c1f518d88d81f1efec5c7b387",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
+    },
+    {
+      "file": "case-activity-recommendations-saved.png",
+      "edition": "user",
+      "entry": "start-user-dev.cmd",
+      "screen": "用户版 › 个人成果库",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "annotation": {
+        "kind": "instruction",
+        "callouts": [
+          {
+            "number": 1,
+            "text": "本例同时选择了存库，因此个人库中也有一份副本。",
+            "box": {
+              "x": 372,
+              "y": 397,
+              "width": 1032,
+              "height": 451.921875
+            },
+            "badge": {
+              "x": 341,
+              "y": 394,
+              "width": 26,
+              "height": 26
+            }
+          }
+        ]
+      },
+      "guide_sha256": "ab724518ac7de6b91ba240d0721bad9f1722b709df6de11e41f0b1e44bc7680d",
+      "image_sha256": "c6ef3c643ae644e920fd1093c84d17aec711ad52e1f8b970663474a39dbdb4e7",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "admin-users.png",
@@ -3319,11 +4203,11 @@
           },
           {
             "number": 2,
-            "text": "在对应成员行设置所属工作组和项目组管理员身份。",
+            "text": "设置账号加入的项目组及组内权限。",
             "box": {
               "x": 1048.84375,
               "y": 589,
-              "width": 66,
+              "width": 44,
               "height": 33
             },
             "badge": {
@@ -3337,13 +4221,13 @@
             "number": 3,
             "text": "在对应成员行处理密码重置。",
             "box": {
-              "x": 1128.84375,
+              "x": 1106.84375,
               "y": 589,
               "width": 44,
               "height": 33
             },
             "badge": {
-              "x": 1125.84375,
+              "x": 1103.84375,
               "y": 558,
               "width": 26,
               "height": 26
@@ -3351,10 +4235,10 @@
           }
         ]
       },
-      "guide_sha256": "bb57f17ef49a89ae0204995d363b92071871d4a25f24d645f70246493daeefae",
-      "image_sha256": "7f85f97cb4fe1e9e72f8e7e4070ab10c1992366982d332c28988c02d3412a6d2",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "guide_sha256": "698078e2865a3287546f78fc444fc46e0ef2dbd2b467293284c50f7b9fa86aa0",
+      "image_sha256": "d9670c32622efffb8268e806d926f2274a40512b497acfbef9a46127dfed3cc6",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "admin-groups.png",
@@ -3415,9 +4299,9 @@
         ]
       },
       "guide_sha256": "798a179de3659ffa113b11bdeab85415ca7ecba882a5f08bdfc74a52065b979f",
-      "image_sha256": "3bf302c5ca1f09c4558538d89331cbc51c1ff19696401d6720843a94b8369286",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "5febc917e1b0f0d90b697a6b3a7093e6ef60ff35e94d1f383af9b5e8f859455d",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     },
     {
       "file": "admin-storage.png",
@@ -3478,56 +4362,9 @@
         ]
       },
       "guide_sha256": "431c31480e022925ea86eb020e0a4e070116777845a67272288c71156713c963",
-      "image_sha256": "c58a40c483e21281b270528381af00eb485846a76b47e8ed24118dd40ef55f46",
-      "source_digest": "3de4b560eef7f34c6768a7de90a399a655ab72118b1091a7875024101296164a",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
-    },
-    {
-      "file": "case-session-admin-direct.png",
-      "edition": "admin",
-      "entry": "start-admin-dev.cmd",
-      "screen": "管理员版 › 网络出口 › 成员接入 › 直连管理端",
-      "annotation": {
-        "kind": "instruction",
-        "callouts": [
-          {
-            "number": 1,
-            "text": "成员可直接访问管理端地址时选择这条路线。",
-            "box": {
-              "x": 274,
-              "y": 399.1875,
-              "width": 557,
-              "height": 84.5
-            },
-            "badge": {
-              "x": 243,
-              "y": 396.1875,
-              "width": 26,
-              "height": 26
-            }
-          },
-          {
-            "number": 2,
-            "text": "复制直连接入码，交给成员在新建会话时使用。",
-            "box": {
-              "x": 1266,
-              "y": 694.6875,
-              "width": 113,
-              "height": 36
-            },
-            "badge": {
-              "x": 1235,
-              "y": 691.6875,
-              "width": 26,
-              "height": 26
-            }
-          }
-        ]
-      },
-      "guide_sha256": "3c4722da693d90337776852d552f797baa8bea8c29a3b63ed282e52b25eb4768",
-      "image_sha256": "6de57e5247bacd84b291fc3c31d9c55a99834fe3893a815726b528995fc76fce",
-      "source_digest": "a7e58646850093b19adea15e0f320eda5845c08decca99961fce749bec93ca82",
-      "base_commit": "fda23a5ebaa64cea2576dadccc0a747cad1600f5"
+      "image_sha256": "0f9d3b8ebf81c57ebb73b03163095b27ff0d1a904d704b923c8a1ab0acd9a68e",
+      "source_digest": "4e38cef0627497d266beae7c166a4eefe6519e3725c0385c95ebabea546edcb0",
+      "base_commit": "54bc8f32bb3916f1041f0cd85204d34b7b69d257"
     }
   ]
 }

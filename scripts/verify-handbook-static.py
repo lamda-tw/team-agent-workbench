@@ -91,7 +91,9 @@ def check(html, names, prefix):
         if link.startswith(('#', 'https://', 'http://', 'mailto:')):
             continue
         assert unquote(link.split('#')[0]).removeprefix(prefix) in names, f'Missing offline link: {link}'
-    assert '9552017' not in html and META.commit in html
+    baseline = (json.loads((ROOT / 'docs/handbook/revisions.json').read_text(encoding='utf-8'))['revisions'][-1]['base_commit']
+                if structure_match else META.commit)
+    assert '9552017' not in html and baseline in html
     return {'topics': len(articles), 'sections': sum(len(a['sections']) for a in articles),
             'navigation_targets': len(ids), 'internal_links': len(anchors), 'inline_images': len(inline_images)}
 

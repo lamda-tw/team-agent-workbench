@@ -20,7 +20,7 @@ const guides=JSON.parse(await fs.readFile(guideSource,'utf8'));
 const digest=createHash('sha256');
 async function hashTree(dir){for(const entry of (await fs.readdir(dir,{withFileTypes:true})).sort((a,b)=>a.name.localeCompare(b.name))){const file=path.join(dir,entry.name);if(entry.isDirectory())await hashTree(file);else{digest.update(path.relative(root,file));digest.update(await fs.readFile(file));}}}
 await hashTree(path.join(root,'src'));
-for(const file of [source,guideSource,path.join(root,'scripts/handbook-screen-annotations.mjs'),import.meta.filename,path.join(root,'scripts/handbook-ui-fixture.mjs'),path.join(root,'start-admin-dev.cmd'),path.join(root,'start-user-dev.cmd')])digest.update(await fs.readFile(file));
+for(const file of [source,guideSource,path.join(root,'package.json'),path.join(root,'scripts/handbook-screen-annotations.mjs'),import.meta.filename,path.join(root,'scripts/handbook-ui-fixture.mjs'),path.join(root,'scripts/handbook-question-fixture.mjs'),path.join(root,'scripts/handbook-activity-fixture.mjs'),path.join(root,'start-admin-dev.cmd'),path.join(root,'start-user-dev.cmd')])digest.update(await fs.readFile(file));
 const hash=digest.digest('hex');
 const filter=process.argv.find(a=>a.startsWith('--case='))?.slice(7);
 const stepFilter=Number(process.argv.find(a=>a.startsWith('--step='))?.slice(7)||0);
@@ -107,7 +107,7 @@ async function adminScene(page,data){
  }
  if(step===1&&paneIndex===1){await click(page,'创建项目组');await page.getByLabel('项目组名称',{exact:true}).fill('项目一组');}
  else if(step===1&&paneIndex===2){await page.getByRole('tab',{name:'按组查看',exact:true}).click();}
- else if(step===2&&paneIndex===1){const row=page.locator('tr').filter({hasText:'alice'});await row.getByRole('button',{name:'组与组管理员',exact:true}).click();}
+ else if(step===2&&paneIndex===1){const row=page.locator('tr').filter({hasText:'alice'});await row.getByRole('button',{name:'组与角色',exact:true}).click();}
  else if(step===2&&paneIndex===2){await page.getByRole('tab',{name:'按组查看',exact:true}).click();}
 }
 async function openSession(page){await page.locator('[data-session-id="work-session"]').click();await page.getByLabel('任务输入',{exact:true}).waitFor();}
@@ -147,6 +147,42 @@ async function userScene(page,data){
  if(await page.getByRole('heading',{name:'登录团队工作台',exact:true}).count())await page.locator('.modal').getByRole('button',{name:'取消',exact:true}).click();
  if(beforeProject){await page.getByRole('dialog',{name:'完善项目资料'}).waitFor();await page.getByLabel('引导项目名称').fill(data.project.name);for(const [label,key] of [['项目背景','background'],['项目目标','objectives'],['验收标准','acceptance']])await page.getByLabel(label,{exact:true}).fill(data.brief[key]);return;}
  await page.locator('[data-project-id="handbook-project"]').click();
+ if(id==='case-activity-recommendations'||pane.recommendation){
+  const recommendationStage=pane.recommendation||data.stage;
+  if(recommendationStage==='saved'){await openResults(page,'个人');await openContent(page,0);}
+  else{
+   await openSession(page);
+   await page.getByLabel('任务输入',{exact:true}).fill(data.snapshot.inputs[data.session.id].text);
+   if(recommendationStage==='choose'||recommendationStage==='choose-save'){
+    const panel=page.getByRole('region',{name:'本会话相关新动态'});
+    await panel.getByRole('button',{name:'查看',exact:true}).click();
+    const card=panel.locator('.activity-recommendation').first();
+    if(recommendationStage==='choose')await card.getByRole('checkbox',{name:'加入当前会话',exact:true}).check();
+    await card.getByRole('checkbox',{name:'存入个人成果库',exact:true}).check();
+   }
+  }
+  return;
+ }
+ if(id==='case-member-questions'){
+  if(data.stage==='received'){
+   await page.getByRole('button',{name:'团队动态',exact:true}).click();
+   await page.getByRole('region',{name:'提问动态'}).waitFor();
+  }else{
+   await openSession(page);
+   await click(page,'提问');
+   if(data.stage==='compose'){
+    await page.getByLabel('问题标题',{exact:true}).fill(data.question.title);
+    await page.getByLabel('需要补充什么',{exact:true}).fill(data.question.body);
+    await page.getByLabel('补充资料（可选）',{exact:true}).fill(data.question.context);
+    await click(page,'添加附件');
+    await page.getByRole('checkbox',{name:'Carol carol',exact:true}).check();
+   }else{
+    await page.locator('.team-question-card').filter({hasText:data.question.title}).click();
+    if(data.stage==='reply')await page.getByLabel('回复Bob',{exact:true}).fill('需要增加大输入样本。沿用本轮设备与代码版本，分别记录普通输入和大输入的耗时，并标明未验证项。');
+   }
+  }
+  return;
+ }
  if(id==='case-session-routes'){
   await page.getByTitle('新建会话',{exact:true}).click();
   if(data.stage==='management-direct'||data.stage==='management-shared'){
@@ -171,8 +207,11 @@ async function userScene(page,data){
    await page.getByRole('button',{name:'整理成果',exact:true}).click();
    const dialog=page.getByRole('dialog',{name:'整理成果',exact:true});
    await dialog.getByRole('button',{name:'开始整理对话',exact:true}).waitFor();
-   for(const checkbox of await dialog.locator('.preparation-category-choices input').all())await checkbox.uncheck();
+   await dialog.getByRole('heading',{name:'整理哪些方面',exact:true}).waitFor();
+   for(const checkbox of await dialog.locator('.preparation-category-choices input[type="checkbox"]').all())await checkbox.uncheck();
    await dialog.getByLabel('探索记录',{exact:false}).check();
+   await dialog.locator('.preparation-category-choice.selected summary').click();
+   await dialog.getByLabel('探索记录的整理方向',{exact:true}).fill('保留本轮的测试输入、设备、证据和适用范围；未验证的内容单独列出。');
   }
   return;
  }
@@ -215,7 +254,7 @@ try{
     const name=screenshotName(id,i,j,pane);
     if(!/^[a-z0-9-]+\.png$/.test(name))throw new Error(`Invalid screenshot filename: ${name}`);
     if(retryFiles&&!retryFiles.has(name))continue;
-    const page=await browser.newPage({viewport:{width:1440,height:1000},deviceScaleFactor:1,locale:'zh-CN',timezoneId:'Asia/Shanghai'});
+    const page=await browser.newPage({viewport:{width:1440,height:pane.captureHeight||1000},deviceScaleFactor:1,locale:'zh-CN',timezoneId:'Asia/Shanghai'});
     page.setDefaultTimeout(4000);const errors=[];page.on('pageerror',error=>errors.push(error.message));
     await page.addInitScript(installFixture,data);
     await page.context().setOffline(true);
@@ -231,7 +270,7 @@ try{
      let annotation;
      if(inventoryOnly)await saveInventory(page,name);
      else{annotation=await annotateScreenshot(page,guides[name]);await page.screenshot({path:path.join(out,name),animations:'disabled'});}
-     report.push({file:name,edition,entry:edition==='admin'?'start-admin-dev.cmd':'start-user-dev.cmd',screen:pane.screen,annotation,guide_sha256:createHash('sha256').update(JSON.stringify(guides[name])).digest('hex'),image_sha256:inventoryOnly?null:createHash('sha256').update(await fs.readFile(path.join(out,name))).digest('hex'),source_digest:hash,base_commit:execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim()});
+     report.push({file:name,edition,entry:edition==='admin'?'start-admin-dev.cmd':'start-user-dev.cmd',screen:pane.screen,viewport:page.viewportSize(),annotation,guide_sha256:createHash('sha256').update(JSON.stringify(guides[name])).digest('hex'),image_sha256:inventoryOnly?null:createHash('sha256').update(await fs.readFile(path.join(out,name))).digest('hex'),source_digest:hash,base_commit:execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim()});
      console.log(`Captured ${name}`);
     }catch(error){await page.screenshot({path:path.join(temp,'failure.png')});console.error('FAILED',name,error.message,'\nDOM:',(await page.locator('body').innerText()).slice(-5500),'\nErrors:',errors,'\nUnhandled:',await page.evaluate(()=>window.__handbook?.unhandled),'\nDebug:',temp);failures.push({file:name,error:error.message});if(!keepGoing)throw error;}
     finally{await page.close();}

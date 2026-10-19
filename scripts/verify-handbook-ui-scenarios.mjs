@@ -21,7 +21,8 @@ for (const capture of screenshotManifest.captures) {
     assert.deepEqual(capture.annotation.callouts.map(item => item.text), guide.callouts.map(item => item.text), `${capture.file} caption differs from its callouts`);
     for (const item of capture.annotation.callouts) {
       for (const box of [item.box, item.badge]) {
-        assert(box.x >= 0 && box.y >= 0 && box.x + box.width <= screenshotManifest.viewport.width + 1 && box.y + box.height <= screenshotManifest.viewport.height + 1, `${capture.file} has a clipped annotation`);
+        const viewport = capture.viewport || screenshotManifest.viewport;
+        assert(box.x >= 0 && box.y >= 0 && box.x + box.width <= viewport.width + 1 && box.y + box.height <= viewport.height + 1, `${capture.file} has a clipped annotation`);
       }
     }
   }

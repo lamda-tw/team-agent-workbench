@@ -10,6 +10,7 @@ SOURCE = ROOT / 'docs/user-guide.md'
 
 # One manifest drives HTML topics, ZIP Markdown files, and incremental inputs.
 RELATED = {
+    'project-groups.md': ('group-permissions', '项目组与权限'),
     'deployment-guide.md': ('deployment', '部署指导'),
     'network-egress.md': ('egress-reference', '管理端网络出口说明'),
     'result-classification.md': ('classification-reference', '个人成果分类与任务入口'),
@@ -54,7 +55,7 @@ def read_meta(source: Path = SOURCE) -> ManualMeta:
 
     return ManualMeta(
         version=field('文档版本', r'\d+\.\d+(?:\.\d+)?'),
-        software_version=field('适用软件版本', r'\S+'),
+        software_version=field('适用软件版本', r'[^\r\n]+'),
         commit=field('功能核对版本', r'[0-9a-f]{7,40}'),
         date=field('发布日期', r'\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日'),
     )

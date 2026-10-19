@@ -35,14 +35,16 @@ function reviewedDraft(binding: RemoteBinding): Draft {
 const result = (category: string, title: string, topic = '同一主题') => ({ category, topic, title, body: title + '的具体内容与验证边界。', origin: 'project', evidenceIds: ['message:m'] });
 const output = (artifacts: unknown[]) => JSON.stringify({ artifacts, sourceReview: { status: 'complete', inputCount: 1, conversationHash: 'a'.repeat(64) } });
 
-test('extraction keeps one result per category, preserves task details and rejects incomplete review or fabricated updates', () => {
+test('October 8 extraction preserves independent tasks up to 50 results and rejects incomplete review or fabricated updates', () => {
   const draft = reviewedDraft({ project: { id: 'p', remoteRoot: '/p', uploadPath: '/p/submissions/a', historyPath: '/p/trajectories/a' } } as RemoteBinding);
   const tasks = Array.from({length:9}, (_,i)=>'待办动作'+i).join('；');
   const artifacts = [result('exploration','词典增加召回也带来误匹配'), {...result('todo','待办动作列表'),body:tasks}];
   applyPreparation(draft,output(artifacts)); assert.equal(draft.artifacts!.length,2);
   assert.equal(draft.artifacts![1].resultStatus,'pending'); assert.match(draft.artifacts![1].body,/待办动作8/);
   assert.throws(()=>applyPreparation(draft,output([artifacts[0],artifacts[0]])),/每个勾选类别|重复/);
-  assert.throws(()=>applyPreparation(draft,output(Array.from({length:9},(_,i)=>result('todo','动作'+i)))),/每个勾选类别/);
+  applyPreparation(draft,output(Array.from({length:50},(_,i)=>result('todo','动作'+i))));
+  assert.equal(draft.artifacts!.length,50);
+  assert.throws(()=>applyPreparation(draft,output(Array.from({length:51},(_,i)=>result('todo','动作'+i)))),/最多 50 条/);
   assert.throws(() => applyPreparation(draft, JSON.stringify({ artifacts, sourceReview: { status: 'incomplete', explanation: '只读取了部分对话' } })), /完整读取/);
   assert.throws(() => applyPreparation(draft, output([{ ...result('capability', '批处理'), updateId: randomUUID() }])), /当前个人能力版本/);
   applyPreparation(draft, output([result('todo', '修复产品的代理连接失败问题')])); assert.equal(draft.artifacts!.length, 1, 'project defects are not dropped by environment keywords');

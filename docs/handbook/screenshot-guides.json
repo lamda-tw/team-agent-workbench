@@ -328,16 +328,16 @@
   },
   "case-personal-results-01-1.png": {
     "kind": "instruction",
-    "purpose": "Bob 核对团队成果并保存个人副本",
+    "purpose": "从相关动态推荐保存个人副本",
     "callouts": [
       {
-        "selector": ".content-detail > .markdown",
-        "text": "阅读团队成果的结论、证据与适用范围。",
-        "show_caption": false
+        "selector": ".activity-recommendation-actions",
+        "text": "只勾选存入个人成果库；需要用于当前对话时再勾选加入会话。",
+        "show_caption": true
       },
       {
-        "button": "存入个人成果库",
-        "text": "点击保存；后续在“个人”页管理这份副本。",
+        "button": "执行所选",
+        "text": "确认所选范围后保存副本。",
         "show_caption": false
       }
     ]
@@ -902,8 +902,8 @@
         "show_caption": false
       },
       {
-        "button": "组与组管理员",
-        "text": "在对应成员行设置所属工作组和项目组管理员身份。",
+        "button": "组与角色",
+        "text": "设置账号加入的项目组及组内权限。",
         "index": 0,
         "show_caption": true
       },
@@ -1051,18 +1051,17 @@
   },
   "example-05-2.png": {
     "kind": "instruction",
-    "purpose": "Bob 将个人副本用于自己的会话",
+    "purpose": "Bob 带入参考资料后继续复测",
     "callouts": [
       {
-        "summary": "资料来源（1）",
-        "text": "展开查看这份个人副本的来源与版本。",
-        "show_caption": false
+        "selector": ".source-chips",
+        "text": "已选入下一条消息的参考资料，发送时带给 AI。",
+        "show_caption": true
       },
       {
-        "text": "从“更多”进入“加入会话”，选择本次要使用成果的会话。",
-        "scope": ".result-card.is-expanded",
-        "show_caption": true,
-        "selector": ".result-more"
+        "field": "任务输入",
+        "text": "补充本轮复测要求，再发送任务。",
+        "show_caption": false
       }
     ]
   },
@@ -1084,17 +1083,21 @@
   },
   "example-04-2.png": {
     "kind": "instruction",
-    "purpose": "Bob 在 Alice 上传完成后查看团队动态",
+    "purpose": "Bob 查看与当前验证工作相关的新成果",
     "callouts": [
       {
-        "selector": ".update-feed > :first-child .update-entry-body",
-        "text": "同步或刷新后，核对 Alice 上传的成果标题和版本。",
+        "selector": ".activity-recommendation",
+        "text": "结合本会话工作内容，核对推荐理由和原文片段。",
         "show_caption": false
       },
       {
-        "button": "查看结果",
-        "text": "打开这一条动态对应的成果详情。",
-        "index": 0,
+        "selector": ".activity-recommendation-actions",
+        "text": "本例同时选择加入会话与保存个人副本。",
+        "show_caption": true
+      },
+      {
+        "button": "执行所选",
+        "text": "执行本次选中的操作。",
         "show_caption": false
       }
     ]
@@ -1117,21 +1120,27 @@
   },
   "example-03-2.png": {
     "kind": "instruction",
-    "purpose": "Alice 确认整理来源、类别并开始整理对话",
+    "purpose": "Alice 选择整理方面并补充整理要求",
     "callouts": [
       {
         "selector": ".preparation-intro",
-        "text": "确认来源为“格式 A 验证”，本次整理读取这段会话。",
+        "text": "核对来源会话及本次读取的消息数量。",
         "show_caption": false
       },
       {
-        "selector": ".preparation-category-choices",
-        "text": "本例只选“探索记录”，保留本轮实验的观察、依据和适用范围。",
+        "selector": ".preparation-category-toggle",
+        "index": 1,
+        "text": "本例勾选探索记录，也可同时选择其他整理方面。",
+        "show_caption": false
+      },
+      {
+        "field": "探索记录的整理方向",
+        "text": "每类独立填写整理要求，留空使用默认提示词。",
         "show_caption": true
       },
       {
         "button": "开始整理对话",
-        "text": "点击后等待整理完成，再打开生成的成果核对内容。",
+        "text": "确认类别和要求后开始整理。",
         "show_caption": false
       }
     ]
@@ -1198,6 +1207,185 @@
         "button": "复制接入码",
         "text": "复制直连接入码，交给成员在新建会话时使用。",
         "show_caption": false
+      }
+    ]
+  },
+  "case-member-questions-compose.png": {
+    "kind": "instruction",
+    "purpose": "填写问题并选择接收成员",
+    "callouts": [
+      {
+        "text": "写清需要对方确认的范围。",
+        "show_caption": false,
+        "selector": ".team-question-compose textarea",
+        "index": 0
+      },
+      {
+        "selector": ".team-question-attachments",
+        "text": "附上本次问题需要的资料。",
+        "show_caption": false
+      },
+      {
+        "button": "发送提问（1 人）",
+        "text": "选择 Carol，再发送问题。",
+        "show_caption": false
+      }
+    ]
+  },
+  "case-member-questions-received.png": {
+    "kind": "instruction",
+    "purpose": "从团队动态查看问题",
+    "callouts": [
+      {
+        "selector": ".team-question-card",
+        "text": "点击问题卡片，阅读问题和资料。",
+        "show_caption": false
+      }
+    ]
+  },
+  "case-member-questions-reply.png": {
+    "kind": "instruction",
+    "purpose": "直接发送答复",
+    "callouts": [
+      {
+        "selector": ".team-question-detail-scroll > .team-question-files",
+        "text": "可预览或下载随问题发送的资料。",
+        "show_caption": true
+      },
+      {
+        "field": "回复Bob",
+        "text": "填写答复后点击发送。",
+        "show_caption": false
+      },
+      {
+        "button": "发送",
+        "text": "将答复发给 Bob。",
+        "show_caption": false
+      }
+    ]
+  },
+  "case-member-questions-imported.png": {
+    "kind": "instruction",
+    "purpose": "采用已收到的答复",
+    "callouts": [
+      {
+        "selector": ".team-question-import",
+        "text": "引入后，正文出现在 Bob 的工作会话中。",
+        "show_caption": true
+      },
+      {
+        "selector": ".message.user",
+        "index": 1,
+        "text": "核对会话中的答复内容。",
+        "show_caption": false
+      }
+    ]
+  },
+  "case-member-questions-receiver-auto.png": {
+    "kind": "instruction",
+    "purpose": "由自己的会话自动回答",
+    "callouts": [
+      {
+        "selector": ".session-toolbar h2",
+        "text": "当前会话用于回答 Bob 的问题。",
+        "show_caption": true
+      },
+      {
+        "button": "停止自动",
+        "text": "自动期间输入框锁定；需要手动回复时点击停止自动。",
+        "show_caption": true
+      }
+    ]
+  },
+  "case-member-questions-author-auto.png": {
+    "kind": "instruction",
+    "purpose": "发问人与指定成员自动往返",
+    "callouts": [
+      {
+        "selector": ".team-question-lane-head",
+        "text": "Bob 当前只与 Carol 自动往返。",
+        "show_caption": true
+      },
+      {
+        "button": "停止自动",
+        "text": "停止自动后可恢复手动沟通。",
+        "show_caption": false
+      }
+    ]
+  },
+  "case-member-questions-closed.png": {
+    "kind": "instruction",
+    "purpose": "确认提问结束状态",
+    "callouts": [
+      {
+        "selector": ".team-question-detail .callout",
+        "text": "结束后保留历史往来，不再接收新答复。",
+        "show_caption": true
+      }
+    ]
+  },
+  "case-activity-recommendations-notice.png": {
+    "kind": "instruction",
+    "purpose": "从工作会话查看相关动态",
+    "callouts": [
+      {
+        "selector": ".activity-recommendations-heading",
+        "text": "当前轮次结束后，在输入框上方查看新推荐。",
+        "show_caption": true
+      },
+      {
+        "button": "查看",
+        "scope": ".activity-recommendations",
+        "text": "展开推荐，输入草稿继续保留。",
+        "show_caption": false
+      }
+    ]
+  },
+  "case-activity-recommendations-choose.png": {
+    "kind": "instruction",
+    "purpose": "核对推荐后选择采用方式",
+    "callouts": [
+      {
+        "selector": ".activity-recommendation",
+        "text": "先核对关联理由和原文片段。",
+        "show_caption": false
+      },
+      {
+        "selector": ".activity-recommendation-actions",
+        "text": "本例同时加入当前会话并保存个人副本；也可只选其中一项。",
+        "show_caption": true
+      },
+      {
+        "button": "执行所选",
+        "text": "确认后执行所选操作。",
+        "show_caption": false
+      }
+    ]
+  },
+  "case-activity-recommendations-attached.png": {
+    "kind": "instruction",
+    "purpose": "核对待发送的成果引用",
+    "callouts": [
+      {
+        "selector": ".source-chips",
+        "text": "成果已选入下一条消息，发送时带给 AI。",
+        "show_caption": true
+      },
+      {
+        "field": "任务输入",
+        "text": "原输入保留，可继续修改后发送。",
+        "show_caption": false
+      }
+    ]
+  },
+  "case-activity-recommendations-saved.png": {
+    "kind": "instruction",
+    "purpose": "查看个人成果库中的副本",
+    "callouts": [
+      {
+        "selector": ".result-card.is-expanded",
+        "text": "本例同时选择了存库，因此个人库中也有一份副本。",
+        "show_caption": true
       }
     ]
   }

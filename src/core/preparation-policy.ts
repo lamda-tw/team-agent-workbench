@@ -4,7 +4,6 @@ import { contributionCategoryFields, contributionCategorySchema, contributionTit
 import type { Draft, DraftArtifact } from '../shared/types';
 import type { EmptyPreparationResult } from '../shared/preparation-review';
 import { assertReadableResultText } from '../shared/result-reading';
-import { preparationCategoryResultLimit } from '../shared/result-rules';
 
 export const preparedResultSchema = z.object({
   category: contributionCategorySchema, topic: z.string().trim().min(1).max(100),
@@ -27,15 +26,12 @@ const normalized = (text: string) => text.normalize('NFKC').toLocaleLowerCase().
 
 export function reviewPreparedResults(draft: Draft, raw: unknown) {
   const modern = draft.resultRules?.contract === 4;
-  const limit = modern ? Math.max(new Set(draft.resultRules?.categories || []).size, 1) * preparationCategoryResultLimit : 5;
   const parsed = z.object({
-    artifacts: z.array(preparedResultSchema).max(limit),
+    artifacts: z.array(preparedResultSchema).max(modern ? 50 : 5),
     sourceReview: z.object({ status: z.enum(['complete', 'incomplete']), inputCount: z.number().int().nonnegative().optional(), conversationHash: z.string().optional(), explanation: z.string().max(600).optional() }).optional(),
     emptyReason: z.object({ code: z.enum(['already_saved', 'no_reusable_content', 'no_matching_category']), explanation: z.string().trim().min(1).max(600), existingResultIds: z.array(z.string()).max(100).default([]) }).optional()
   }).safeParse(raw);
-  if (!parsed.success) throw new Error(modern
-    ? `每个勾选类别最多生成 ${preparationCategoryResultLimit} 条成果。请把超出的同一类别收拢到 ${preparationCategoryResultLimit} 条内后重试；标题不超过 40 字，正文不超过 500 字，并保留主题和来源。`
-    : '整理结果不符合精简规则（最多 5 条，条数超限或缺少主题、来源；每条标题不超过 40 字、正文不超过 500 字），请重试整理');
+  if (!parsed.success) throw new Error(`整理结果不符合精简规则（最多 ${modern ? 50 : 5} 条，条数超限或缺少主题、来源；每条标题不超过 40 字、正文不超过 500 字），请重试整理`);
   if ((draft.resultRules?.contract || 0) >= 3) {
     const review = parsed.data.sourceReview;
     if (!review || review.status !== 'complete') throw new Error('未能完整读取本次材料，不能判断是否有新成果。' + (review?.explanation || '请重试整理。'));
@@ -43,7 +39,7 @@ export function reviewPreparedResults(draft: Draft, raw: unknown) {
     if (!parsed.data.artifacts.length && !parsed.data.emptyReason) throw new Error('AI 返回了空结果，但未说明原因，请重试整理');
   }
   const categories = new Set(draft.resultRules!.categories), evidence = new Set(draft.preparationEvidenceIds || []);
-  const topics = new Set<string>(), titles = new Set<string>(), bodies = new Set<string>(), categoryCounts = new Map<string, number>();
+  const topics = new Set<string>(), titles = new Set<string>(), bodies = new Set<string>();
   const results: z.infer<typeof preparedResultSchema>[] = [];
   for (const item of parsed.data.artifacts) {
     if (item.origin === 'local_environment' || !modern && containsLocalEnvironmentError([item.topic, item.title, item.body, item.sourceDetails].filter(Boolean).join('\n'))) continue;
@@ -55,11 +51,6 @@ export function reviewPreparedResults(draft: Draft, raw: unknown) {
     if (item.body.split(/\n\s*\n/).length > 3) throw new Error('成果正文超过三段，请重新精简整理');
     const topic = (modern ? item.category + ':' : '') + normalized(item.topic) + (modern && item.category === 'todo' ? ':' + normalized(item.title) : ''), title = (modern ? item.category + ':' : '') + normalized(item.title), body = normalized(item.body);
     if (!topic || topics.has(topic) || titles.has(title) || bodies.has(body)) throw new Error('同一主题被重复整理，请合为一条后重试');
-    if (modern) {
-      const count = (categoryCounts.get(item.category) || 0) + 1;
-      if (count > preparationCategoryResultLimit) throw new Error(`每个勾选类别最多生成 ${preparationCategoryResultLimit} 条成果，请把超出的同一类别收拢到 ${preparationCategoryResultLimit} 条内后重试`);
-      categoryCounts.set(item.category, count);
-    }
     topics.add(topic); titles.add(title); bodies.add(body); results.push(item);
   }
   let emptyResult: EmptyPreparationResult | undefined;

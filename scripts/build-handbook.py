@@ -14,7 +14,8 @@ ROOT=Path(__file__).resolve().parents[1]
 @lru_cache(maxsize=1)
 def read_meta():
  commit=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip()
- return replace(read_source_meta(),commit=commit,date=datetime.now().strftime('%Y 年 %m 月 %d 日'))
+ version=json.loads((ROOT/'package.json').read_text(encoding='utf-8'))['version']
+ return replace(read_source_meta(),commit=commit,software_version=version,date=datetime.now().strftime('%Y 年 %m 月 %d 日'))
 DOCS=ROOT/'docs'
 WEB=DOCS/'handbook'
 STRUCTURE=json.loads((WEB/'structure.json').read_text(encoding='utf-8'))
@@ -150,16 +151,35 @@ def heading(identifier,title,level='h2'):
 def beta_features_page():
  title='Beta 功能'
  sections=[
-  ('beta-open','开启跨会话引用','用户版顶部点击 Beta 功能，开启“跨会话引用阶段摘要”。开关按当前团队账号保存在本机，默认关闭。'),
+  ('beta-open','开启跨会话引用','用户版顶部点击 Beta 功能，开启“跨会话引用”。开关按当前团队账号保存在本机，默认关闭。'),
   ('beta-use','引用另一段会话的摘要','先在来源会话的“AI 参考内容 → 查看阶段摘要”核对或更正摘要。打开同一项目的目标会话，在输入区点击“引用会话摘要”，预览后点击“加入当前会话”。确认参考资料已选中，填写本轮要求并发送。'),
   ('beta-scope','使用范围与共享','只能引用同一团队账号、同一项目在本机保存的其他工作会话。加入摘要后不会立即发送给 AI；发送下一条消息时才会带入。摘要不自动同步给团队，也不作为团队成果上传。引用摘要会关闭目标会话的轨迹自动上传；如需共享轨迹，请先核对并手动上传。'),
   ('beta-close','关闭 Beta 功能','回到顶部“Beta 功能”关闭开关。关闭后隐藏新增引用入口，已加入会话的摘要仍保留；发送前可从输入区参考资料中移除。')]
- body='<p class="read-first">试用功能统一从用户版顶部的“Beta 功能”进入。当前提供“跨会话引用阶段摘要”，用于把自己在同一项目的工作进展带入另一段会话。</p>'
+ sections.extend([
+  ('beta-subsession','创建 Subsession','开启“Subsession”后，从工作会话顶部点击“创建 Subsession”，将子任务放入独立会话。子会话的回报经本人查看并选入后，才会发送给父会话的 AI。关闭开关后停止提供新增入口，已有子会话和回报保留。'),
+  ('beta-codex-desktop','联动 Codex 桌面版','开启“Codex 桌面联动”，在新建 Codex 会话时勾选“联动 Codex 桌面版”。首次发送会启动或复用后台；需要原生界面时点击“在 Codex 中打开”。两端轮流发送，保留同一会话的上下文。当前支持本机网络；首次启用前，保存工作并退出正在普通方式运行的 Codex。'),
+  ('beta-cursor-native','联动 Cursor 原生会话','开启“Cursor 原生联动”，从“接入 Cursor 会话”选择原生会话。保留普通 IDE 窗口；需要返回对应聊天时点击“在 Cursor 中打开”。后续消息等待前一轮结束，模型、模式和权限在两端同步，工具和授权在 Cursor 中处理。独立 Agents 窗口暂不关联。')])
+ body='<p class="read-first">从用户版顶部的“Beta 功能”分别开启跨会话引用、Subsession 和桌面联动。开关按当前团队账号保存在本机。</p>'
  body+=''.join(heading(identifier,name)+'<p>'+html.escape(description)+'</p>' for identifier,name,description in sections)
  return {'id':'beta-features','title':title,'group':GROUPS['beta-features'],'html':body,
          'headings':[{'id':identifier,'title':name,'level':'h2'} for identifier,name,_ in sections],
          'sections':[{'id':identifier,'title':name,'text':description} for identifier,name,description in sections],
          'text':' '.join([title,*(description for _,_,description in sections)])}
+
+def questions_page():
+ spec=STRUCTURE['questions']
+ body='<p class="read-first">'+scenario_inline(spec['intro'])+'</p>'
+ headings=[];sections=[]
+ for section in spec['sections']:
+  body+=heading(section['id'],section['title'])
+  body+=''.join('<p>'+scenario_inline(text)+'</p>' for text in section.get('paragraphs',[]))
+  if section.get('steps'):
+   body+='<ol>'+''.join('<li>'+scenario_inline(text)+'</li>' for text in section['steps'])+'</ol>'
+  if section.get('notes'): body+=render_notes(section['notes'],scenario_inline)
+  headings.append({'id':section['id'],'title':section['title'],'level':'h2'})
+  sections.append({'id':section['id'],'title':section['title'],'text':' '.join(section.get('paragraphs',[])+section.get('steps',[])+section.get('notes',[]))})
+ return {'id':spec['id'],'title':spec['title'],'group':GROUPS[spec['id']],'html':body,
+         'headings':headings,'sections':sections,'text':spec['intro']+' '+' '.join(s['text'] for s in sections)}
 
 def quickstart_page(spec):
  steps=[]
@@ -334,6 +354,8 @@ def main(capture_ui=True):
   DESTINATION_TITLES[case['id']]=case['title']
   for supplement in case.get('supplements',[]): DESTINATION_TITLES[supplement['id']]=supplement['title']
  DESTINATION_TITLES['beta-features']='Beta 功能'
+ DESTINATION_TITLES['questions']=STRUCTURE['questions']['title']
+ DESTINATION_TITLES.update({s['id']:s['title'] for s in STRUCTURE['questions']['sections']})
  DESTINATION_TITLES.update({'common-actions':'常用操作','complete-task-index':'按任务查找',
                             'egress-path':EGRESS_PATH_TITLE,
                             'egress-scenarios':'查看接入管理端的操作教程'})
@@ -361,11 +383,14 @@ def main(capture_ui=True):
  articles.extend(quickstart_page(spec) for spec in STRUCTURE['quickstarts'])
  articles.extend(use_case_page(spec) for spec in STRUCTURE['use_cases'])
  articles.append(beta_features_page())
+ articles.append(questions_page())
  article_by_id={article['id']:article for article in articles}
  if len(article_by_id)!=len(articles): raise ValueError('Duplicate handbook page ID')
  if set(article_by_id)!=set(PAGE_ORDER):
   raise ValueError(f'Handbook structure mismatch: missing={set(article_by_id)-set(PAGE_ORDER)}, extra={set(PAGE_ORDER)-set(article_by_id)}')
  enrich_home(article_by_id['start'])
+ add_related(article_by_id['sessions'],'向项目组成员请教与接收答复：',['questions','case-member-questions'])
+ add_related(article_by_id['activity'],'接收和回复成员提问：',['questions-reply','case-member-questions'])
  add_related(article_by_id['sessions'],'跨会话引用的开关和操作：',['beta-features'])
  enrich_algorithm_example(article_by_id['example'])
  enrich_gateway(article_by_id['gateway'])
@@ -375,7 +400,7 @@ def main(capture_ui=True):
   +article_by_id['deployment']['html'])
  article_by_id['deployment']['text']+=' 团队 SSH/SFTP 共享服务器中转 管理端反向隧道 Codex Cursor'
  add_related(article_by_id['conclusions'],'成果分类的设置与使用细节：',['classification-reference-topic-1'])
- add_related(article_by_id['tasks'],'任务入口及文件的详细边界：',['classification-reference-topic-5','classification-reference-topic-6'])
+ add_related(article_by_id['tasks'],'任务入口及文件的详细边界：',['classification-reference-tasks','classification-reference-task-files'])
  add_related(article_by_id['people'],'首次启用团队服务器，按界面完成：',['case-team-setup'])
  add_related(article_by_id['deployment'],'首次部署操作示例：',['case-team-setup'])
  add_related(article_by_id['egress-reference'],'按界面操作：',['section-14-1','section-14-2'])

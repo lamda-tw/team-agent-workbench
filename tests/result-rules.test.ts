@@ -71,7 +71,7 @@ test('merge uses the same boundaries, at most one result, and supports an empty 
   applyContentMerge(value, output()); assert.equal(value.body, ''); assert.equal(value.mergeSources[0].revision, 1);
 });
 
-test('automatic preparation writes one project profile and rejects a second result', () => {
+test('legacy project-profile drafts still accept their saved format without changing category preparation', () => {
   const value = draft();
   value.organizationFormat = 'project-profile-v1';
   value.resultRules = { contract: 4, categories: ['capability', 'exploration', 'todo'] };

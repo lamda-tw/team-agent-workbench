@@ -20,9 +20,6 @@ export const projectOrganizationSchema = z.object({
 });
 export type ProjectOrganization = z.infer<typeof projectOrganizationSchema>;
 
-export const organizationEditedMessage = '这个项目的整理结果已经由人改过，不能再自动整理。';
-export const organizationExistsMessage = '这个项目已经整理出一条结果。人还没改过时，请在那一条上再次整理。';
-
 export function assertOneProjectSentence(value: string) {
   const text = value.trim();
   if (/[\u0000-\u001f]/.test(text)) throw new Error('项目说明不能包含控制字符');
@@ -106,10 +103,4 @@ export function isProjectOrganizationDraft(draft: { organizationFormat?: string;
   // project profiles by their actual fields, never by that shared version alone.
   const fields=draft.artifacts?.length===1?draft.artifacts[0].fields:undefined;
   return draft.resultRules?.contract===4 && !!fields && projectOrganizationFields.every(field=>typeof fields[field.key]==='string');
-}
-
-export function organizationRefusal(drafts: readonly OrganizationDraftRef[], projectId: string, resumeId?: string) {
-  const related = drafts.filter(item => item.binding?.project.id === projectId && isProjectOrganizationDraft(item));
-  if (related.some(item => item.organizationEdited)) return organizationEditedMessage;
-  if (!resumeId && related.some(item => !item.submitted && item.generation !== 'canceled' && item.generation !== 'error')) return organizationExistsMessage;
 }

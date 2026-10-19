@@ -203,7 +203,7 @@
       },
       {
         "title": "完成本轮验证后，Alice 整理会话成果",
-        "instruction": "Alice 检查格式 A 的实际产物与测试日志，确认结论有证据后，在会话右上角点击“整理成果”。弹窗中确认来源会话，勾选“探索记录”，点击“开始整理对话”。Bob 同时继续自己的格式 B 实验。",
+        "instruction": "Alice 检查格式 A 的实际产物与测试日志，确认结论有证据后，在该工作会话顶部点击“整理成果”。首次整理读取这段会话的全部消息。Alice 本次勾选“探索记录”，展开“补充整理要求（选填）”，填写要保留的测试条件与验证边界，再点击“开始整理对话”。Bob 同时继续自己的格式 B 实验。",
         "result": "整理完成后，Alice 在“成果整理”打开待核对记录，再执行下一步上传。",
         "panes": [
           {
@@ -236,20 +236,20 @@
           {
             "actor": "Alice · 项目组管理员",
             "screen": "工作会话 › 整理选项",
-            "heading": "Alice 确认整理来源、类别并开始整理对话",
-            "status": "确认本次整理选项",
+            "heading": "Alice 选择整理方面并补充整理要求",
+            "status": "已选择探索记录并填写方向",
             "rows": [
               [
                 "来源会话",
                 "格式 A 验证"
               ],
               [
-                "本次成果分类",
-                "探索记录"
+                "整理方面",
+                "本例选择探索记录"
               ],
               [
-                "整理方式",
-                "首次整理整个会话"
+                "补充要求",
+                "保留输入、设备、证据和适用范围"
               ]
             ],
             "action": "开始整理对话",
@@ -260,11 +260,14 @@
             },
             "stage": "prepare"
           }
+        ],
+        "notes": [
+          "整理方面可选“已有能力、探索记录、待办事项”，每类均可填写独立的整理方向；留空使用默认提示词。整理结果可人工编辑，也可从原记录再次选择范围与方向整理。"
         ]
       },
       {
-        "title": "Alice 核对并上传，Bob 打开新成果",
-        "instruction": "Alice 打开整理记录，补全结论、输入、设备、代码版本和适用范围，勾选要分享的条目，点击“提交到 量化转换项目”。上传完成后，Bob 刷新“团队动态”，在 Alice 的更新中点击“查看结果”。",
+        "title": "Alice 发布成果，Bob 查看相关动态",
+        "instruction": "Alice 在整理记录中核对标题、正文、分类与附件，点击“提交到 量化转换项目”。上传完成后，Bob 的“格式 B 验证”会话结合自己的阶段摘要判断新成果的关联；本例出现了相关推荐，Bob 在输入框上方点击“查看”，核对理由与原文。",
         "result": "",
         "panes": [
           {
@@ -296,8 +299,8 @@
           },
           {
             "actor": "Bob · 项目组成员",
-            "screen": "团队动态 › 待处理",
-            "status": "上传完成并同步后",
+            "screen": "工作会话 › 格式 B 验证 › 相关动态",
+            "status": "待确认采用方式",
             "rows": [
               [
                 "新动态",
@@ -312,26 +315,30 @@
                 "先打开结果核对证据"
               ]
             ],
-            "action": "查看结果",
+            "action": "执行所选",
             "image": "example-04-2.png",
             "capture": {
               "step": 4,
               "pane": 2
             },
             "stage": "publish",
-            "heading": "Bob 在 Alice 上传完成后查看团队动态"
+            "heading": "Bob 在当前会话核对新成果的推荐",
+            "recommendation": "choose"
           }
+        ],
+        "notes": [
+          "推荐按各会话的工作内容分别判断；未出现推荐时，从“团队动态”查看已上传的成果。推荐出现的时机与选择方法见[发现并采用相关动态](#case-activity-recommendations)。"
         ]
       },
       {
         "title": "Bob 采用结论、完成复测并回传结果",
-        "instruction": "Bob 将 Alice 的结论作为对照，验证格式 B 在相同条件下的表现。",
+        "instruction": "Bob 在推荐面板中同时勾选“加入当前会话”和“存入个人成果库”，点击“执行所选”。输入区出现成果引用，个人库也保存了一份副本；Bob 随后继续验证并回传结果。",
         "result": "上传完成后，Alice 可从团队动态打开 Bob 的“格式 B 大输入性能反例”，继续核对和复测。",
         "panes": [
           {
             "actor": "Bob · 项目组成员",
-            "screen": "项目成果库 › 个人 › 格式 A 验证结论",
-            "status": "个人副本",
+            "screen": "工作会话 › 格式 B 验证 › 待发送的成果引用",
+            "status": "已加入待发送资料",
             "rows": [
               [
                 "来源",
@@ -346,14 +353,16 @@
                 "下一次提问"
               ]
             ],
-            "action": "加入会话",
+            "action": "发送任务",
             "image": "example-05-2.png",
             "capture": {
               "step": 5,
               "pane": 2
             },
             "stage": "adopt",
-            "heading": "Bob 将个人副本用于自己的会话"
+            "heading": "Bob 带入新参考资料后继续验证",
+            "recommendation": "attached",
+            "recommendationInput": "请按共同口径比较格式 A 和格式 B，记录输入规模、设备与代码版本。"
           },
           {
             "actor": "Bob · 项目组成员",
@@ -384,9 +393,9 @@
           }
         ],
         "actions": [
-          "在打开的成果详情点击“存入个人成果库”；进入“项目成果库 → 个人”，打开这份副本，点击“加入会话”，选择“格式 B 验证”并确认。",
-          "回到“格式 B 验证”会话，要求 AI 按共同口径比较两种格式。Bob 运行测试并检查日志，本例发现大输入下格式 B 更快，记录输入规模、设备与代码版本。",
-          "在该会话点击“整理成果”，选择“探索记录”并开始整理；完成后核对草稿中的差异、证据和限制，点击“提交到 量化转换项目”。"
+          "回到“格式 B 验证”会话，核对待发送的成果引用，填写共同测试口径后发送；AI 本轮会使用所选成果作为参考。",
+          "Bob 运行测试并检查日志，本例发现大输入下格式 B 更快，记录输入规模、设备和代码版本。",
+          "在该会话点击“整理成果”，选择“探索记录”，按需补充该类整理方向后开始；完成后核对草稿中的差异、证据、限制与附件，点击“提交到 量化转换项目”。"
         ]
       },
       {
@@ -448,12 +457,15 @@
             "stage": "retest",
             "heading": "Alice 带着双方的证据继续复测"
           }
+        ],
+        "notes": [
+          "本例 Alice 先保留个人副本，再带入会话。若在当前会话的相关动态面板中采用反例，可分别勾选“加入当前会话”和“存入个人成果库”，执行后继续复测。"
         ]
       },
       {
         "title": "汇总双方证据，发布共同结论",
         "instruction": "Alice 在“项目成果库 → 团队”点击“合并整理”，选中双方成果和同项目工作会话，开始生成综合结果。完成后在“成果整理”核对共识、分歧和适用范围，修改内容并确认保存。Bob 刷新动态，打开综合结果查看。",
-        "result": "综合结果记录两条来源及版本；Alice 按需将原成果移入历史，Bob 可查看团队新版本。",
+        "result": "综合成果记录两条来源及版本。上传完成后形成新的团队动态，Bob 的会话按自身摘要判断关联；采用综合成果后，已有的来源引用仍保留原版本。",
         "panes": [
           {
             "actor": "Alice · 项目组管理员",
@@ -734,13 +746,13 @@
     "caption": "Bob 管理仅自己可见并随账号同步的个人成果",
     "steps": [
       {
-        "title": "从团队成果保存个人副本",
+        "title": "从相关动态推荐保存个人副本",
         "result": "",
         "panes": [
           {
             "actor": "Bob · 项目组成员",
-            "screen": "团队动态 › 动态结果 › 格式 A 验证结论",
-            "status": "已核对 v1",
+            "screen": "工作会话 › 相关动态",
+            "status": "已选择存库",
             "rows": [
               [
                 "来源",
@@ -755,13 +767,14 @@
                 "Bob 的个人成果"
               ]
             ],
-            "action": "存入个人成果库",
+            "action": "执行所选",
             "image": "case-personal-results-01-1.png",
             "capture": {
               "step": 1,
               "pane": 1
             },
-            "heading": "Bob 核对团队成果并保存个人副本"
+            "heading": "Bob 从推荐中只保存个人副本",
+            "recommendation": "choose-save"
           }
         ]
       },
@@ -1644,7 +1657,7 @@
         ]
       },
       {
-        "title": "Alice 验收任务并查看共享结果",
+        "title": "Alice 验收任务并采用共享成果",
         "result": "",
         "panes": [
           {
@@ -1852,5 +1865,220 @@
       }
     ],
     "page": "case-session-routes"
+  },
+  "case-member-questions": {
+    "caption": "向成员提问并采用答复",
+    "steps": [
+      {
+        "title": "Bob 发出问题并附上样本清单",
+        "panes": [
+          {
+            "actor": "Bob · 项目组成员",
+            "stage": "compose",
+            "screen": "用户版 › 工作会话 › 提问",
+            "status": "开放",
+            "rows": [
+              [
+                "问题",
+                "确认本轮验证范围"
+              ]
+            ],
+            "action": "查看提问",
+            "image": "case-member-questions-compose.png",
+            "heading": "Bob 填写问题、资料和接收人"
+          }
+        ]
+      },
+      {
+        "title": "Carol 查看问题并直接回复",
+        "panes": [
+          {
+            "actor": "Carol · 项目组成员",
+            "stage": "received",
+            "screen": "用户版 › 团队动态 › 提问动态",
+            "status": "开放",
+            "rows": [
+              [
+                "问题",
+                "确认本轮验证范围"
+              ]
+            ],
+            "action": "查看提问",
+            "image": "case-member-questions-received.png",
+            "heading": "Carol 从团队动态查看新问题"
+          },
+          {
+            "actor": "Carol · 项目组成员",
+            "stage": "reply",
+            "screen": "用户版 › 工作会话 › 提问",
+            "status": "开放",
+            "rows": [
+              [
+                "问题",
+                "确认本轮验证范围"
+              ]
+            ],
+            "action": "查看提问",
+            "image": "case-member-questions-reply.png",
+            "heading": "Carol 阅读问题后直接回复"
+          }
+        ]
+      },
+      {
+        "title": "Bob 采用答复继续工作",
+        "panes": [
+          {
+            "actor": "Bob · 项目组成员",
+            "stage": "imported",
+            "screen": "用户版 › 工作会话 › 提问",
+            "status": "开放",
+            "rows": [
+              [
+                "问题",
+                "确认本轮验证范围"
+              ]
+            ],
+            "action": "查看提问",
+            "image": "case-member-questions-imported.png",
+            "heading": "Bob 把 Carol 的答复引入工作会话"
+          }
+        ]
+      },
+      {
+        "title": "双方开启 AI 自动往返（可选）",
+        "panes": [
+          {
+            "actor": "Carol · 项目组成员",
+            "stage": "receiver-auto",
+            "screen": "用户版 › 工作会话 › 提问",
+            "status": "开放",
+            "rows": [
+              [
+                "问题",
+                "确认本轮验证范围"
+              ]
+            ],
+            "action": "查看提问",
+            "image": "case-member-questions-receiver-auto.png",
+            "heading": "Carol 的工作会话自动回答新问题"
+          },
+          {
+            "actor": "Bob · 项目组成员",
+            "stage": "author-auto",
+            "screen": "用户版 › 工作会话 › 提问",
+            "status": "开放",
+            "rows": [
+              [
+                "问题",
+                "确认本轮验证范围"
+              ]
+            ],
+            "action": "查看提问",
+            "image": "case-member-questions-author-auto.png",
+            "heading": "Bob 的工作会话继续与 Carol 自动往返"
+          }
+        ]
+      },
+      {
+        "title": "确认信息后结束提问",
+        "panes": [
+          {
+            "actor": "Bob · 项目组成员",
+            "stage": "closed",
+            "screen": "用户版 › 工作会话 › 提问",
+            "status": "已关闭",
+            "rows": [
+              [
+                "问题",
+                "确认本轮验证范围"
+              ]
+            ],
+            "action": "查看提问",
+            "image": "case-member-questions-closed.png",
+            "heading": "提问结束，工作会话保留"
+          }
+        ]
+      }
+    ]
+  },
+  "case-activity-recommendations": {
+    "caption": "发现并采用相关动态",
+    "steps": [
+      {
+        "title": "本轮结束后查看推荐入口",
+        "panes": [
+          {
+            "actor": "Bob · 项目组成员",
+            "stage": "notice",
+            "screen": "用户版 › 工作会话 › 相关动态",
+            "status": "待采用",
+            "rows": [
+              [
+                "成果",
+                "格式 A 验证结论"
+              ]
+            ],
+            "action": "核对并采用",
+            "image": "case-activity-recommendations-notice.png",
+            "heading": "输入框上方出现相关动态入口"
+          }
+        ]
+      },
+      {
+        "title": "阅读理由并选择采用方式",
+        "panes": [
+          {
+            "actor": "Bob · 项目组成员",
+            "stage": "choose",
+            "screen": "用户版 › 工作会话 › 相关动态",
+            "status": "待采用",
+            "rows": [
+              [
+                "成果",
+                "格式 A 验证结论"
+              ]
+            ],
+            "action": "核对并采用",
+            "image": "case-activity-recommendations-choose.png",
+            "heading": "核对推荐依据，并分别选择加入会话或存库"
+          }
+        ]
+      },
+      {
+        "title": "核对会话引用和个人副本",
+        "panes": [
+          {
+            "actor": "Bob · 项目组成员",
+            "stage": "attached",
+            "screen": "用户版 › 工作会话 › 相关动态",
+            "status": "已采用",
+            "rows": [
+              [
+                "成果",
+                "格式 A 验证结论"
+              ]
+            ],
+            "action": "核对并采用",
+            "image": "case-activity-recommendations-attached.png",
+            "heading": "Bob 核对下一条消息将引用的成果"
+          },
+          {
+            "actor": "Bob · 项目组成员",
+            "stage": "saved",
+            "screen": "用户版 › 个人成果库",
+            "status": "已采用",
+            "rows": [
+              [
+                "成果",
+                "格式 A 验证结论"
+              ]
+            ],
+            "action": "核对并采用",
+            "image": "case-activity-recommendations-saved.png",
+            "heading": "Bob 查看已保存的个人副本"
+          }
+        ]
+      }
+    ]
   }
 }

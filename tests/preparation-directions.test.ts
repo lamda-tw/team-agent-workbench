@@ -61,8 +61,10 @@ test('category controls expose one multiline field per checked category, with de
       session: { id: 'session', title: '会话', messages: [] } as unknown as AgentSession, initialDirections: directions, again: true, close: () => {}, started: async () => {},
     }));
     assert(again.includes('再次整理成果'));
-    assert(again.includes('恰好一句话，说明这是个什么项目。'));
-    assert(again.includes('用什么标准判断这些成果算达到。'));
-    assert(!again.includes('关注精度与性能边界'));
+    assert(again.includes('整理哪些方面'));
+    assert(again.includes('关注精度与性能边界'));
+    assert(again.includes('保留未解决的阻塞项'));
+    assert.equal((again.match(/type="checkbox"/g) || []).length, 3);
+    assert(!again.includes('每个项目整理一条'));
   } finally { (globalThis as any).window = previous; }
 });
