@@ -1,5 +1,6 @@
 import type { ModelOption, Provider, ProviderCatalog, QuotaWindow } from '../shared/types';
 import { JsonRpc, spawnCLI, stopCLI } from './rpc';
+import { codexDefaultModel } from '../shared/model-selection';
 
 // Return only display fields. CLI diagnostics and authentication data never reach the renderer.
 const reasoningEffortId = /^[A-Za-z0-9_-]{1,32}$/;
@@ -91,6 +92,11 @@ export async function inspectCatalog(provider: Provider, executable: string, cwd
             if (cursor) seen.add(cursor);
           } while (cursor);
           result.models = [...new Map(models.map(m => [m.id, m])).values()];
+          try {
+            const { config } = await rpc.request('config/read', { includeLayers: false, cwd }, Math.min(timeout, 3000));
+            result.defaultModel = codexDefaultModel(config, result);
+            if (result.defaultModel && result.models.length && !result.models.some(model => model.id === result.defaultModel)) result.defaultModelWarning = `CLI 配置的默认模型「${result.defaultModel}」未出现在当前列表中；如无法使用，请从列表选择模型。`;
+          } catch { /* A missing config endpoint must not be confused with a known default. */ }
           if (!result.models.length) result.modelError = 'CLI 未返回可选模型，可沿用默认模型。';
         } catch { result.modelError = '模型列表读取失败，请检查网络和 CLI 版本后重试。也可沿用 CLI 默认模型。'; }
       })(),

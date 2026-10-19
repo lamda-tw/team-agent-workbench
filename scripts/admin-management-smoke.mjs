@@ -70,7 +70,7 @@ try {
   checks.push('create independent user before any groups exist');
   await createGroup('nlp'); await createGroup('ocr');
   await page.getByRole('button', { name: '创建用户', exact: true }).click(); await fields('alice');
-  for (const label of ['nlp', 'ocr']) await page.locator('.modal .check-row').filter({ hasText: 'local_' + label }).locator('input').check();
+  for (const label of ['nlp', 'ocr']) await page.getByRole('checkbox', { name: label, exact: true }).check();
   for (const label of ['nlp', 'ocr']) await expect(page.locator('.modal .check-row').filter({ hasText: label + ' · 内容管理者' }).locator('input')).toBeChecked();
   await page.locator('.modal .check-row').filter({ hasText: 'ocr · 内容管理者' }).locator('input').uncheck(); await confirm();
   await expect(userRow('alice').locator('.group-chip.subadmin')).toContainText('nlp');
@@ -80,8 +80,8 @@ try {
   await expect(group('nlp').locator('[data-user="alice"]')).toContainText('管理者');
   await expect(group('ocr').locator('[data-user="alice"]')).toContainText('成员');
   await group('nlp').getByRole('button', { name: '组内创建用户', exact: true }).click();
-  await expect(page.locator('.modal .check-row').filter({ hasText: 'local_nlp' }).locator('input')).toBeChecked();
-  await expect(page.locator('.modal .check-row').filter({ hasText: 'local_ocr' }).locator('input')).not.toBeChecked();
+  await expect(page.getByRole('checkbox', { name: 'nlp', exact: true })).toBeChecked();
+  await expect(page.getByRole('checkbox', { name: 'ocr', exact: true })).not.toBeChecked();
   await fields('bob'); await confirm(); assert.deepEqual((await state()).users.bob.groups, ['local_nlp']);
   checks.push('group creation preselects its group and updates hierarchy');
   await group('nlp').locator('[data-user="bob"]').getByRole('button', { name: '设为管理者', exact: true }).click();
@@ -104,8 +104,8 @@ try {
   assert.deepEqual((await state()).users.solo.contentAdminGroups, ['local_ocr']);
   checks.push('user adds an existing group without losing other memberships or roles');
   await userRow('alice').locator('.person-link').click();
-  await expect(page.locator('.modal .check-row').filter({ hasText: 'local_nlp' }).locator('input')).toBeChecked();
-  await page.locator('.modal .check-row').filter({ hasText: 'local_ocr' }).locator('input').uncheck(); await confirm();
+  await expect(page.getByRole('checkbox', { name: 'nlp', exact: true })).toBeChecked();
+  await page.getByRole('checkbox', { name: 'ocr', exact: true }).uncheck(); await confirm();
   assert.deepEqual((await state()).users.alice.groups, ['local_nlp']);
   assert.deepEqual((await state()).users.alice.contentAdminGroups, ['local_nlp']);
   checks.push('click user to inspect and edit all memberships, removing one group preserves another role');

@@ -70,8 +70,8 @@ try {
   await expect(projectSettings.getByLabel('代码目录（选填）')).toHaveValue(await fs.realpath(data));
   await page.screenshot({ path: path.join(data, 'project-settings-dialog.png') });
   await projectSettings.getByRole('button', { name: '关闭窗口', exact: true }).click();
-  await page.getByRole('button', { name: '设置', exact: true }).click();
-  const globalSettings = page.locator('.modal').filter({ hasText: '本机与 CLI 设置' });
+  await page.getByRole('button', { name: 'agent管理', exact: true }).click();
+  const globalSettings = page.locator('.modal').filter({ hasText: 'agent管理' });
   await expect(globalSettings).toBeVisible();
   await expect(globalSettings.getByLabel('代码目录（选填）')).toHaveCount(0);
   await expect(globalSettings.getByRole('tab', { name: '项目设置', exact: true })).toHaveCount(0);

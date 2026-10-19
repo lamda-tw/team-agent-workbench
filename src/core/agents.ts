@@ -18,6 +18,7 @@ import { permissionLabels } from '../shared/permission-presentation';
 import { codexCapabilities, cursorCommandCapabilities, cursorPluginCapabilities, emptyCapabilityCatalog } from './provider-capabilities';
 import { CliConnectionTracker } from './cli-connection';
 import type { CliConnection } from '../shared/cli-connection';
+import { codexModelUnavailableMessage } from '../shared/model-selection';
 export interface AgentHooks { changed: () => void; event: (value: unknown) => void; done: () => void; authFailed?: (error: unknown) => void; needsApproval?: (kind: 'question' | 'approval') => void; connectionChanged?: (value: CliConnection) => void; }
 const now = () => new Date().toISOString();
 export const nativeRolloutForkError = 'Codex 没有继续写原来的会话文件，已停止，避免变成两份。';
@@ -161,6 +162,7 @@ export class AgentRuntime {
         if (this.storage) { s.codexStorage = 'workbench'; delete s.codexNeedsRegistration; }
       }
       this.nativeModel = result.model; this.nativeEffort = result.reasoningEffort;
+      if (typeof result.model === 'string' && result.model) s.resolvedModel = result.model;
       if (this.storage?.sharedEndpoint && result.thread?.status?.type === 'active') { this.turnActive = true; this.sharedTurnOwned = false; }
       if (this.storage?.sharedEndpoint) {
         s.messages = mergeSharedThread(s.messages, result.thread);
@@ -230,7 +232,7 @@ export class AgentRuntime {
     this.hooks.changed();
   }
   async ensureStarted() {
-    try { await this.start(); } catch (error) { if (this.session.cursorNative || this.storage?.sharedEndpoint) { this.session.desktopSyncState = 'disconnected'; this.session.desktopSyncError = error instanceof Error ? error.message : '同步暂时不可用'; this.hooks.changed(); } this.connection.error(error, false); const issue = permissionIssue(error); if (issue) { this.session.permissionIssue = issue; this.hooks.changed(); } else if (!this.session.cursorNative) this.hooks.authFailed?.(error); throw error; }
+    try { await this.start(); } catch (error) { const modelError = this.session.provider === 'codex' ? codexModelUnavailableMessage(error, this.session.model || this.nativeModel) : undefined; if (modelError) { this.finish(error instanceof Error ? error.message : String(error)); throw new Error(modelError, { cause: error }); } if (this.session.cursorNative || this.storage?.sharedEndpoint) { this.session.desktopSyncState = 'disconnected'; this.session.desktopSyncError = error instanceof Error ? error.message : '同步暂时不可用'; this.hooks.changed(); } this.connection.error(error, false); const issue = permissionIssue(error); if (issue) { this.session.permissionIssue = issue; this.hooks.changed(); } else if (!this.session.cursorNative) this.hooks.authFailed?.(error); throw error; }
   }
   async mcpCatalog() { await this.connectCodex(); if (!this.mcp) throw new Error('当前 CLI 不支持 MCP 管理'); return this.mcp.list(); }
   async modes(): Promise<SessionModeCatalog> {
@@ -399,9 +401,10 @@ export class AgentRuntime {
   }
   private finish(error?: string) {
     this.connection.finish(error);
+    const modelError = this.session.provider === 'codex' ? codexModelUnavailableMessage(error, this.session.model || this.nativeModel) : undefined;
     const completedTurn = this.turnActive; this.turnActive = false;
-    if (error) { const issue = permissionIssue(error); if (issue) this.session.permissionIssue = issue; else if (!this.session.cursorNative) this.hooks.authFailed?.(error); }
-    this.session.status = error ? 'error' : 'idle'; this.session.error = error; this.session.approvals = [];
+    if (error && !modelError) { const issue = permissionIssue(error); if (issue) this.session.permissionIssue = issue; else if (!this.session.cursorNative) this.hooks.authFailed?.(error); }
+    this.session.status = error ? 'error' : 'idle'; this.session.error = modelError || error; this.session.approvals = [];
     this.session.desktopWaitingApproval = false; this.session.desktopSyncPending = false; clearTimeout(this.sharedRefresh); this.sharedRefresh = undefined;
     this.turnId = undefined; this.requests.clear(); this.fileChanges.clear(); this.hooks.changed(); if (completedTurn) this.hooks.done();
   }

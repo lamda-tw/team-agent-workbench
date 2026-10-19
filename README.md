@@ -4,9 +4,9 @@
 
 [快速安装](#install) · [完整前置条件](#requirements) · [启动排障](#troubleshooting) · [使用指南](docs/user-guide.md) · [服务器部署](docs/deployment-guide.md) · [开发与验证](#development)
 
-当前源码版本 **2.0.1**。使用当前功能请按下面的源码方式启动；部署人员已有的旧安装包不包含当前全部修改。
+当前源码版本 **2.0.2**。使用当前功能请按下面的源码方式启动；部署人员已有的旧安装包不包含当前全部修改。
 
-v2.0 增加可选的[项目助手（RSI）](docs/rsi-v2.md)：在项目设置中分别开启，后台分析结果仅保存到本机，不显示建议或改变对话。入口仍使用原有两个启动脚本。
+v2.0 增加可选的[AI推荐（RSI）](docs/rsi-v2.md)：通过项目下的开关分别开启，后台分析结果仅保存到本机，不显示建议或改变对话。入口仍使用原有两个启动脚本。
 
 <a id="install"></a>
 
@@ -226,7 +226,7 @@ where.exe npm
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\prepare-runtimes.ps1
 ```
 
-- 使用 Claude Code 时，按 [Claude Code 官方安装说明](https://code.claude.com/docs/en/quickstart)单独安装 CLI。安装后新开终端执行 `claude --version`，应输出版本；若工作台未检测到，在“设置 → 本机与 CLI”指定 `claude.exe` 或 `claude.cmd`。官方 Windows 安装建议同时安装 Git for Windows，以使用 Bash 工具。登录、已有 API/云服务配置和部署约定见 [Claude Code 接入](docs/claude-code.md)。
+- 使用 Claude Code 时，按 [Claude Code 官方安装说明](https://code.claude.com/docs/en/quickstart)单独安装 CLI。安装后新开终端执行 `claude --version`，应输出版本；若工作台未检测到，在“agent管理”指定 `claude.exe` 或 `claude.cmd`。官方 Windows 安装建议同时安装 Git for Windows，以使用 Bash 工具。登录、已有 API/云服务配置和部署约定见 [Claude Code 接入](docs/claude-code.md)。
 - 使用安装包时，用户版包含配套 Codex/Cursor 运行文件，Claude Code 需另行安装；仍需在新电脑上完成所用模型服务的认证。只使用其中一种提供方时，不需要登录其他提供方。
 - 模型登录过程中通常需要浏览器授权，或按 CLI 提供的方式完成登录。团队 SSH 密码与模型账号是两套独立凭据。
 

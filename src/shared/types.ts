@@ -47,7 +47,7 @@ export interface AgentSession {
   cursorQueue?: { paused: boolean; requests: CursorQueuedRequest[] };
   cursorPendingSubmission?: { id: string; text: string };
   mode?: import('./session-mode').SessionMode; proposedPlan?: import('./session-mode').ProposedPlan;
-  id: string; title: string; provider: Provider; model?: string; reasoningEffort?: string; closedAt?: string; nativeId?: string; nativePath?: string; nativeLive?: boolean; codexStorage?: 'workbench'; codexNeedsRegistration?: boolean;
+  id: string; title: string; provider: Provider; model?: string; resolvedModel?: string; reasoningEffort?: string; closedAt?: string; nativeId?: string; nativePath?: string; nativeLive?: boolean; codexStorage?: 'workbench'; codexNeedsRegistration?: boolean;
   personalGroupId?: string; relayAccount?: string;
   cwd: string; purpose: 'work' | 'prepare' | 'background'; networkRoute?: SessionNetworkRoute; parentId?: string; fork?: SubsessionFork; reports?: SubsessionReport[]; createdAt: string;
   handoffState?: import('./activity-assistant').HandoffState;
@@ -84,7 +84,7 @@ export interface ProviderAuth { status: 'unknown' | 'checking' | 'authenticated'
 export interface ReasoningEffortOption { id: string; description?: string }
 export interface ModelOption { id: string; name: string; isDefault?: boolean; defaultReasoningEffort?: string; reasoningEfforts?: ReasoningEffortOption[] }
 export interface QuotaWindow { name: string; usedPercent: number; windowMinutes?: number; resetsAt?: number }
-export interface ProviderCatalog { models: ModelOption[]; modelError?: string; quota: { windows: QuotaWindow[]; detail: string; url: string }; checkedAt: string }
+export interface ProviderCatalog { models: ModelOption[]; defaultModel?: string; defaultModelWarning?: string; modelError?: string; quota: { windows: QuotaWindow[]; detail: string; url: string }; checkedAt: string }
 export interface Snapshot { personal?: { settings: Settings; providers: ProviderInfo[]; auth: Record<Provider, ProviderAuth>; egress?: UserEgressStatus }; questions?: import('./questions').QuestionInbox; activity?: import('./activity-assistant').ActivityAssistantView; publishingConclusions?: string[]; accountChanging?: boolean; activeTurns?: Record<string, string>; accountSync?: import('./account-data').AccountSyncState; settings: Settings; sessions: AgentSession[]; inputs: Record<string, SessionInput>; transfers: Transfer[]; drafts: Draft[]; connection?: { profile: ConnectionProfile; connected: boolean; workspace?: WorkspaceAccess; workspaces: WorkspaceAccess[] }; providers: ProviderInfo[]; auth: Record<Provider, ProviderAuth>; workspaceReady: boolean; egress?: UserEgressStatus }
 export type WorkbenchEvent = { type: 'state' } | { type: 'questions' } | { type: 'notice'; message: string };
 export interface WorkbenchAPI {

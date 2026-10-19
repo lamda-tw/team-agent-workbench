@@ -36,7 +36,8 @@ test('other project/session histories and unknown accounts do not enter the curr
   profile.projects = []; await assert.rejects(workbench.rsi.collect(offlineProjectId), /项目/);
 }));
 test('shadow analysis stays asynchronous and records suggestions without changing the conversation or fabricating feedback', async () => fixture(async (workbench, root) => {
-  const session = await workbench.createSession('codex', root, offlineProjectId, 'work', undefined, 'fixture-model');
+  const session = await workbench.createSession('codex', root, offlineProjectId, 'work');
+  session.resolvedModel = 'fixture-model'; // CLI has resolved the inherited default for the completed turn.
   await workbench.rsi.configureShadow(offlineProjectId, { enabled: true, dailyCalls: 2 });
   let release!: () => void; const waiting = new Promise<void>(resolve => { release = resolve; });
   workbench.rsi.runText = async (_s, prompt) => { await waiting; const data = JSON.parse(prompt.split('REFERENCE_DATA=')[1]); return JSON.stringify({ state: { progress: '等待测试', blockers: [], unknowns: ['F1'], evidenceIds: [data.evidence[0].id] }, suggestions: [{ title: '验证指标', action: '独立评估 F1', reason: '只有模型自述', evidenceIds: [data.evidence[0].id], conditions: [], uncertainty: '效果未知', priority: 0.8 }] }); };

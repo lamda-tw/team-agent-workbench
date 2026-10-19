@@ -90,7 +90,6 @@ test('ordinary members can edit their local directory even when shared project s
   assert.match(settings, /<input aria-label="代码目录（选填）"[^>]*value="D:\/project\/code"/);
   assert.doesNotMatch(settings, /<input aria-label="代码目录（选填）"[^>]*disabled/);
   assert.match(settings, /<button class="primary">保存代码目录<\/button>/);
-  assert.match(settings, /aria-label="项目助手设置"/);
-  assert.match(settings, /不显示建议、不改变对话/);
+  assert.doesNotMatch(settings, /项目助手|AI推荐/);
   assert.doesNotMatch(settings, /暂不设置/);
 }));

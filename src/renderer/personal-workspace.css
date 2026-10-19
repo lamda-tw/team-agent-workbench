@@ -1,4 +1,4 @@
-.personal-section{margin:10px 8px 14px;padding:7px 6px 9px;border:1px solid var(--border,#dfe5e1);border-radius:10px;background:var(--panel,#fff)}
+.personal-section{margin:0 0 10px;padding:10px;min-width:0;border:1px solid var(--border,#dfe5e1);border-radius:8px;background:var(--panel,#fff)}
 .personal-section.is-active{border-color:#aacbbb;background:#f7fbf8}
 .personal-section>header{display:flex;align-items:center;gap:4px;margin-bottom:5px}
 .personal-heading{display:flex;align-items:center;gap:8px;min-width:0;flex:1;padding:7px 5px;border:0;background:transparent;text-align:left;color:inherit}

@@ -21,7 +21,11 @@ export function workbenchRsi(workbench: Workbench, runText: TextTask, changed: (
   const sessions = (projectId: string) => workbench.store.sessions.filter(session => session.binding?.project.id === projectId && ownsBinding(profile(), session.binding) && session.purpose === 'work' && !session.closedAt);
   return new RsiEngine(workbench.store.root, {
     scope: projectId => { const value = binding(projectId), account = accountIdentity(value); return { key: JSON.stringify([account, projectId]), account, projectId, user: value.username }; },
-    session: projectId => { binding(projectId); return sessions(projectId).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]; },
+    session: projectId => {
+      binding(projectId);
+      const session = sessions(projectId).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+      return session && !session.model && session.resolvedModel ? { ...session, model: session.resolvedModel } : session;
+    },
     changed,
     collect: async projectId => {
       const bound = binding(projectId), items: RsiObservation[] = [], at = new Date().toISOString();

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ExternalLink, RefreshCw } from 'lucide-react';
 import type { Provider, ProviderCatalog, SessionNetworkRoute } from '../shared/types';
+import { defaultModelLabel } from '../shared/model-selection';
 
 export function ModelPicker({ provider, cwd, ready, model, changed, initialCatalog, networkRoute }: { provider: Provider; cwd: string; ready: boolean; model: string; changed: (model: string) => void; initialCatalog?: ProviderCatalog; networkRoute?: SessionNetworkRoute }) {
   const [catalog, setCatalog] = useState<ProviderCatalog>(), [busy, setBusy] = useState(false), [error, setError] = useState('');
@@ -15,7 +16,8 @@ export function ModelPicker({ provider, cwd, ready, model, changed, initialCatal
   const url = provider === 'codex' ? 'https://chatgpt.com/codex/settings/usage' : provider === 'claude' ? 'https://claude.ai/settings/usage' : 'https://cursor.com/dashboard/spending';
   return <section className="model-picker" aria-label="模型与额度">
     <div className="row"><b>模型与额度</b><span className="spacer"/><button className="text-button" disabled={!ready || busy} onClick={() => void refresh(true)}><RefreshCw size={13} className={busy ? 'spin' : ''}/>{busy ? '读取中…' : '刷新模型与额度'}</button></div>
-    <label className="field">会话模型<select aria-label="会话模型" value={model} disabled={!ready || busy && !catalog?.models.length} onChange={e => changed(e.target.value)}><option value="">沿用 CLI 默认模型</option>{model && !catalog?.models.some(m => m.id === model) && <option value={model}>{model}（上次选择）</option>}{catalog?.models.map(m => <option key={m.id} value={m.id}>{m.name}{m.isDefault ? ' · 默认' : ''}</option>)}</select></label>
+    <label className="field">会话模型<select aria-label="会话模型" value={model} disabled={!ready || busy && !catalog?.models.length} onChange={e => changed(e.target.value)}><option value="">{defaultModelLabel(catalog)}</option>{model && !catalog?.models.some(m => m.id === model) && <option value={model}>{model}（上次选择）</option>}{catalog?.models.map(m => <option key={m.id} value={m.id}>{m.name}{m.isDefault ? ' · CLI 推荐' : ''}</option>)}</select></label>
+    {!model && catalog?.defaultModelWarning && <p className="muted small">{catalog.defaultModelWarning}</p>}
     {!ready && <p className="muted small">暂时无法读取模型列表；仍可创建会话并沿用 CLI 默认模型。</p>}
     {(error || catalog?.modelError) && <p role="alert" className="inline-error">{error || catalog?.modelError}</p>}
     <div className="quota-panel">

@@ -58,11 +58,11 @@ function CliComposerSettings({ session, networkEnabled, openConnection, authChec
   };
   const toggle = (kind: Choice['kind']) => { setError(''); setOpen(open === kind ? undefined : kind); };
   const models = catalog?.models || [];
-  const selectedModel = session.model || models.find(m => m.isDefault)?.id;
+  const selectedModel = session.model || session.resolvedModel || catalog?.defaultModel;
   const selected = models.find(m => m.id === selectedModel);
   const efforts = session.provider === 'codex' ? selected?.reasoningEfforts || [] : [];
   const activeEffort = efforts.some(item => item.id === session.reasoningEffort) ? session.reasoningEffort : efforts.some(item => item.id === selected?.defaultReasoningEffort) ? selected?.defaultReasoningEffort : session.provider === 'codex' ? session.reasoningEffort : undefined;
-  const modelName = (catalog?.models.find(m => m.id === session.model)?.name || session.model || '默认模型') + (activeEffort ? ' · ' + effortLabel(activeEffort) : '');
+  const modelName = (catalog?.models.find(m => m.id === selectedModel)?.name || selectedModel || 'CLI 默认模型') + (activeEffort ? ' · ' + effortLabel(activeEffort) : '');
   const chooseEffort = async (effort: string) => {
     if (disabled || session.reasoningEffort === effort) { close(); return; }
     setSaving(true); setError('');
@@ -83,10 +83,10 @@ function CliComposerSettings({ session, networkEnabled, openConnection, authChec
         {session.status === 'starting' && <p className="muted small">正在启动，完成后可切换。</p>}
         {running && <p className="muted small">当前回复继续运行；切换后，新设置从下一轮开始使用。</p>}
         {open === 'model' ? <>
-          {session.model && !models.some(m => m.id === session.model) && <div className="current-model">当前：{session.model}</div>}
+          {selectedModel && !models.some(m => m.id === selectedModel) && <div className="current-model">当前：{selectedModel}</div>}
           {catalog?.modelError && <p className="inline-error" role="alert">{catalog.modelError}</p>}
           {!loading && catalog && !models.length && !catalog.modelError && <p className="muted small">暂未获取可用模型，请刷新重试。</p>}
-          <div role="group" aria-label="可用模型">{models.map(m => <button key={m.id} className="setting-option" aria-pressed={selectedModel === m.id} disabled={disabled || loading && !models.length} onClick={() => void apply({ kind: 'model', value: m.id })}><span>{m.name}{m.isDefault && <small>默认</small>}</span>{selectedModel === m.id && <Check size={14}/>}</button>)}</div>
+          <div role="group" aria-label="可用模型">{models.map(m => <button key={m.id} className="setting-option" aria-pressed={selectedModel === m.id} disabled={disabled || loading && !models.length} onClick={() => void apply({ kind: 'model', value: m.id })}><span>{m.name}{m.isDefault && <small>CLI 推荐</small>}</span>{selectedModel === m.id && <Check size={14}/>}</button>)}</div>
           {session.provider === 'codex' && (efforts.length > 0 || (!loading && !!selected)) && <div role="group" aria-label="思考努力程度"><p>思考努力程度</p>{efforts.map(effort => <button key={effort.id} className="setting-option" aria-pressed={activeEffort === effort.id} disabled={disabled || loading} onClick={() => void chooseEffort(effort.id)}><span>{effortLabel(effort.id)}{effort.description && <small>{effort.description}</small>}</span>{activeEffort === effort.id && <Check size={14}/>}</button>)}{!efforts.length && <p className="muted small">当前模型没有可选的思考努力程度。</p>}</div>}
           <div className="quota-panel"><div className="row"><strong>账号额度</strong><span className="spacer"/><button className="text-button" onClick={() => void window.workbench.call('open.link', session.provider === 'codex' ? 'https://chatgpt.com/codex/settings/usage' : session.provider === 'claude' ? 'https://claude.ai/settings/usage' : 'https://cursor.com/dashboard/spending').catch(() => setError('无法打开浏览器，请稍后重试。'))}><ExternalLink size={12}/>官方额度页</button></div>
             {!catalog?.quota.windows.length && <p className="muted small">{catalog?.quota.detail || (session.provider === 'cursor' ? '请在官方额度页查看' : '额度未读取')}</p>}

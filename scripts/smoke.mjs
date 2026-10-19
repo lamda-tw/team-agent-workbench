@@ -130,7 +130,7 @@ try {
   await page.getByRole('button', { name: '轨迹上传', exact: true }).click();
   assert.equal(await page.locator('.check-row input').isChecked(), false);
   await page.getByRole('button', { name: '关闭窗口', exact: true }).click();
-  await page.getByRole('button', { name: '设置', exact: true }).click();
+  await page.getByRole('button', { name: 'agent管理', exact: true }).click();
   await page.getByText('设置', { exact: true }).waitFor();
   await page.getByRole('tab', { name: '本机与 CLI', exact: true }).click();
   await page.getByText('Codex · GPT', { exact: true }).waitFor();
