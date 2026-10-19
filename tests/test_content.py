@@ -12,7 +12,7 @@ import sys
 import tempfile
 import unittest
 import uuid
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 
 spec = importlib.util.spec_from_file_location('content', pathlib.Path(__file__).parents[1] / 'server/content.py')
 content = importlib.util.module_from_spec(spec)
@@ -21,6 +21,36 @@ spec.loader.exec_module(content)
 BRIEF = dict(background='项目背景', objectives='提升质量', acceptance='指标验收')
 
 class ContentRules(unittest.TestCase):
+    def test_first_login_restricts_operations_and_validates_password(self):
+        self.state['users']['alice']['mustChangePassword'] = True
+        self.assertEqual(self.call('alice', op='password_status'), {'required': True})
+        with self.assertRaisesRegex(PermissionError, '首次登录'):
+            self.call('alice', op='account_read')
+        for value in ('', 'bad:password', 'bad\npassword'):
+            with self.assertRaises(ValueError):
+                self.call('alice', op='password_change', oldPassword='123456', newPassword=value)
+        self.assertTrue(self.state['users']['alice']['mustChangePassword'])
+
+    def test_password_change_checks_shadow_and_only_updates_own_flag(self):
+        self.state['users']['alice']['mustChangePassword'] = True
+        file = self.root / '.workbench/admin/state.json'
+        file.write_text(json.dumps(self.state), encoding='utf-8')
+        library = Mock()
+        library.crypt.return_value = b'wrong'
+        with patch('ctypes.CDLL', return_value=library), patch('ctypes.util.find_library', return_value='crypt'), patch.object(content.subprocess, 'run', return_value=Mock(stdout='alice:$6$hash:rest')) as run:
+            with self.assertRaisesRegex(PermissionError, '原密码错误'):
+                self.call('alice', op='password_change', oldPassword='123456', newPassword='new-secret')
+            self.assertEqual(run.call_count, 1)
+            library.crypt.return_value = b'$6$hash'
+            self.assertTrue(self.call('alice', op='password_change', oldPassword='123456', newPassword='new-secret'))
+            self.assertEqual(run.call_args.kwargs['input'], 'alice:new-secret\n')
+            for value in ('x', '123456'):
+                self.assertTrue(self.call('alice', op='password_change', oldPassword=value, newPassword=value))
+                self.assertEqual(run.call_args.kwargs['input'], 'alice:' + value + '\n')
+        saved = json.loads(file.read_text(encoding='utf-8'))
+        self.assertFalse(saved['users']['alice']['mustChangePassword'])
+        self.assertEqual(saved['users']['bob'], self.state['users']['bob'])
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

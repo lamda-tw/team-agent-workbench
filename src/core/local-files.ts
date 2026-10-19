@@ -1,3 +1,4 @@
+import { newAccountPasswordSchema } from '../shared/accounts';
 import { QuestionFiles } from './question-files';
 import type { QuestionCommand } from '../shared/questions';
 import { groupCommand, groupRole } from './group-files';
@@ -11,7 +12,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import type { ConnectionProfile, FilePreview, Project, RemoteBinding, RemoteEntry, WorkspaceAccess } from '../shared/types';
-import { authorizeUser, diskPath, localRoot, passwordMatches, readRegistry, registryLock } from './local-space';
+import { passwordHash, writeRegistry, authorizeUser, diskPath, localRoot, passwordMatches, readRegistry, registryLock } from './local-space';
 import { assertRemote, childRemote, remotePath, withinRemote } from './paths';
 import { newProjectLayout, projectName } from './project-layout';
 import { sameEndpoint } from './sftp';
@@ -35,6 +36,20 @@ export class LocalFileConnection {
     if (profile.fingerprint && profile.fingerprint !== fingerprint) throw new Error('本地测试共享区身份已改变，请重新打开对应的联调启动器');
     this.profile = { ...profile, mode: 'local', localRoot: this.root, host: 'local', port: 22, fingerprint, projects: [], workPath: '', manifestPath: '' };
     this.proof = proof; this.ready = true; this.changed(); return this.profile;
+  }
+  async passwordStatus() {
+    const data = await readRegistry(this.root);
+    return { required: !!authorizeUser(data, this.profile!.username, this.proof).mustChangePassword };
+  }
+  async changePassword(oldPassword: string, newPassword: string) {
+    newAccountPasswordSchema.parse(newPassword);
+    return registryLock(this.root, async () => {
+      const data = await readRegistry(this.root), username = this.profile!.username;
+      const user = authorizeUser(data, username, this.proof);
+      if (!passwordMatches(oldPassword, data.credentials[username])) throw new Error('原密码错误');
+      data.credentials[username] = passwordHash(newPassword); user.mustChangePassword = false;
+      await writeRegistry(this.root, data); this.proof = data.credentials[username]; return true;
+    });
   }
   channel(binding?: RemoteBinding) {
     if (!this.ready || !this.profile) throw new Error('请先连接本地共享区');

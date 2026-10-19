@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { Workbench } from '../src/core/workbench';
 import { Store } from '../src/core/store';
-import { planSteps } from '../src/shared/session-mode';
+import { planExecuteSchema, planReviseSchema, planSteps } from '../src/shared/session-mode';
 import { grantTestWorkspace, offlineProjectId } from './fixtures/offline-workspace';
 // @ts-expect-error Shared JS fixture.
 import { authLauncher } from './fixtures/auth-launcher.mjs';
@@ -70,6 +70,13 @@ test('unsupported Plan mode is reported without changing conversation state', as
     await fixture.write({ status: 'ready', noPlan: true, turn: 'success' });
     await wb.changeMode(session.id, 'default'); assert.equal(await wb.send(session.id, 'Ordinary work still works'), true); await until(() => session.status === 'idle');
   } finally { await wb.close(); await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
+});
+test('plan actions accept Codex item ids and still require a session uuid', () => {
+  const sessionId = '6f0c2a1e-7b4d-4c3a-9e1f-2a8b5d6c7e90';
+  assert.equal(planExecuteSchema.parse({ id: sessionId, messageId: 'plan-4821' }).messageId, 'plan-4821');
+  assert.equal(planReviseSchema.parse({ id: sessionId, messageId: 'plan-4821', text: '  先核对接口  ' }).text, '先核对接口');
+  assert.throws(() => planExecuteSchema.parse({ id: sessionId, messageId: '' }));
+  assert.throws(() => planReviseSchema.parse({ id: 'plan-4821', messageId: 'plan-4821', text: '修订' }));
 });
 test('native plan progress maps both providers without claiming unfinished work is complete', () => {
   assert.deepEqual(planSteps([{ step: 'A', status: 'inProgress' }, { content: 'B', status: 'in_progress' }, { content: 'C', status: 'cancelled' }, { step: 'D', status: 'new' }, {}]).map(s => s.status), ['inProgress', 'inProgress', 'cancelled', 'pending']);

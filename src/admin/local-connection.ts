@@ -88,7 +88,7 @@ export class LocalAdminConnection {
           case 'user_create':
             if ([data.administrator, ...Object.keys(state.users)].some(name => name.toLowerCase() === request.username.toLowerCase())) throw new Error('账号已存在（不允许创建仅大小写不同的重名账号）');
             state.users[request.username] = { username: request.username, name: request.name, enabled: true, accountId: randomUUID(), groups: request.groups || [], contentAdminGroups: request.contentAdminGroups || [] };
-            data.credentials[request.username] = passwordHash(request.password); break;
+            data.credentials[request.username] = passwordHash(request.password); data.state.users[request.username].mustChangePassword = true; break;
           case 'user_password': data.credentials[request.username] = passwordHash(request.password); break;
           case 'user_enabled': user!.enabled = request.enabled; break;
           case 'user_groups': {

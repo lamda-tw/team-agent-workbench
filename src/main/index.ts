@@ -1,3 +1,6 @@
+import { assertPersonalRelay } from '../core/personal-relay';
+import { PERSONAL_PROJECT_ID, isPersonalBinding } from '../shared/personal-workspace';
+import { newAccountPasswordSchema } from '../shared/accounts';
 import { clientWindowTitle } from '../shared/client-version';
 import { preparationCategoriesSchema } from '../shared/result-rules';
 import { resultStatusSchema } from '../shared/result-model';
@@ -34,6 +37,7 @@ import { ServerIdentityStore } from '../core/server-identities';
 import { EgressClientProxy } from '../core/egress';
 import { decodeEgressInvite, userEgressInputSchema } from '../core/egress-config';
 import { taskbarAttention, taskbarShouldAlert, type TaskbarAttention } from '../shared/taskbar-attention';
+import { planExecuteSchema, planReviseSchema } from '../shared/session-mode';
 type DataContext = { workbench: Workbench; egress: EgressClientProxy; egressSecretFile: string; broadcast: () => void; notice: (message: string) => void };
 type SidebarPanes = { workgroups?: number; files?: number; sessions?: number };
 type WindowContext = DataContext & { slot: number; sidebarProjectHeight?: number; sidebarPanes?: SidebarPanes; release: () => Promise<void> };
@@ -64,20 +68,71 @@ async function syncServerIdentities(clearKey?: string) {
     await context.workbench.store.save(); context.broadcast();
   }));
 }
-const id = z.string().uuid(), text = z.string().max(2 * 1024 * 1024), provider = z.enum(['codex', 'cursor', 'claude']);
+const personalWindows = new Set<BrowserWindow>();
+let personalContext: DataContext | undefined;
+let personalRelay: DataContext | undefined;
+function actionContext(action: string, raw: any, owner: BrowserWindow, preferPersonal = false): DataContext {
+  const team = contexts.get(owner)!;
+  preferPersonal ||= personalWindows.has(owner);
+  if (!personalContext || action === 'snapshot' || action === 'workspace.select' || action === 'layout.sidebar' || action.startsWith('account.') || action === 'local.move' || /^(remote\.|group\.|project\.|assignment\.|question\.|content\.|window\.)/.test(action)) return team;
+  if (action.startsWith('local.')) return personalContext;
+  if (Array.isArray(raw?.ids)) { const localIds = new Set([...personalContext.workbench.store.sessions, ...personalContext.workbench.store.drafts].map(item => item.id)); if (raw.ids.some((id: string) => localIds.has(id)) && !raw.ids.every((id: string) => localIds.has(id))) throw new Error('请分别处理未分项目和团队项目中的记录'); if (raw.ids.every((id: string) => localIds.has(id))) return personalContext; }
+  const sessionId = raw?.id || raw?.parentId || raw?.sessionId;
+  if (sessionId && !preferPersonal && team.workbench.store.conclusions.some(item => item.id === sessionId)) return team;
+  if (sessionId && (personalContext.workbench.store.sessions.some(item => item.id === sessionId) || personalContext.workbench.store.drafts.some(item => item.id === sessionId) || personalContext.workbench.store.conclusions.some(item => item.id === sessionId))) return personalContext;
+  if (raw?.projectId && raw.projectId !== PERSONAL_PROJECT_ID) return team;
+  if (raw?.id && (team.workbench.store.sessions.some(item => item.id === raw.id) || team.workbench.store.drafts.some(item => item.id === raw.id))) return team;
+  if (raw?.projectId === PERSONAL_PROJECT_ID || preferPersonal) return personalContext;
+  return team;
+}
+async function alignPersonalRelay(team: DataContext, action: string, raw: any) {
+  if (!personalContext) return;
+  const local = personalContext.workbench;
+  if (!local.store.settings.egress && team.workbench.store.settings.egress) {
+    const settings = structuredClone(team.workbench.store.settings.egress), accessCode = await readProtected(team.egressSecretFile);
+    await applyClientEgress(personalContext, { settings, accessCode });
+  }
+  const central = local.store.settings.egress?.viaSharedServer;
+  const draft = local.store.drafts.find(item => item.id === raw?.id);
+  const session = local.store.sessions.find(item => item.id === (draft?.sessionId || raw?.id || raw?.parentId || raw?.sessionId));
+  const route = raw?.networkRoute || session?.networkRoute || (local.store.settings.egress?.enabled ? 'management' : 'direct');
+  const executing = /^(session\.(create|send|retry|mode|model|network|permission|native|codexDesktop|desktopSync)|draft\.(prepare|retry|reorganize)|conclusion\.merge\.prepare|subsession\.create|provider\.(auth|catalog|login$)|egress\.test)/.test(action);
+  if (central && executing && route === 'management') {
+    const identity = team.workbench.remote.connected && team.workbench.remote.profile ? accountIdentity(team.workbench.remote.profile) : undefined;
+    assertPersonalRelay(route, central, identity, session);
+    if (personalRelay && personalRelay !== team && local.store.sessions.some(item => item.networkRoute === 'management' && (['starting', 'running', 'approval'].includes(item.status) || local.activity.busy))) throw new Error('本机会话正在使用另一个中央账号中转，请先结束任务');
+    personalRelay = team;
+    if (session && !session.relayAccount && session.networkRoute === 'management') { session.relayAccount = identity; await local.store.save(); }
+  }
+  personalContext.egress.sharedServerConnectionChanged(!!personalRelay?.workbench.remote.connected);
+}
+const id = z.string().regex(/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}(?:-[1-5])?$/i), text = z.string().max(2 * 1024 * 1024), provider = z.enum(['codex', 'cursor', 'claude']);
 const sessionInput = z.object({ id });
 const capability = z.object({ id: z.string().min(1).max(500), kind: z.enum(['skill', 'plugin']), name: z.string().min(1).max(200) });
 async function chooseFiles(owner: BrowserWindow) { return (await dialog.showOpenDialog(owner, { title: '选择要共享的文件', properties: ['openFile', 'multiSelections'] })).filePaths; }
-async function dispatch(action: string, raw: unknown, owner: BrowserWindow): Promise<unknown> {
-  const context = contexts.get(owner); if (!context) throw new Error('当前窗口的独立工作台尚未就绪');
+async function dispatch(action: string, raw: unknown, owner: BrowserWindow, preferPersonal = false): Promise<unknown> {
+  const active = contexts.get(owner);
+  const context = actionContext(action, raw, owner, preferPersonal); if (!context) throw new Error('当前窗口的独立工作台尚未就绪');
   const { workbench, egress, broadcast, notice } = context;
+  if (context === personalContext && active) await alignPersonalRelay(active, action, raw);
   if (!['snapshot', 'remote.connect', 'window.new'].includes(action)) workbench.assertAccountReady();
-  const setupActions = new Set(['snapshot', 'window.new', 'group.control', 'content.updates', 'content.updates.read', 'content.updates.clear', 'content.updates.dismiss', 'settings.save', 'layout.sidebar', 'providers.detect', 'provider.auth', 'provider.login.cancel', 'choose.directory', 'choose.executable', 'server.identity.forget', 'remote.connect', 'remote.disconnect', 'provider.login', 'open.data', 'open.link', 'copy', 'session.stop', 'session.completion.read', 'remote.manifest', 'session.history', 'handoff.read', 'egress.configure', 'egress.test']);
+  const setupActions = new Set(['snapshot', 'workspace.select', 'local.move', 'window.new', 'group.control', 'content.updates', 'content.updates.read', 'content.updates.clear', 'content.updates.dismiss', 'settings.save', 'layout.sidebar', 'providers.detect', 'provider.auth', 'provider.login.cancel', 'choose.directory', 'choose.executable', 'server.identity.forget', 'remote.connect', 'remote.disconnect', 'provider.login', 'open.data', 'open.link', 'copy', 'session.stop', 'session.completion.read', 'remote.manifest', 'session.history', 'handoff.read', 'egress.configure', 'egress.test']);
   if (!setupActions.has(action)) workbench.assertWorkspace();
   switch (action) {
+    case 'workspace.select': { const p = z.object({ personal: z.boolean() }).parse(raw); if (p.personal) personalWindows.add(owner); else personalWindows.delete(owner); return true; }
+    case 'local.group.save': { const p = z.object({ id: id.optional(), name: z.string().max(120) }).parse(raw); return workbench.savePersonalGroup(p.name, p.id); }
+    case 'local.group.delete': return workbench.dissolvePersonalGroup(z.object({ id }).parse(raw).id);
+    case 'local.session.group': { const p = z.object({ id, groupId: id.optional() }).parse(raw); return workbench.assignPersonalGroup(p.id, p.groupId); }
+    case 'local.move': { const p = z.object({ projectId: z.string().min(1), sessionId: id.optional(), groupId: id.optional() }).parse(raw); return personalContext!.workbench.movePersonalTo(workbench, p.projectId, p); }
     case 'snapshot': {
       const snapshot = switchingWindows.has(owner) ? scopeAccountSnapshot({ ...workbench.snapshot(), accountChanging: true }) : workbench.snapshot();
-      return { ...snapshot, settings: { ...snapshot.settings, sidebarProjectHeight: context.sidebarProjectHeight, sidebarPanes: context.sidebarPanes, defaultServer: sharedServerEndpoint }, egress: egress.status() };
+      const local = personalContext?.workbench.snapshot();
+      return { ...snapshot, workspaceReady: true,
+        sessions: [...(local?.sessions || []), ...snapshot.sessions], drafts: [...(local?.drafts || []), ...snapshot.drafts],
+        inputs: { ...snapshot.inputs, ...local?.inputs }, activeTurns: { ...snapshot.activeTurns, ...local?.activeTurns },
+        activity: { ...snapshot.activity, jobs: [...(snapshot.activity?.jobs || []), ...(local?.activity?.jobs || [])] },
+        personal: local && { settings: local.settings, providers: local.providers, auth: local.auth, egress: personalContext!.egress.status() },
+        settings: { ...snapshot.settings, personalGroups: local?.settings.personalGroups || [], sidebarProjectHeight: active!.sidebarProjectHeight, sidebarPanes: active!.sidebarPanes, defaultServer: sharedServerEndpoint }, egress: egress.status() };
     }
     case 'window.new': openAdditionalWindow(false); return true;
     case 'egress.configure': {
@@ -93,16 +148,16 @@ async function dispatch(action: string, raw: unknown, owner: BrowserWindow): Pro
     case 'settings.save': {
       const next: import('../shared/types').Settings = settingsSchema.parse(raw);
       // Settings forms must not overwrite newer local inbox/alias changes with a stale snapshot.
-      for (const key of ['contentSeen', 'contentUpdates', 'contentAliases', 'dismissedContentUpdateIds', 'egress', 'projectDirectories', 'betaFeatures'] as const) Object.assign(next, { [key]: workbench.store.settings[key] });
+      for (const key of ['contentSeen', 'contentUpdates', 'contentAliases', 'dismissedContentUpdateIds', 'egress', 'projectDirectories', 'betaFeatures', 'personalGroups'] as const) Object.assign(next, { [key]: workbench.store.settings[key] });
       for (const p of ['codex', 'cursor', 'claude'] as const) if (next.providerPaths[p] !== workbench.store.settings.providerPaths[p]) workbench.accounts.invalidate(p);
       next.verifiedLocalWorkspace = workbench.store.settings.verifiedLocalWorkspace; next.workspaceSnapshot = workbench.store.settings.workspaceSnapshot; workbench.store.settings = next; await workbench.store.save(); broadcast(); return true;
     }
     case 'layout.sidebar': {
       const pane = z.number().int().min(80).max(2000);
       const p = z.object({ height: z.number().int().min(180).max(4000).optional(), workgroups: pane.optional(), files: pane.optional(), sessions: pane.optional() }).refine(value => value.height !== undefined || value.workgroups !== undefined || value.files !== undefined || value.sessions !== undefined).parse(raw);
-      if (p.height !== undefined) context.sidebarProjectHeight = p.height;
-      context.sidebarPanes = { ...context.sidebarPanes, ...(p.workgroups !== undefined ? { workgroups: p.workgroups } : {}), ...(p.files !== undefined ? { files: p.files } : {}), ...(p.sessions !== undefined ? { sessions: p.sessions } : {}) };
-      await atomicJson(windowStateFile(context.slot), { profile: workbench.store.settings.workspaceSnapshot?.profile, sidebarProjectHeight: context.sidebarProjectHeight, sidebarPanes: context.sidebarPanes });
+      if (p.height !== undefined) active!.sidebarProjectHeight = p.height;
+      active!.sidebarPanes = { ...active!.sidebarPanes, ...(p.workgroups !== undefined ? { workgroups: p.workgroups } : {}), ...(p.files !== undefined ? { files: p.files } : {}), ...(p.sessions !== undefined ? { sessions: p.sessions } : {}) };
+      await atomicJson(windowStateFile(active!.slot), { profile: active!.workbench.store.settings.workspaceSnapshot?.profile, sidebarProjectHeight: active!.sidebarProjectHeight, sidebarPanes: active!.sidebarPanes });
       return true;
     }
     case 'beta.set': { const p = z.object({ feature: z.enum(['sessionHandoff', 'subsessions', 'codexDesktopSync', 'cursorDesktopSync']), enabled: z.boolean() }).parse(raw); return workbench.setBetaFeature(p.feature, p.enabled); }
@@ -122,8 +177,8 @@ async function dispatch(action: string, raw: unknown, owner: BrowserWindow): Pro
     case 'session.capabilities': { const p = z.object({ id, forceRefresh: z.boolean().optional(), kind: z.enum(['skill', 'plugin']).optional() }).parse(raw); return workbench.capabilities(p.id, p.forceRefresh, p.kind); }
     case 'session.modes': return workbench.modes(z.object({ id }).parse(raw).id);
     case 'session.mode': { const p = z.object({ id, mode: z.enum(['default', 'plan', 'ask']) }).parse(raw); return workbench.changeMode(p.id, p.mode); }
-    case 'session.plan.execute': { const p = z.object({ id, messageId: id }).parse(raw); return workbench.executePlan(p.id, p.messageId); }
-    case 'session.plan.revise': { const p = z.object({ id, messageId: id, text: z.string().trim().min(1).max(100000) }).parse(raw); return workbench.revisePlan(p.id, p.messageId, p.text); }
+    case 'session.plan.execute': { const p = planExecuteSchema.parse(raw); return workbench.executePlan(p.id, p.messageId); }
+    case 'session.plan.revise': { const p = planReviseSchema.parse(raw); return workbench.revisePlan(p.id, p.messageId, p.text); }
     case 'session.tools.configuration': { const p = z.object({ id, kind: z.enum(['mcp', 'skill', 'plugin']) }).parse(raw); const file = await workbench.toolConfiguration(p.id, p.kind); const error = await shell.openPath(file); if (error) throw new Error('无法打开配置，请检查本机文件关联。'); return true; }
     case 'session.skills.configure': { const p = z.object({ id, skillId: z.string().min(1).max(1000), enabled: z.boolean() }).parse(raw); return workbench.configureSkill(p.id, p.skillId, p.enabled); }
     case 'session.mcp': { const p = z.object({ id, refresh: z.boolean().optional() }).parse(raw); return workbench.mcpCatalog(p.id, p.refresh); }
@@ -141,11 +196,11 @@ async function dispatch(action: string, raw: unknown, owner: BrowserWindow): Pro
     case 'session.permissions': { const p = z.object({ id, mode: z.enum(['inherit', 'review', 'auto', 'full']), stop: z.boolean().optional() }).parse(raw); return workbench.changePermissions(p.id, p.mode, p.stop); }
     case 'session.model': { const p = z.object({ id, model: z.string().trim().min(1).max(256).regex(/^[^\x00-\x1f\x7f]+$/), stop: z.boolean().optional() }).parse(raw); return workbench.changeModel(p.id, p.model, p.stop); }
     case 'session.reasoningEffort': { const p = z.object({ id, effort: z.string().regex(/^[A-Za-z0-9_-]{1,32}$/).nullable() }).parse(raw); return workbench.changeReasoningEffort(p.id, p.effort); }
-    case 'session.network': { const p = z.object({ id, networkRoute: z.enum(['direct', 'management']) }).parse(raw); return workbench.changeNetworkRoute(p.id, p.networkRoute); }
+    case 'session.network': { const p = z.object({ id, networkRoute: z.enum(['direct', 'management']) }).parse(raw); return workbench.changeNetworkRoute(p.id, p.networkRoute, workbench.personal && workbench.store.settings.egress?.viaSharedServer && active?.workbench.remote.profile ? accountIdentity(active.workbench.remote.profile) : undefined); }
     case 'choose.directory': return (await dialog.showOpenDialog(owner, { properties: ['openDirectory'] })).filePaths[0] || '';
     case 'choose.executable': return (await dialog.showOpenDialog(owner, { title: '选择 CLI 程序（不是编辑器）', properties: ['openFile'], filters: [{ name: 'CLI', extensions: ['exe', 'cmd', 'ps1'] }] })).filePaths[0] || '';
     case 'remote.connect': {
-      const p = z.object({ profile: profileSchema, password: z.string().min(1).max(4096), localPath: z.string().default(''), egress: userEgressInputSchema.optional() }).parse(raw);
+      const p = z.object({ profile: profileSchema, password: z.string().min(1).max(4096), newPassword: newAccountPasswordSchema.optional(), localPath: z.string().default(''), egress: userEgressInputSchema.optional() }).parse(raw);
       const key = serverIdentityKey(p.profile.host, p.profile.port);
       const profile = { ...p.profile, fingerprint: p.profile.mode === 'local' ? p.profile.fingerprint : serverIdentities.get(key) };
       return loginWindow(owner, profile, p.password, p.localPath, async fingerprint => {
@@ -158,7 +213,7 @@ async function dispatch(action: string, raw: unknown, owner: BrowserWindow): Pro
           await serverIdentities.remember(key, fingerprint); await syncServerIdentities();
         }
         return accepted;
-      }, p.egress);
+      }, p.egress, p.newPassword);
     }
     case 'server.identity.forget': {
       const p = z.object({ host: z.string().min(1), port: z.number().int().min(1).max(65535) }).parse(raw), key = serverIdentityKey(p.host, p.port);
@@ -166,7 +221,8 @@ async function dispatch(action: string, raw: unknown, owner: BrowserWindow): Pro
     }
     case 'project.create': { const p = z.object({ name: z.string().min(1).max(180), groupName: z.string().optional(), brief: projectBriefSchema.optional() }).parse(raw); return workbench.createProject(p.name, p.groupName, p.brief); }
     case 'project.initialize': { const p = z.object({ name: z.string().min(1).max(180), groupName: z.string().min(1).max(80), contextKey: z.string().max(4096), brief: projectBriefSchema }).parse(raw); return workbench.initializeProject(p.name, p.groupName, p.brief, p.contextKey); }
-    case 'remote.disconnect': workbench.remote.disconnect(); return true;
+    case 'remote.password': { const p = z.object({ oldPassword: z.string().min(1).max(4096), newPassword: newAccountPasswordSchema }).parse(raw); return workbench.remote.changePassword(p.oldPassword, p.newPassword); }
+    case 'remote.disconnect': if (personalRelay === active && personalContext?.workbench.store.sessions.some(session => session.networkRoute === 'management' && (['starting', 'running', 'approval'].includes(session.status) || personalContext?.workbench.activity.busy))) throw new Error('请先结束使用中央中转的本机会话，再断开连接'); workbench.remote.disconnect(); return true;
     case 'group.control': return workbench.groupCommand(raw as any);
     case 'remote.manifest': return workbench.refreshGroups();
     case 'remote.list': { const p = z.object({ projectId: z.string(), path: text }).parse(raw); return workbench.remote.list(workbench.remote.binding(p.projectId), p.path); }
@@ -177,7 +233,10 @@ async function dispatch(action: string, raw: unknown, owner: BrowserWindow): Pro
       await workbench.queue.enqueueDownload(binding, p.path, result.filePath); notice('文件已加入下载队列，可在传输记录查看结果'); return true;
     }
     case 'remote.upload': { const p = z.object({ projectId: z.string(), folder: text }).parse(raw); const binding = workbench.remote.binding(p.projectId); const files = await chooseFiles(owner); if (!files.length) return 0; await workbench.uploadFiles(binding, p.folder, files); return files.length; }
-    case 'session.create': { const p = z.object({ provider, cwd: text, projectId: z.string().optional(), model: z.string().min(1).max(256).regex(/^[^\x00-\x1f]+$/).optional(), permissionMode: z.enum(['inherit', 'review', 'auto', 'full']).optional(), includeBrief: z.boolean().default(true), networkRoute: z.enum(['direct', 'management']).optional(), desktopSync: z.boolean().default(false) }).parse(raw); if ((p.networkRoute || (workbench.store.settings.egress?.enabled ? 'management' : 'direct')) === 'management') await workbench.requireAuth(p.provider, p.cwd.trim() || await workbench.researchWorkspace(), 'management'); return workbench.createSession(p.provider, p.cwd, p.projectId, 'work', undefined, p.model, p.permissionMode, p.includeBrief, p.networkRoute, p.desktopSync); }
+    case 'session.create': { const p = z.object({ provider, cwd: text, projectId: z.string().optional(), model: z.string().min(1).max(256).regex(/^[^\x00-\x1f]+$/).optional(), permissionMode: z.enum(['inherit', 'review', 'auto', 'full']).optional(), includeBrief: z.boolean().default(true), networkRoute: z.enum(['direct', 'management']).optional(), desktopSync: z.boolean().default(false) }).parse(raw); if ((p.networkRoute || (workbench.store.settings.egress?.enabled ? 'management' : 'direct')) === 'management') await workbench.requireAuth(p.provider, p.cwd.trim() || await workbench.researchWorkspace(), 'management'); const groupId = z.object({ personalGroupId: id.optional() }).parse(raw).personalGroupId;
+      const session = await workbench.createSession(p.provider, p.cwd, p.projectId, 'work', undefined, p.model, p.permissionMode, p.includeBrief, p.networkRoute, p.desktopSync, groupId);
+      if (workbench.personal) { if (session.networkRoute === 'management' && workbench.store.settings.egress?.viaSharedServer && active?.workbench.remote.profile) session.relayAccount = accountIdentity(active.workbench.remote.profile); await workbench.store.save(); }
+      return session; }
     case 'session.native.list': return workbench.listNativeSessions(z.object({ provider: z.enum(['codex', 'cursor']) }).parse(raw).provider);
     case 'session.native.link': { const p = z.object({ provider: z.enum(['codex', 'cursor']), nativeId: z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i), projectId: z.string().min(1) }).parse(raw); return workbench.linkNativeSession(p.provider, p.nativeId, p.projectId); }
     case 'session.native.linkMany': { const p = z.object({ provider: z.enum(['codex', 'cursor']), nativeIds: z.array(z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)).min(1).max(50), projectId: z.string().min(1) }).parse(raw); return workbench.linkNativeSessions(p.provider, p.nativeIds, p.projectId); }
@@ -324,7 +383,7 @@ async function dispatch(action: string, raw: unknown, owner: BrowserWindow): Pro
     case 'session.answer': { const p = z.object({ id, requestId: z.string(), option: z.string(), answers: z.record(z.string(), z.union([z.string(), z.array(z.string())])).optional() }).parse(raw); return workbench.answer(p.id, p.requestId, p.option, p.answers); }
     case 'session.attachLocal': { const p = sessionInput.parse(raw); return workbench.attachLocal(p.id, await chooseFiles(owner)); }
     case 'session.attachRemote': { const p = z.object({ id, projectId: z.string(), path: text }).parse(raw); return workbench.attachRemote(p.id, p.projectId, p.path); }
-    case 'session.autoUpload': { const p = z.object({ id, enabled: z.boolean() }).parse(raw); const s = workbench.session(p.id); if (p.enabled && (!s.binding || s.purpose !== 'work')) throw new Error('只有绑定远端项目的工作会话可开启自动上传'); if (p.enabled && s.sources.some(source => source.sourcePath.startsWith('session-handoff:') || source.sourcePath.startsWith('subsession-report:'))) throw new Error('当前会话引用了个人会话内容，不能开启轨迹自动上传；如需分享轨迹，请先预览并手动确认'); s.autoUpload = p.enabled; await workbench.store.save(); broadcast(); return true; }
+    case 'session.autoUpload': { const p = z.object({ id, enabled: z.boolean() }).parse(raw); const s = workbench.session(p.id); if (p.enabled && (workbench.personal || !s.binding || s.purpose !== 'work')) throw new Error('只有绑定远端项目的工作会话可开启自动上传'); if (p.enabled && s.sources.some(source => source.sourcePath.startsWith('session-handoff:') || source.sourcePath.startsWith('subsession-report:'))) throw new Error('当前会话引用了个人会话内容，不能开启轨迹自动上传；如需分享轨迹，请先预览并手动确认'); s.autoUpload = p.enabled; await workbench.store.save(); broadcast(); return true; }
     case 'session.history': return historyMarkdown(workbench.session(sessionInput.parse(raw).id));
     case 'session.uploadTrajectory': return workbench.archive(sessionInput.parse(raw).id);
     case 'handoff.read': return workbench.readHandoff(sessionInput.parse(raw).id);
@@ -439,7 +498,8 @@ async function storedWindowState(slot: number): Promise<{ profile?: import('../s
   try { const settings = JSON.parse(await fs.readFile(path.join(instanceRoot(slot), 'settings.json'), 'utf8')); const snapshot = settings.workspaceSnapshot || settings.offlineAuthorization; return { profile: snapshot?.profile ? profileSchema.parse(snapshot.profile) : undefined, sidebarProjectHeight: settings.sidebarProjectHeight }; }
   catch (error: any) { if (error.code !== 'ENOENT') throw error; return {}; }
 }
-async function loginWindow(window: BrowserWindow, profile: import('../shared/types').ConnectionProfile, password: string, localPath: string, trust: (fingerprint: string) => Promise<boolean>, egressInput?: z.infer<typeof userEgressInputSchema>) {
+async function loginWindow(window: BrowserWindow, profile: import('../shared/types').ConnectionProfile, password: string, localPath: string, trust: (fingerprint: string) => Promise<boolean>, egressInput?: z.infer<typeof userEgressInputSchema>, newPassword?: string) {
+  if (personalRelay === contexts.get(window) && personalContext?.workbench.store.sessions.some(session => session.networkRoute === 'management' && (['starting', 'running', 'approval'].includes(session.status) || personalContext?.workbench.activity.busy))) throw new Error('请先结束使用中央中转的本机会话，再更换登录账号');
   if (switchingWindows.has(window)) throw new Error('正在登录，请等待结果');
   const previous = contexts.get(window)!;
   const currentProfile = previous.workbench.store.settings.workspaceSnapshot?.profile;
@@ -453,6 +513,10 @@ async function loginWindow(window: BrowserWindow, profile: import('../shared/typ
     // Authenticate before selecting any other account's local records. Failure leaves
     // the old context, its live tasks and the window's persisted selection untouched.
     const result = await verified.connect({ ...profile, projects: [], manifestPath: '', workPath: '' }, password, trust);
+    if ((await verified.passwordStatus()).required) {
+      if (!newPassword) throw new Error('PASSWORD_CHANGE_REQUIRED：首次登录，请设置新密码');
+      await verified.changePassword(password, newPassword);
+    }
     await verified.loadManifest();
     return await routeAccount(async () => {
       if (window.isDestroyed() || closingWindows.has(window) || closing) throw new Error('窗口正在关闭，请重新登录');
@@ -541,37 +605,38 @@ async function storedDatasetSlots() {
 function syncTaskbar(window: BrowserWindow, workbench: Workbench) {
   try {
     if (window.isDestroyed()) return;
-    const next = taskbarAttention(workbench.questions.view(), workbench.contentUpdates(), workbench.store.sessions);
+    const next = taskbarAttention(workbench.questions.view(), workbench.contentUpdates(), [...workbench.store.sessions, ...(personalContext?.workbench.store.sessions || [])]);
     const previous = taskbarSeen.get(window);
     taskbarSeen.set(window, next);
     if (taskbarShouldAlert(previous, next) && !window.isFocused()) window.flashFrame(true);
   } catch (error) { console.error('任务栏提醒未更新', errorMessage(error)); }
 }
-async function createDataContext(root: string): Promise<DataContext> {
+async function createDataContext(root: string, personal = false): Promise<DataContext> {
   let workbench: Workbench;
-  const emit = (event: WorkbenchEvent) => { for (const [window, context] of contexts) if (context.workbench === workbench && !window.isDestroyed()) window.webContents.send('workbench:event', event); };
+  const emit = (event: WorkbenchEvent) => { for (const [window, context] of contexts) if ((personal || context.workbench === workbench) && !window.isDestroyed()) window.webContents.send('workbench:event', event); };
   let emitTimer: NodeJS.Timeout | undefined;
-  const broadcast = () => { egress?.sharedServerConnectionChanged(!!workbench?.remote.connected); if (!emitTimer) emitTimer = setTimeout(() => { emitTimer = undefined; emit({ type: 'state' }); for (const [window, context] of contexts) if (context.workbench === workbench && !window.isDestroyed()) syncTaskbar(window, workbench); }, 80); };
+  const broadcast = () => { egress?.sharedServerConnectionChanged(personal ? !!personalRelay?.workbench.remote.connected : !!workbench?.remote.connected); if (!personal) personalContext?.egress.sharedServerConnectionChanged(!!personalRelay?.workbench.remote.connected); if (!emitTimer) emitTimer = setTimeout(() => { emitTimer = undefined; emit({ type: 'state' }); for (const [window, context] of contexts) if ((personal || context.workbench === workbench) && !window.isDestroyed()) syncTaskbar(window, context.workbench); }, 80); };
   const notice = (message: string) => { emit({ type: 'notice', message });
     if (/^(收到提问|收到问题答复|问题已关闭)：/.test(message) && Notification.isSupported()) {
       const notification = new Notification({ title: '团队工作台 · 提问', body: message });
       notification.on('click', () => { for (const [window, context] of contexts) if (context.workbench === workbench && !window.isDestroyed()) { window.show(); window.focus(); window.webContents.send('workbench:event', { type: 'questions' }); break; } });
       notification.show();
-    } if (message.startsWith('待授权：')) for (const [window, context] of contexts) if (context.workbench === workbench && !window.isDestroyed() && !window.isFocused()) window.flashFrame(true); };
+    } if (message.startsWith('待授权：')) for (const [window, context] of contexts) if ((personal || context.workbench === workbench) && !window.isDestroyed() && !window.isFocused()) window.flashFrame(true); };
   let egress: EgressClientProxy | undefined;
-  workbench = new Workbench(root, broadcast, notice, 10 * 60 * 1000, route => {
+  workbench = new Workbench(root, broadcast, notice, 10 * 60 * 1000, (route, session) => {
     if (route === 'direct') return {};
+    if (personal) assertPersonalRelay(route || (workbench.store.settings.egress?.enabled ? 'management' : 'direct'), workbench.store.settings.egress?.viaSharedServer, personalRelay?.workbench.remote.connected && personalRelay.workbench.remote.profile ? accountIdentity(personalRelay.workbench.remote.profile) : undefined, session);
     const environment = egress?.environment() || {};
     if (route === 'management' && !environment.HTTPS_PROXY) throw new Error('该会话的管理端出口未启动，请先恢复管理端连接');
     return environment;
   },
-    (session, value) => { if (session.networkRoute === 'management') egress?.reportCliStatus(session.provider, session.id, value, session.binding?.username || ''); },new CodexDesktopService({workerFile:path.join(__dirname,runtimeAssets,'codex-desktop-worker.cjs')}));
+    (session, value) => { if (session.networkRoute === 'management') egress?.reportCliStatus(session.provider, session.id, value, session.binding?.username || ''); },new CodexDesktopService({workerFile:path.join(__dirname,runtimeAssets,'codex-desktop-worker.cjs')}), undefined, personal);
   try {
     await workbench.init();
     workbench.store.settings.trustedServerIdentities = serverIdentities.snapshot();
     const egressSecretFile = path.join(root, 'egress-access.bin'), settings = workbench.store.settings.egress, accessCode = await readProtected(egressSecretFile);
     const username = workbench.store.settings.connections.at(-1)?.username || workbench.store.settings.workspaceSnapshot?.profile.username || '';
-    egress = new EgressClientProxy(settings ? { ...settings, accessCode, username } : undefined, (host, port, signal, expectedServer) => workbench.remote.openEgressTunnel(host, port, signal, expectedServer)); egress.on('changed', broadcast);
+    egress = new EgressClientProxy(settings ? { ...settings, accessCode, username } : undefined, (host, port, signal, expectedServer) => (personal ? personalRelay?.workbench.remote : workbench.remote)?.openEgressTunnel(host, port, signal, expectedServer) || Promise.reject(new Error('请先登录中央节点'))); egress.on('changed', broadcast);
     if (settings?.enabled && accessCode) { await egress.start().catch(() => {}); if (!settings.viaSharedServer || workbench.remote.connected) void egress.probe().catch(() => {}); }
     return { workbench, egress, egressSecretFile, broadcast, notice };
   } catch (error) { await workbench.close().catch(() => {}); await egress?.stop().catch(() => {}); throw error; }
@@ -602,6 +667,7 @@ async function createWindow(preferredSlot?: number, fresh = false) {
   });
   window.on('closed', () => {
     for (const current of contexts.values()) current.workbench.activity.removeWindow(String(window.id));
+    personalWindows.delete(window);
     windows.delete(window); const context = contexts.get(window); contexts.delete(window);
     if (context) { activeSlots.delete(context.slot); if (!quitting && !closingWindows.has(window)) void context.release().catch(error => console.error('账号窗口关闭失败', errorMessage(error))); }
   });
@@ -644,9 +710,10 @@ if (ownDataDirectory(latestWindow, () => openAdditionalWindow(true))) app.whenRe
     const owner = BrowserWindow.fromWebContents(event.sender);
     if (!owner || !windows.has(owner) || event.senderFrame?.url !== pathToFileURL(entry).href) return { ok: false, error: '不允许的调用来源' };
     try {
-      const operation = z.string().parse(action), context = contexts.get(owner)!;
+      const requested = z.string().parse(action), preferPersonal = requested.startsWith('personal:'), operation = preferPersonal ? requested.slice(9) : requested, context = contexts.get(owner)!;
+      const executing = actionContext(operation, payload, owner, preferPersonal);
       if ((switchingWindows.has(owner) || closingWindows.has(owner) || closing) && operation !== 'snapshot') throw new Error('正在登录或关闭窗口，请等待完成');
-      const value = await context.workbench.runAccountOperation(operation, () => dispatch(operation, payload, owner));
+      const value = await executing.workbench.runAccountOperation(operation, () => dispatch(operation, payload, owner, preferPersonal));
       if (!['snapshot', 'remote.connect', 'window.new'].includes(operation) && contexts.get(owner) !== context) throw new Error('账号已改变，未返回上一个账号的操作结果，请刷新后重试');
       return { ok: true, value };
     } catch (e: any) { return { ok: false, error: errorMessage(e) }; }
@@ -654,6 +721,7 @@ if (ownDataDirectory(latestWindow, () => openAdditionalWindow(true))) app.whenRe
   const legacySettings = await fs.readFile(path.join(app.getPath('userData'), 'settings.json'), 'utf8').then(value => JSON.parse(value)).catch((error: any) => { if (error.code === 'ENOENT') return {}; throw error; });
   await serverIdentities.init(legacySettings.trustedServerIdentities || {});
   sharedServerEndpoint = await loadSharedServerEndpoint();
+  personalContext = await createDataContext(path.join(app.getPath('userData'), 'personal'), true);
   await routeAccount(() => createWindow());
   windowsReady = true;
   void drainAdditionalWindows();
@@ -686,7 +754,7 @@ async function finishQuit() {
     for (const [, current] of pending) current.workbench.activity.removeWindow(String(window.id));
   }
   for (const [window] of pending) { dismissWindow(window); if (!window.isDestroyed()) window.destroy(); }
-  try { await routeAccount(async () => { for (const [, context] of pending) await context.release(); }); }
+  try { await routeAccount(async () => { for (const [, context] of pending) await context.release(); if (personalContext) { await personalContext.workbench.close(); await personalContext.egress.stop(); } }); }
   catch (error) { reportCloseFailure(error); }
   finally { quitting = true; for (const [window] of pending) closingWindows.delete(window); closing = false; app.quit(); }
 }

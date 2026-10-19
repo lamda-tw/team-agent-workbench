@@ -75,6 +75,16 @@ export class SftpConnection {
     return this.profile!;
   }
   disconnect() { this.workspace = undefined; this.workspaces = []; this.sftp = undefined; this.sessionPassword = ''; this.client?.end(); this.client = undefined; this.changed(); }
+  async passwordStatus(): Promise<{ required: boolean }> {
+    const s = this.channel();
+    return storageRequest(s, this.profile!.username, { op: 'password_status' }, () => { if (this.channel() !== s) throw new Error('连接已改变'); });
+  }
+  async changePassword(oldPassword: string, newPassword: string) {
+    const s = this.channel();
+    await storageRequest(s, this.profile!.username, { op: 'password_change', oldPassword, newPassword }, () => { if (this.channel() !== s) throw new Error('连接已改变'); });
+    this.sessionPassword = newPassword;
+    return true;
+  }
   openEgressTunnel(host: string, port: number, signal: AbortSignal) {
     if (!this.connected || !this.client) throw new Error('请先登录共享服务器，再使用中转访问管理端');
     return forwardEgress(this.client, host, port, signal);

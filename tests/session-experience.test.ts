@@ -69,7 +69,7 @@ for (const provider of ['codex', 'cursor'] as const) test(provider + ': model pr
     await wb.saveDraftSupplement(d.id, 'Human edits stay intact', 'https://github.com/owner/repo');
     const attempt = d.prepareSessionId;
     await f.write({ status: 'ready', turn: 'success' }); await wb.retryPreparation(d.id); await until(() => d.generation === 'ready');
-    assert.notEqual(d.prepareSessionId, attempt); assert(d.generatedBody); assert.equal(d.supplement, 'Human edits stay intact'); assert.match(d.body, /已经达到的成果/);
+    assert.notEqual(d.prepareSessionId, attempt); assert(d.generatedBody); assert.equal(d.supplement, 'Human edits stay intact'); assert(d.artifacts?.some(item => item.body.includes('测试已通过')), 'retry restores usable structured results');
     assert.equal(wb.session(d.prepareSessionId!).model, 'chosen-model');
     await f.write({ status: 'ready', turn: 'crash' }); await wb.retryPreparation(d.id); await until(() => d.generation === 'error'); assert.match(d.generationError!, /CLI 意外停止/);
     const canceledRetry = wb.retryPreparation(d.id); await wb.cancelPreparation(d.id); await canceledRetry;

@@ -13,7 +13,12 @@ const fixture = await authLauncher(path.join(data, 'cli')); await fixture.write(
 const apps = [], errors = [];
 async function launch(edition) {
   const store = path.join(data, edition); await fs.mkdir(store);
-  if (edition === 'user') await fs.writeFile(path.join(store, 'settings.json'), JSON.stringify({ connections: [], providerPaths: { codex: fixture.launcher, cursor: fixture.launcher }, lastWorkspace: '' }));
+  if (edition === 'user') {
+    const settings = { connections: [], providerPaths: { codex: fixture.launcher, cursor: fixture.launcher, claude: fixture.launcher }, lastWorkspace: '' };
+    for (const directory of [path.join(store, 'window-state', '1'), path.join(store, 'personal')]) {
+      await fs.mkdir(directory, { recursive: true }); await fs.writeFile(path.join(directory, 'settings.json'), JSON.stringify(settings));
+    }
+  }
   const env = { ...process.env, WORKBENCH_TEST: '1', WORKBENCH_DATA_DIR: store, WORKBENCH_ADMIN_DATA_DIR: store }; delete env.ELECTRON_RUN_AS_NODE;
   const app = await electron.launch({ args: ['dist/' + edition], cwd: root, env, timeout: 60000 }); apps.push(app);
   const page = await app.firstWindow(); page.on('pageerror', e => errors.push(e.message)); return { app, page };
@@ -29,27 +34,29 @@ try {
   }
   await ap.getByRole('button', { name: '创建用户', exact: true }).click();
   await ap.getByLabel('成员姓名', { exact: true }).fill('测试成员'); await ap.getByLabel('登录账号', { exact: true }).fill('test1');
-  await ap.getByLabel('初始密码', { exact: true }).fill('1'); await ap.getByLabel('再次输入密码', { exact: true }).fill('1'); await confirm(ap);
+  await expect(ap.getByLabel('初始密码', { exact: true })).toHaveCount(0); await confirm(ap);
   const row = ap.locator('tbody tr').filter({ hasText: 'test1' });
   const config = await memberProfile(admin, 'test1'); assert.equal(config.workPath, ''); assert.deepEqual(config.projects, []);
   const user = await launch('user'), up = user.page;
   await setConnectionProfile(user, config);
-  await up.getByLabel('成员账号').fill('test1'); await up.getByLabel('登录密码', { exact: true }).fill('1');
+  await up.getByLabel('成员账号').fill('test1'); await up.getByLabel('登录密码', { exact: true }).fill('123456');
   await expect(up.getByLabel('共享工作路径', { exact: true })).toHaveCount(0); await expect(up.getByLabel('Linux 工作路径', { exact: true })).toHaveCount(0);
+  await up.getByRole('button', { name: '登录', exact: true }).click();
+  await up.getByLabel('新密码', { exact: true }).fill('1'); await up.getByLabel('确认新密码', { exact: true }).fill('1');
   await up.getByRole('button', { name: '登录', exact: true }).click(); await expect(up.locator('.modal')).toHaveCount(0);
-  await expect(up.getByText('还没有加入工作组', { exact: true })).toBeVisible(); await up.screenshot({ path: path.join(data, 'no-groups.png') });
-  await expect(up.getByTitle('新建会话', { exact: true })).toHaveCount(0);
+  await expect(up.locator('.workgroup')).toHaveCount(0); await expect(up.getByLabel('空白工作台')).toBeVisible(); await up.screenshot({ path: path.join(data, 'no-groups.png') });
+  await expect(up.getByTitle('新建会话', { exact: true })).toBeEnabled();
   const snap = () => up.evaluate(() => window.workbench.call('snapshot'));
   assert.equal((await snap()).sessions.length, 0);
-  await assert.rejects(up.evaluate(data => window.workbench.call('session.create', { provider: 'codex', cwd: data }), data), /没有加入工作组/);
+  await assert.rejects(up.evaluate(data => window.workbench.call('session.create', { provider: 'codex', cwd: data, projectId: 'unauthorized-team-project' }), data), /没有加入工作组/);
   for (const group of ['local_ocr', 'local_nlp']) {
     await row.getByRole('button', { name: '加入用户组', exact: true }).click(); await ap.getByLabel('选择已有用户组').selectOption(group);
     await ap.getByLabel('成员身份', { exact: true }).selectOption('admin'); await confirm(ap);
   }
-  await up.getByRole('button', { name: '刷新账号身份与工作组', exact: true }).click(); await expect(up.locator('.workgroup')).toHaveCount(2);
+  await up.getByRole('button', { name: '刷新工作组、项目和文件', exact: true }).click(); await expect(up.locator('.workgroup')).toHaveCount(2);
   await expect(up.getByText('还没有加入工作组', { exact: true })).toHaveCount(0); await expect(up.locator('[data-group-name="local_secret"]')).toHaveCount(0);
   for (const group of ['ocr', 'nlp']) {
-    if (group !== 'ocr') await up.getByTitle('在 ' + group + ' 创建项目', { exact: true }).click();
+    await up.getByTitle('在 ' + group + ' 创建项目', { exact: true }).click();
     await expect(up.getByRole('dialog', { name: '完善项目资料' })).toContainText(group + ' · 项目初始化');
     await fs.mkdir(path.join(data, group), { recursive: true });
     await completeProjectSetup(up, '同名项目', path.join(data, group));
@@ -116,6 +123,6 @@ try {
   await up.getByTitle('刷新工作组、项目和文件', { exact: true }).click(); await expect(up.locator('.workgroup .inline-error')).toBeVisible();
   await expect(up.getByText('还没有加入工作组', { exact: true })).toHaveCount(0);
   assert.deepEqual(errors, []);
-  await fs.writeFile(path.join(data, 'result.json'), JSON.stringify({ passed: true, cases: ['unassigned login and admin config import', 'no shared root or shared path input', 'unassigned users have no workbench', 'live group assignment', 'one saved account login discovers two groups', 'separate groups and same-name projects', 'independent subadmin/member roles and backend denial', 'canceled upload preserves view with no task or success toast', 'selected upload queues and reaches shared filesystem', 'one refresh updates both membership and current project files', 'separate file refresh removed', 'user refreshes identity after administrator changes', 'session stays bound after switching groups', 'membership revocation blocks upload', 'inaccessible group differs from no groups'], screenshots: ['no-groups.png', 'two-groups.png', 'independent-roles.png'] }, null, 2));
+  await fs.writeFile(path.join(data, 'result.json'), JSON.stringify({ passed: true, cases: ['unassigned login and admin config import', 'no shared root or shared path input', 'unassigned users retain personal work but cannot create team sessions', 'live group assignment', 'one saved account login discovers two groups', 'separate groups and same-name projects', 'independent subadmin/member roles and backend denial', 'canceled upload preserves view with no task or success toast', 'selected upload queues and reaches shared filesystem', 'one refresh updates both membership and current project files', 'separate file refresh removed', 'user refreshes identity after administrator changes', 'session stays bound after switching groups', 'membership revocation blocks upload', 'inaccessible group differs from no groups'], screenshots: ['no-groups.png', 'two-groups.png', 'independent-roles.png'] }, null, 2));
   console.log(JSON.stringify({ passed: true, data }));
 } finally { for (const app of apps.reverse()) await app.close().catch(() => {}); }

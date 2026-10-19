@@ -35,6 +35,7 @@ export class ActivityAssistant {
   private controller?: AbortController;
   private stopped = false;
   private enabled = false;
+  private pauses = 0;
   private touched = new Set<string>();
   private summaryQueue: string[] = [];
   private summaryRetries = new Set<string>();
@@ -44,6 +45,9 @@ export class ActivityAssistant {
   private lastMatched = new Map<string, number>();
   private lastError?: string;
   constructor(private host: ActivityHost, public runText: TextTask) {}
+  get busy() { return !!this.running; }
+  async pause() { this.pauses++; this.controller?.abort(); await this.running; }
+  resume() { this.pauses = Math.max(0, this.pauses - 1); }
   get state() { return this.host.store.activity; }
   view(): ActivityAssistantView {
     const ids = new Set(this.host.store.sessions.filter(s => this.host.owns(s)).map(s => s.id));
@@ -119,7 +123,7 @@ export class ActivityAssistant {
   }
   async tick() {
     if (this.running) return this.running;
-    if (this.stopped || !this.enabled) return;
+    if (this.stopped || this.pauses || !this.enabled) return;
     const connected = this.host.connected();
     if (this.connected === false && connected) this.connectionRecovered();
     this.connected = connected;

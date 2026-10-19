@@ -24,7 +24,8 @@ const launch = async () => {
   const page = await app.firstWindow(); page.on('pageerror', error => errors.push(error.message));
   await expect(page.getByRole('heading', { name: '登录团队工作台', exact: true })).toBeVisible();
   await expect(page.getByLabel('代码目录（选填）')).toHaveCount(0);
-  await page.locator('.modal').getByRole('button', { name: '取消', exact: true }).click();
+  await page.locator('.modal').getByRole('button', { name: '跳过，暂不登录', exact: true }).click();
+  await page.locator('[data-project-id="' + offlineProjectId + '"]').click();
   assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().some(window => window.isVisible())), false);
   return page;
 };
@@ -46,6 +47,7 @@ try {
   await session.getByRole('button', { name: '取消', exact: true }).click();
 
   // Each project's own settings stays available to members, including offline.
+  await page.locator('.personal-heading').click();
   await page.getByRole('button', { name: '项目设置：测试项目', exact: true }).click();
   const projectSettings = page.getByRole('dialog', { name: '项目设置 · 测试项目', exact: true });
   await expect(projectSettings).toBeVisible();

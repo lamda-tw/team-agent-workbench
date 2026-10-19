@@ -1153,7 +1153,7 @@ def _execute(request):
         import pwd, grp
         username = account_name(request.get("username"))
         login = system_username(username)
-        password = check_password(request.get("password", ""))
+        password = check_password(request.get("password", "123456") if op == "user_create" else request.get("password", ""))
         groups = request.get("groups", [])
         if any(g not in state["groups"] or not state["groups"][g].get("workspace") or state["groups"][g].get("deletedAt") or state["groups"][g].get("purgedAt") for g in groups) or any(g not in groups for g in request.get("contentAdminGroups", [])):
             raise ValueError("请选择已准备好的用户组，组管理员须属于对应组")
@@ -1186,6 +1186,7 @@ def _execute(request):
             raise ValueError("账号身份与创建记录不符，拒绝恢复")
         checkpoint(root, state, "专用账号已创建")
         run(["chpasswd"], login + ":" + password + "\n")
+        record["mustChangePassword"] = True
         checkpoint(root, state, "初始密码已设置")
         assign_groups(root, state, request)
         record["provisioning"] = False

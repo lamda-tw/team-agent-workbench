@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -107,7 +108,12 @@ else if (command === 'login') {
       else if (current.status === 'expired') send({ id: m.id, error: { code: -32000, message: 'refresh_token_expired' } });
       else { const reply = () => send({ id: m.id, result: { requiresOpenaiAuth: current.status !== 'custom', account: current.status === 'ready' ? { type: 'chatgpt', email: 'fake@example.com', planType: 'pro' } : null } }); if (current.delay) setTimeout(reply, current.delay); else reply(); }
     } else if (m.method === 'thread/start' || m.method === 'thread/resume') {
-      threadId = m.params.threadId || (m.params.ephemeral ? 'fake-background-' + process.pid : 'fake-thread');
+      threadId = m.params.threadId || (current.nativeHistory ? randomUUID() : m.params.ephemeral ? 'fake-background-' + process.pid : 'fake-thread');
+      if (current.nativeHistory && process.env.CODEX_HOME) {
+        const file = path.join(process.env.CODEX_HOME, 'sessions', `rollout-${threadId}.jsonl`);
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        if (!fs.existsSync(file)) fs.writeFileSync(file, JSON.stringify({ type: 'session_meta', payload: { id: threadId } }) + '\n');
+      }
       approvalPolicy = m.params.approvalPolicy || current.permissionConfig?.approval || 'on-request';
       if (current.rejectPermissionMode) send({ id: m.id, error: { code: -32000, message: 'sandbox mode not allowed by administrator policy' } });
       else send({ id: m.id, result: { thread: { id: threadId }, ...(current.permissionRuntime ? { sandbox: { type: ({ 'read-only': 'readOnly', 'workspace-write': 'workspaceWrite', 'danger-full-access': 'dangerFullAccess' })[m.params.sandbox || current.permissionConfig?.sandbox || 'workspace-write'], networkAccess: false }, approvalPolicy: m.params.approvalPolicy || current.permissionConfig?.approval || 'on-request', approvalsReviewer: m.params.approvalsReviewer || current.permissionConfig?.reviewer || 'user', ...current.permissionRuntimeOverride } : {}) } });
