@@ -3,9 +3,10 @@ import { ChevronRight, Settings } from 'lucide-react';
 import type { WorkbenchAPI } from '../shared/types';
 import { RsiRecommendationToggle } from './rsi-recommendation-toggle';
 
-export function SidebarProjectItem({ project, selected, select, settings, call }: {
+export function SidebarProjectItem({ project, selected, select, settings, call, recommendations, pending }: {
   project: { id: string; name: string }; selected: boolean;
   select: () => void; settings: () => void; call: WorkbenchAPI['call'];
+  recommendations?: () => void; pending?: number;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   useEffect(() => { if (!selected) setCollapsed(false); }, [selected]);
@@ -18,6 +19,6 @@ export function SidebarProjectItem({ project, selected, select, settings, call }
       </button>
       <button className="icon project-settings-action" title={'项目设置：' + project.name} aria-label={'项目设置：' + project.name} onClick={settings}><Settings size={14}/></button>
     </div>
-    {expanded && <div className="workgroup-project-details" id={detailsId}><RsiRecommendationToggle projectId={project.id} projectName={project.name} call={call}/></div>}
+    {expanded && <div className="workgroup-project-details" id={detailsId}><RsiRecommendationToggle projectId={project.id} projectName={project.name} call={call} open={recommendations} pending={pending}/></div>}
   </div>;
 }

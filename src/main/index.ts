@@ -74,7 +74,7 @@ let personalRelay: DataContext | undefined;
 function actionContext(action: string, raw: any, owner: BrowserWindow, preferPersonal = false): DataContext {
   const team = contexts.get(owner)!;
   preferPersonal ||= personalWindows.has(owner);
-  if (!personalContext || action === 'snapshot' || action === 'workspace.select' || action === 'layout.sidebar' || action.startsWith('account.') || action === 'local.move' || /^(remote\.|group\.|project\.|assignment\.|question\.|content\.|window\.)/.test(action)) return team;
+  if (!personalContext || action === 'snapshot' || action === 'workspace.select' || action === 'layout.sidebar' || action.startsWith('account.') || action === 'local.move' || /^(remote\.|group\.|project\.|assignment\.|question\.|rsi\.|content\.|window\.)/.test(action)) return team;
   if (action.startsWith('local.')) return personalContext;
   if (Array.isArray(raw?.ids)) { const localIds = new Set([...personalContext.workbench.store.sessions, ...personalContext.workbench.store.drafts].map(item => item.id)); if (raw.ids.some((id: string) => localIds.has(id)) && !raw.ids.every((id: string) => localIds.has(id))) throw new Error('请分别处理未分项目和团队项目中的记录'); if (raw.ids.every((id: string) => localIds.has(id))) return personalContext; }
   const sessionId = raw?.id || raw?.parentId || raw?.sessionId;
@@ -271,6 +271,7 @@ async function dispatch(action: string, raw: unknown, owner: BrowserWindow, pref
     case 'rsi.preference': { const p = z.object({ projectId: text, text: z.string().max(2000) }).parse(raw); return workbench.rsi.personalPreference(p.projectId, p.text); }
     case 'rsi.reuse': { const p = z.object({ projectId: text, sourceProjectId: text, policyId: text }).parse(raw); return workbench.rsi.reuse(p.projectId, p.sourceProjectId, p.policyId); }
     case 'rsi.view': return workbench.rsi.view(z.object({ projectId: text }).parse(raw).projectId);
+    case 'rsi.inbox': return workbench.rsi.inbox(z.object({ projectId: text }).parse(raw).projectId);
     case 'rsi.configure': { const p = z.object({ projectId: text, config: z.unknown() }).parse(raw); return workbench.rsi.configure(p.projectId, p.config); }
     case 'rsi.collect': return workbench.rsi.collect(z.object({ projectId: text }).parse(raw).projectId);
     case 'rsi.run': { const p = z.object({ projectId: text, operation: z.enum(['recommend', 'learn', 'evaluate']), candidateId: text.optional() }).parse(raw); await workbench.rsi.start(p.projectId, p.operation, 'manual', p.candidateId); return true; }

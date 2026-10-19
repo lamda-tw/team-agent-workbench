@@ -49,8 +49,9 @@ export interface RsiSuggestion extends z.infer<typeof rsiSuggestionSchema> {
   sessionId: string; projectId: string;
 }
 export const rsiReactionSchema = z.object({
-  suggestionId: z.string(), kind: z.enum(['presented', 'visible', 'accepted', 'rejected', 'dismissed', 'deferred', 'edited', 'feedback', 'action', 'outcome']),
+  suggestionId: z.string(), kind: z.enum(['presented', 'visible', 'accepted', 'rejected', 'dismissed', 'reopened', 'supplement', 'deferred', 'edited', 'feedback', 'action', 'outcome']),
   text: z.string().trim().max(6000).default(''), requestId: z.string().min(1).max(160),
+  linkedSessionId: z.string().min(1).nullable().optional(),
   outcome: z.enum(['success', 'failure', 'rework', 'unknown']).optional(),
 }).strict();
 export type RsiReaction = z.infer<typeof rsiReactionSchema>;
@@ -94,6 +95,20 @@ export interface RsiView extends RsiProject {
   busy: boolean; stage?: string; queued: boolean; personalPreference: string;
   sourceSession?: { id: string; title: string; provider: string; model?: string; reasoningEffort?: string };
   reusablePolicies: { projectId: string; policyId: string; guidance: string; validatedProjects: number }[];
+}
+
+export function rsiReview(suggestionId: string, events: RsiEvent[]) {
+  const own = events.filter(event => event.suggestionId === suggestionId);
+  const decision = own.filter(event => event.kind === 'accepted' || event.kind === 'rejected').at(-1)?.kind as 'accepted' | 'rejected' | undefined;
+  const closed = own.filter(event => event.kind === 'dismissed' || event.kind === 'reopened').at(-1)?.kind === 'dismissed';
+  const supplement = own.filter(event => event.kind === 'supplement').at(-1);
+  return { decision: decision || 'pending' as const, closed, linkedSessionId: supplement?.linkedSessionId || undefined,
+    feedback: supplement?.text ?? own.filter(event => ['accepted', 'rejected', 'feedback'].includes(event.kind) && event.text).at(-1)?.text ?? '' };
+}
+export interface RsiInbox {
+  projectId: string; enabled: boolean; busy: boolean; queued: boolean; lastError?: string;
+  sessions: { id: string; title: string }[];
+  items: (RsiSuggestion & { review: ReturnType<typeof rsiReview>; evidence: Pick<RsiEvidence, 'id' | 'source' | 'text' | 'eventAt'>[] })[];
 }
 
 export function rsiSuggestionState(suggestion: RsiSuggestion, events: RsiEvent[]) {

@@ -28,10 +28,13 @@ test('other project/session histories and unknown accounts do not enter the curr
   const profile = workbench.store.settings.workspaceSnapshot!.profile;
   profile.projects.push({ ...profile.projects[0], id: 'other-project', name: '其他项目' });
   const a = await workbench.createSession('codex', root, offlineProjectId), b = await workbench.createSession('cursor', root, 'other-project');
+  const closed = await workbench.createSession('codex', root, offlineProjectId); closed.closedAt = new Date().toISOString();
+  assert.deepEqual((await workbench.rsi.inbox(offlineProjectId)).sessions.map(item => item.id), [a.id]);
   a.messages.push({ id: randomUUID(), role: 'user', text: 'ALICE_PROJECT_A', createdAt: new Date().toISOString() });
   b.messages.push({ id: randomUUID(), role: 'user', text: 'PRIVATE_PROJECT_B', createdAt: new Date().toISOString() });
   await workbench.rsi.collect(offlineProjectId); assert(!JSON.stringify(await workbench.rsi.view(offlineProjectId)).includes('PRIVATE_PROJECT_B'));
   profile.username = 'bob'; await workbench.rsi.collect(offlineProjectId);
+  assert.deepEqual((await workbench.rsi.inbox(offlineProjectId)).sessions, []);
   assert(!JSON.stringify(await workbench.rsi.view(offlineProjectId)).includes('ALICE_PROJECT_A'));
   profile.projects = []; await assert.rejects(workbench.rsi.collect(offlineProjectId), /项目/);
 }));
@@ -48,7 +51,7 @@ test('default-on shadow analysis stays asynchronous without changing the convers
   assert.equal(session.status, 'idle'); assert.equal(workbench.rsi.busy, true);
   release(); await workbench.rsi.settled(); const view = await workbench.rsi.view(offlineProjectId);
   assert.equal(view.events.length, 0); assert.equal(view.suggestions.length, 1);
-  assert.match(view.runs.at(-1)!.decision!, /仅作后台记录/);
+  assert.match(view.runs.at(-1)!.decision!, /等待用户处理/);
   assert.deepEqual(session, before); assert.deepEqual(workbench.store.inputs, inputs); assert.deepEqual(workbench.store.conclusions, results);
   const saved = JSON.parse(await fs.readFile(path.join(workbench.store.root, 'rsi-v2.json'), 'utf8'));
   assert.equal(saved.projects[view.scope.key].suggestions.length, 1);

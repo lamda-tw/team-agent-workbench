@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { RsiEngine, rsiContext, rsiPrompt, validateRsiAnswer } from '../src/core/rsi';
-import { rsiConfigSchema, rsiDefaultRules, rsiSuggestionState, type RsiObservation, type RsiEvidence } from '../src/shared/rsi';
+import { rsiConfigSchema, rsiDefaultRules, rsiSuggestionState, rsiReview, type RsiObservation, type RsiEvidence } from '../src/shared/rsi';
 import type { AgentSession } from '../src/shared/types';
 const pause = () => new Promise(resolve => setTimeout(resolve, 5));
 const answer = (evidence: { id: string; text: string }[], action = '先检查开发集') => ({ state: { progress: '尚待验证', blockers: [], unknowns: ['真实效果待验证'], evidenceIds: evidence.map(item => item.id) }, suggestions: action ? [{ title: '下一步', action, reason: '项目要求', conditions: ['不修改冻结测试集'], uncertainty: '需要独立测试', evidenceIds: [evidence[0].id], priority: 0.8 }] : [] });
@@ -80,6 +80,56 @@ test('observations deduplicate exact source revisions but preserve corroborating
   assert.deepEqual(await engine.observe('p1', [a]), []);
   await engine.observe('p1', [{ ...a, source: 'execution', sourceId: 'tool', assertion: 'observed' }]);
   const view = await engine.view('p1'); assert.equal(view.evidence.length, 2); assert.equal(new Set(view.evidence.map(item => item.factKey)).size, 1); assert.equal(view.events.length, 0);
+}));
+
+test('recommendations accept or reject without mandatory feedback; close is independent and retry is idempotent', async () => fixture(async ({ engine, calls }) => {
+  const view = await recommend(engine), suggestionId = view.suggestions[0].id;
+  const initial = structuredClone((await engine.inbox('p1')).items[0]);
+  const reaction = { suggestionId, kind: 'accepted', requestId: 'accept' };
+  await engine.feedback('p1', reaction); await engine.feedback('p1', reaction);
+  assert.equal((await engine.view('p1')).events.length, 1);
+  await engine.feedback('p1', { suggestionId, kind: 'supplement', requestId: 'empty', text: '', linkedSessionId: null });
+  await engine.feedback('p1', { suggestionId, kind: 'dismissed', requestId: 'close' });
+  let state = rsiReview(suggestionId, (await engine.view('p1')).events);
+  assert.equal(state.decision, 'accepted'); assert.equal(state.closed, true);
+  await engine.feedback('p1', { suggestionId, kind: 'reopened', requestId: 'open' });
+  state = rsiReview(suggestionId, (await engine.view('p1')).events);
+  assert.equal(state.decision, 'accepted'); assert.equal(state.closed, false);
+  await engine.feedback('p1', { suggestionId, kind: 'rejected', requestId: 'reject' });
+  await engine.feedback('p1', { suggestionId, kind: 'supplement', requestId: 'reject-empty' });
+  assert.equal(rsiReview(suggestionId, (await engine.view('p1')).events).decision, 'rejected');
+  await assert.rejects(engine.feedback('p1', { ...reaction, text: 'changed payload' }), /重复请求/);
+  assert.equal(calls.length, 1); assert.equal((await engine.view('p1')).events.some(event => event.kind === 'outcome'), false);
+  const final = (await engine.inbox('p1')).items[0]; assert.equal(final.action, initial.action); assert.equal(final.evidence.length, initial.evidence.length);
+}));
+
+test('session associations validate live eligibility, survive closure, and never change conversation contents', async () => fixture(async ({ engine, session }) => {
+  const view = await recommend(engine), suggestionId = view.suggestions[0].id;
+  await assert.rejects(engine.feedback('p1', { suggestionId, kind: 'supplement', linkedSessionId: session.id, requestId: 'too-soon' }), /先接受/);
+  await engine.feedback('p1', { suggestionId, kind: 'accepted', requestId: 'accept' });
+  await assert.rejects(engine.feedback('p1', { suggestionId, kind: 'supplement', linkedSessionId: 'foreign', requestId: 'foreign' }), /当前账号/);
+  session.closedAt = new Date().toISOString();
+  await assert.rejects(engine.feedback('p1', { suggestionId, kind: 'supplement', linkedSessionId: session.id, requestId: 'closed' }), /开放/);
+  delete session.closedAt;
+  const before = structuredClone(session);
+  await engine.feedback('p1', { suggestionId, kind: 'supplement', linkedSessionId: session.id, text: '先看边界样本', requestId: 'link' });
+  assert.deepEqual(session, before);
+  session.closedAt = new Date().toISOString();
+  await engine.feedback('p1', { suggestionId, kind: 'supplement', linkedSessionId: session.id, text: '会话完成后补充反馈', requestId: 'after-close' });
+  assert.equal((await engine.inbox('p1')).sessions.length, 0);
+  assert.equal((await engine.inbox('p1')).items[0].review.linkedSessionId, session.id);
+  await engine.feedback('p1', { suggestionId, kind: 'supplement', linkedSessionId: null, requestId: 'unlink' });
+  assert.equal((await engine.inbox('p1')).items[0].review.linkedSessionId, undefined);
+  await assert.rejects(engine.feedback('p2', { suggestionId, kind: 'accepted', requestId: 'other-project' }), /不属于/);
+}));
+
+test('blank rejection alone cannot trigger strategy learning', async () => fixture(async ({ engine, calls }) => {
+  await engine.configure('p1', { autoLearn: true });
+  const view = await recommend(engine);
+  await engine.feedback('p1', { suggestionId: view.suggestions[0].id, kind: 'rejected', requestId: 'blank' });
+  assert.equal((await engine.view('p1')).queued, false);
+  await engine.start('p1', 'learn'); await engine.settled();
+  assert.match((await engine.view('p1')).lastError!, /明确反馈/); assert.equal(calls.length, 1);
 }));
 
 test('shadow controls preserve project configuration, resume a paused project, and enforce the call budget', async () => fixture(async ({ engine, session, calls }) => {
