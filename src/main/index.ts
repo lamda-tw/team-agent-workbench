@@ -253,7 +253,9 @@ async function dispatch(action: string, raw: unknown, owner: BrowserWindow, pref
     }
     case 'session.cursorNative.queue': { const p=z.object({id,action:z.enum(['cancel','resume','reconcile','confirm','withdraw']),requestId:z.string().uuid().optional(),nativeMessageId:z.string().uuid().optional()}).parse(raw);return workbench.cursorQueueAction(p.id,p.action,p.requestId,p.nativeMessageId); }
     case 'session.native.publish': return workbench.publishToDesktop(sessionInput.parse(raw).id);
-    case 'subsession.create': { const p = z.object({ parentId: id, focus: z.string().trim().min(1).max(120) }).parse(raw); return workbench.forkSubsession(p.parentId, p.focus); }
+    case 'subsession.create': { const p = z.object({ parentId: id, focus: z.string().trim().max(120).default('子会话'), selectedText: z.string().max(128 * 1024).default('') }).parse(raw); return workbench.forkSubsession(p.parentId, p.focus, p.selectedText); }
+    case 'subsession.promote': return workbench.promoteSubsession(sessionInput.parse(raw).id);
+    case 'subsession.history': return workbench.subsessionHistory(sessionInput.parse(raw).id);
     case 'subsession.report.preview': return workbench.previewSubsessionReport(sessionInput.parse(raw).id);
     case 'subsession.report.publish': { const p = z.object({ id, sourceHash: z.string().regex(/^[a-f0-9]{64}$/), body: z.string().min(1).max(128 * 1024) }).parse(raw); return workbench.publishSubsessionReport(p.id, p.sourceHash, p.body); }
     case 'subsession.report.review': { const p = z.object({ parentId: id, childId: id, reportId: id }).parse(raw); return workbench.reviewSubsessionReport(p.parentId, p.childId, p.reportId); }
@@ -388,7 +390,7 @@ async function dispatch(action: string, raw: unknown, owner: BrowserWindow, pref
       const p = z.object({ id, expectedTurnId: z.string().min(1).max(200), text: text.min(1), sourceIds: z.array(z.string()).default([]), capabilities: z.array(capability).max(20).default([]) }).parse(raw);
       return workbench.steer(p.id, p.expectedTurnId, p.text, p.sourceIds, p.capabilities);
     }
-    case 'session.input': { const p = z.object({ id, input: z.object({ text, sourceIds: z.array(z.string()), answers: z.record(z.string(), z.string()), capabilities: z.array(capability).max(20).optional() }) }).parse(raw); await workbench.saveInput(p.id, p.input); return true; }
+    case 'session.input': { const p = z.object({ id, input: z.object({ nextTurnOnly: z.boolean().optional(), text, sourceIds: z.array(z.string()), answers: z.record(z.string(), z.string()), capabilities: z.array(capability).max(20).optional() }) }).parse(raw); await workbench.saveInput(p.id, p.input); return true; }
     case 'session.stop': return workbench.stop(sessionInput.parse(raw).id);
     case 'session.close': return workbench.closeSession(sessionInput.parse(raw).id);
     case 'session.delete': return workbench.deleteSession(sessionInput.parse(raw).id);

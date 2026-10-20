@@ -110,6 +110,21 @@ export class AgentRuntime {
     const job = this.startSession(); this.starting = job;
     try { await job; } finally { if (this.starting === job) this.starting = undefined; this.hydratingShared = false; this.earlySharedEvents = []; }
   }
+  /** Fork the live thread without interrupting it, starting a turn or compacting.
+   * Omitting lastTurnId deliberately includes the in-progress native turn.
+   * Codex records its interruption in the child, not in the parent. */
+  async forkCodexThread(capture?: () => void) {
+    if (this.session.provider !== 'codex') throw new Error('当前仅支持 Codex 子会话');
+    await this.start();
+    if (!this.session.nativeId || this.closing) throw new Error('Codex 会话尚未就绪');
+    capture?.();
+    const result = await this.rpc.request('thread/fork', {
+      threadId: this.session.nativeId, excludeTurns: true,
+      cwd: this.session.cwd, ...codexPermissionParams(this.session),
+    });
+    if (!result.thread?.id || result.thread.id === this.session.nativeId || !result.thread.path) throw new Error('Codex 未返回独立分支，父会话未改变');
+    return { id: String(result.thread.id), path: String(result.thread.path), desktop: !!this.storage?.sharedEndpoint };
+  }
   private async startSession() {
     if (this.initialized) return;
     const s = this.session; s.status = 'starting'; s.error = undefined; this.hooks.changed();

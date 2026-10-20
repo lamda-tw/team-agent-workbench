@@ -65,8 +65,8 @@ import { linkConclusionPublications } from './conclusion-publications';
 import { applyPreparation, contributionCategoryDirectory, preparationFieldContract, preparationWritingGuide } from './preparation';
 import { attachedConclusion, conclusionTitle, isConclusionSource } from '../shared/conclusion-context';
 import { acceptedSessionContext, isPersonalHandoffSource, sourceIdentity, sourceWasAccepted } from '../shared/session-context';
-import { forkWorkspace, removeForkWorkspace } from './subsession-workspace';
-import { changedWorkspaceFiles, forkContextMarkdown, reportSourceHash } from './subsession-report';
+import { subsessionFamily, subsessionParentId, quoteSessionText } from '../shared/subsessions';
+import { changedWorkspaceFiles, reportSourceHash } from './subsession-report';
 import { safeFilename, localWithin } from './paths';
 import { ProviderAccounts, authReady } from './provider-auth';
 import { inspectCatalog } from './provider-catalog';
@@ -138,7 +138,7 @@ export class Workbench {
   async runAccountOperation<T>(action: string, operation: () => Promise<T>): Promise<T> {
     const independent = ['snapshot', 'remote.connect', 'window.new'].includes(action);
     if (!independent) this.assertAccountReady();
-    const readOnly = ['rsi.view', 'rsi.inbox', 'rsi.settings', 'rsi.summary', 'remote.list', 'remote.preview', 'remote.manifest', 'content.list', 'content.history', 'content.sync', 'content.updates', 'account.sync', 'project.brief', 'question.members', 'question.sync', 'assignment.list', 'assignment.members', 'conclusion.list', 'conclusion.match', 'content.deletion.conclusions', 'session.history', 'session.files', 'session.file.preview', 'handoff.read', 'handoff.list', 'subsession.report.preview', 'draft.attachment.preview', 'content.attachment.preview', 'conclusion.file.preview', 'question.file.preview', 'choose.directory', 'choose.executable', 'copy', 'open.link', 'open.data'].includes(action);
+    const readOnly = ['rsi.view', 'rsi.inbox', 'rsi.settings', 'rsi.summary', 'remote.list', 'remote.preview', 'remote.manifest', 'content.list', 'content.history', 'content.sync', 'content.updates', 'account.sync', 'project.brief', 'question.members', 'question.sync', 'assignment.list', 'assignment.members', 'conclusion.list', 'conclusion.match', 'content.deletion.conclusions', 'session.history', 'session.files', 'session.file.preview', 'handoff.read', 'handoff.list', 'subsession.history', 'subsession.report.preview', 'draft.attachment.preview', 'content.attachment.preview', 'conclusion.file.preview', 'question.file.preview', 'choose.directory', 'choose.executable', 'copy', 'open.link', 'open.data'].includes(action);
     const epoch = this.accountRevision, token = Symbol(action);
     if (!independent && !readOnly) this.accountMutations.add(token);
     try {
@@ -1228,7 +1228,7 @@ export class Workbench {
     if ((s.reasoningEffort || undefined) === next) return s;
     return this.updateSessionSettings(s, () => { if (next) s.reasoningEffort = next; else delete s.reasoningEffort; });
   }
-  async createSession(provider: Provider, cwd: string, projectId?: string, purpose: 'work' | 'prepare' = 'work', parentId?: string, model?: string, permissionMode: PermissionMode = 'inherit', includeBrief = true, networkRoute?: SessionNetworkRoute, desktopSync = false, personalGroupId?: string) {
+  async createSession(provider: Provider, cwd: string, projectId?: string, purpose: 'work' | 'prepare' = 'work', parentId?: string, model?: string, permissionMode: PermissionMode = 'inherit', includeBrief = true, networkRoute?: SessionNetworkRoute, desktopSync = false, personalGroupId?: string, deferRegistration = false) {
     this.assertWorkspace();
     if (personalGroupId && (!this.personal || !this.store.settings.personalGroups?.some(group => group.id === personalGroupId))) throw new Error('个人分组已改变，请重新选择');
     if (desktopSync && provider === 'cursor') assertCursorSharedSessionAvailable();
@@ -1250,6 +1250,7 @@ export class Workbench {
     await fs.writeFile(handoffPath, '# 阶段摘要\n\n## 当前工作焦点与范围\n待补充。\n\n## 当前进展\n尚未整理。\n\n## 已确认的决定与依据\n尚无。\n\n## 改动、影响范围与验证\n记录文件、版本、受影响的流程或文档、检查结果；尚无时写“尚未验证”。\n\n## 阻塞与待确认事项\n尚无。\n\n## 下一步\n待补充。\n', { flag: 'wx' });
     const session: AgentSession = { relayAccount: parentId ? this.session(parentId).relayAccount : undefined, personalGroupId: parentId ? this.session(parentId).personalGroupId : personalGroupId, id, title: purpose === 'prepare' ? '成果整理' : '新会话', provider, model, permissionMode, cwd, purpose, networkRoute: route || (this.store.settings.egress?.enabled ? 'management' : 'direct'), parentId, createdAt: new Date().toISOString(), status: 'idle', messages: [], approvals: [], sources: [], binding, autoUpload: false, handoffPath, ...(purpose === 'work' ? { followProjectBrief: includeBrief } : {}) };
     if(desktopSync && provider==='codex')session.codexDesktop=true;
+    if (deferRegistration) return session;
     this.store.sessions.unshift(session);
     const managed = cwd.startsWith(path.join(this.store.root, 'workspaces') + path.sep);
     if (purpose === 'work' && binding) {
@@ -1361,6 +1362,8 @@ export class Workbench {
         for (const file of session.sources) if (file.contentRef?.projectId === PERSONAL_PROJECT_ID) file.contentRef.projectId = projectId;
         const events = this.store.sessionDir(session.id);
         if (await fs.stat(events).catch(() => undefined)) await fs.cp(events, target.store.sessionDir(session.id), { recursive: true, force: true });
+        for (const source of session.sources) if (localWithin(events, source.localPath)) source.localPath = path.join(target.store.sessionDir(session.id), path.relative(events, source.localPath));
+        if (session.fork?.visibleSnapshotPath && localWithin(events, session.fork.visibleSnapshotPath)) session.fork.visibleSnapshotPath = path.join(target.store.sessionDir(session.id), path.relative(events, session.fork.visibleSnapshotPath));
       }
       const movedDrafts = structuredClone(drafts);
       for (const draft of movedDrafts) {
@@ -1924,23 +1927,39 @@ export class Workbench {
     await this.store.save(); this.broadcast(); return session;
   }
   async deleteSession(id: string) {
-    return this.edit('delete-session:' + id, async () => {
-      const s = this.session(id);
-      if (s.purpose !== 'work' || !s.closedAt) throw new Error('请先关闭工作会话，再删除');
-      if (this.sending.has(id) || this.steering.has(id) || this.stoppingSessions.has(id)) throw new Error('会话正在停止，请稍后删除');
-      if (this.store.drafts.some(d => d.sessionId === id && d.generation === 'running')) throw new Error('请等待成果整理结束后删除会话');
-      const sessions = this.store.sessions, input = this.store.inputs[id], jobs = this.store.activity.jobs;
-      this.store.sessions = this.store.sessions.filter(value => value.id !== id);
-      delete this.store.inputs[id];
-      this.store.activity.jobs = this.store.activity.jobs.filter(job => job.sessionId !== id);
-      // Persist removal first: a late worker reply or restart cannot resurrect the session.
+    return this.edit('subsession-tree', async () => {
+      const root = this.session(id);
+      if (root.purpose !== 'work' || !root.closedAt) throw new Error('请先关闭工作会话，再删除');
+      const family = subsessionFamily(this.store.sessions, id), ids = new Set(family.map(value => value.id));
+      for (const session of family) {
+        this.session(session.id);
+        if (this.store.drafts.some(draft => draft.sessionId === session.id && draft.generation === 'running')) throw new Error('请等待成果整理结束后删除会话');
+      }
+      for (const session of family) if (!session.closedAt) {
+        if (['starting', 'running', 'approval'].includes(session.status)) {
+          const runtime = this.runtimes.get(session.id) || (session.nativeId ? await this.runtime(session) : undefined);
+          if (runtime instanceof AgentRuntime) await runtime.start();
+          // A shared CLI survives disconnection: explicitly stop its turn before
+          // removing the only local control. A failed cancellation aborts deletion.
+          if (runtime) await runtime.cancel();
+        }
+        await this.closeSession(session.id);
+      }
+      for (const key of ids) if (this.sending.has(key) || this.steering.has(key) || this.stoppingSessions.has(key)) throw new Error('会话正在停止，请稍后删除');
+      const sessions = this.store.sessions, inputs = this.store.inputs, jobs = this.store.activity.jobs;
+      this.store.sessions = sessions.filter(value => !ids.has(value.id));
+      this.store.inputs = Object.fromEntries(Object.entries(inputs).filter(([key]) => !ids.has(key)));
+      this.store.activity.jobs = jobs.filter(job => !ids.has(job.sessionId));
       try { await this.store.save(); }
-      catch (error) { this.store.sessions = sessions; if (input) this.store.inputs[id] = input; this.store.activity.jobs = jobs; throw error; }
-      if (s.binding) await this.rsi.forgetSession(s.binding.project.id, s.id);
-      await this.journal.remove(s);
-      if (s.cursorNative?.managed) await this.cursorDesktop.release(id);
-      clearTimeout(this.trajectoryTimers.get(id)); this.trajectoryTimers.delete(id);
+      catch (error) { this.store.sessions = sessions; this.store.inputs = inputs; this.store.activity.jobs = jobs; throw error; }
+      for (const session of family) {
+        if (session.binding) await this.rsi.forgetSession(session.binding.project.id, session.id);
+        await this.journal.remove(session);
+        if (session.cursorNative?.managed) await this.cursorDesktop.release(session.id);
+        clearTimeout(this.trajectoryTimers.get(session.id)); this.trajectoryTimers.delete(session.id);
+      }
       this.broadcast();
+      return { deletedIds: [...ids] };
     }, false);
   }
   async projectJournal(id: string) {
@@ -2722,49 +2741,92 @@ export class Workbench {
     this.remote.channel(binding);
     for (const file of files) { const frozen = await freezeFile(file, path.join(this.store.root, 'uploads', randomUUID())); await this.queue.enqueueMany([{ name: frozen.name, local: frozen.localPath, binding, folder, kind: 'upload', metadata: { kind: 'file', title: frozen.name.slice(0, 200), description: '', submission: submissionRecord(binding, [{ kind: 'file', title: frozen.name }]) } }]); }
   }
-  async forkSubsession(parentId: string, focus: string) {
-    if (!this.betaFeatureEnabled('subsessions')) throw new Error('请先在 Beta 功能中开启 Subsession');
-    const parent = this.session(parentId), title = focus.trim();
-    if (parent.cursorNative) throw new Error('此 Beta 暂不支持从 Cursor 原生会话派生 Subsession');
-    if (!title || title.length > 120) throw new Error('请填写不超过 120 字的探索方向');
-    if (parent.purpose !== 'work' || !parent.binding) throw new Error('只能从项目工作会话创建 Subsession');
-    if (['starting', 'running', 'approval'].includes(parent.status)) throw new Error('请等父会话当前回复结束后再创建 Subsession');
+  async forkSubsession(parentId: string, focus: string, selectedText = '') {
+    // Freeze renderer-visible output before any asynchronous setup. Never wait for
+    // the parent turn to finish or read a later handoff as the fork's context.
+    const parent = this.session(parentId); let captured = structuredClone(parent), capturedAt = new Date().toISOString();
+    const title = focus.trim() || '子会话';
+    if (parent.provider !== 'codex') throw new Error('当前仅支持从 Codex 创建子会话');
+    if (parent.closedAt || parent.purpose !== 'work' || !parent.binding) throw new Error('请选择未关闭的工作会话');
+    if (title.length > 120 || selectedText.length > 128 * 1024) throw new Error('子会话名称或引用过长');
     this.assertCanWork(parent.binding);
-    const context = forkContextMarkdown(parent, await this.readHandoff(parentId));
-    const workspace = await forkWorkspace(parent.cwd, this.store.root, randomUUID());
-    let child: AgentSession | undefined;
-    try {
-      child = await this.createSession(parent.provider, workspace.cwd, parent.binding.project.id, 'work', parent.id, parent.model, parent.permissionMode || 'inherit', false, parent.networkRoute, !!parent.codexDesktop && this.betaFeatureEnabled('codexDesktopSync'));
-      if (!child.binding || accountIdentity(child.binding) !== accountIdentity(parent.binding)) throw new Error('创建期间团队账号已改变，请重试');
-      const sourcesDir = path.join(this.store.sessionDir(child.id), 'sources'); await fs.mkdir(sourcesDir, { recursive: true });
-      const sourceId = randomUUID(), localPath = path.join(sourcesDir, sourceId + '-parent-context.md');
-      await fs.writeFile(localPath, context, { flag: 'wx' });
-      const snapshotHash = createHash('sha256').update(context).digest('hex');
-      child.sources.push({ id: sourceId, name: `父会话派生点 · ${parent.title}`, localPath, sourcePath: 'session-handoff:fork:' + parent.id + ':' + (parent.messages.at(-1)?.id || 'empty'), sha256: snapshotHash, size: Buffer.byteLength(context), fetchedAt: new Date().toISOString() });
-      const accepted = acceptedSessionContext(parent).sourceHashes;
-      const inheritedSourceIds: string[] = [];
-      for (const original of parent.sources.filter(source => accepted[source.id] === source.sha256)) {
-        const frozen = await freezeFile(original.localPath, sourcesDir);
-        Object.assign(frozen, { name: original.name, sourcePath: original.sourcePath, contentRef: original.contentRef });
-        child.sources.push(frozen); inheritedSourceIds.push(frozen.id);
-        if (parent.projectBrief?.sourceId === original.id) child.projectBrief = { ...parent.projectBrief, sourceId: frozen.id };
+    // Dispatch the native fork now, before the lifecycle queue or file copies.
+    // In-progress native history is forked as interrupted; the visible partial
+    // output below supplements deltas not yet persisted by Codex.
+    const nativeJob = parent.nativeId ? this.runtime(parent).then(runtime => {
+      if (!(runtime instanceof AgentRuntime)) throw new Error('Codex 运行环境不可用');
+      return runtime.forkCodexThread(() => { captured = structuredClone(parent); capturedAt = new Date().toISOString(); });
+    }) : Promise.resolve(undefined);
+    // Observe failures even while an earlier lifecycle operation holds the queue.
+    const nativeResult = nativeJob.then(value => ({ value }), error => ({ error }));
+    return this.edit('subsession-tree', async () => {
+      this.session(parentId);
+      const result = await nativeResult;
+      if ('error' in result) throw result.error;
+      const native = result.value;
+      if (this.session(parentId).closedAt) throw new Error('父会话已关闭，未保存子会话');
+      let child: AgentSession | undefined;
+      try {
+        child = await this.createSession('codex', captured.cwd, captured.binding!.project.id, 'work', parentId, captured.model, captured.permissionMode || 'inherit', false, captured.networkRoute, false, captured.personalGroupId, true);
+        if (!child.binding || accountIdentity(child.binding) !== accountIdentity(captured.binding!)) throw new Error('创建期间账号已改变');
+        const directory = path.join(this.store.sessionDir(child.id), 'sources'); await fs.mkdir(directory, { recursive: true });
+        const visibleSnapshotPath = path.join(directory, 'inherited-conversation.json');
+        await fs.writeFile(visibleSnapshotPath, JSON.stringify(captured.messages), { flag: 'wx' });
+        const active = ['starting', 'running', 'approval'].includes(captured.status);
+        let from = captured.messages.length;
+        if (active || !native) {
+          from = 0;
+          if (native) for (let index = captured.messages.length - 1; index >= 0; index--) {
+            if (captured.messages[index].role === 'user' && !captured.messages[index].steering) { from = index; break; }
+          }
+        }
+        const partial = captured.messages.slice(from).filter(message => message.role !== 'user' || message.context?.accepted !== false);
+        const context = `# 子会话创建快照\n\n创建时间：${capturedAt}\n父会话：${captured.title}\n工作目录：${captured.cwd}\n本会话与父会话共用工作目录；上下文已独立。\n${active ? '父会话当时仍在生成。以下是当时已显示的本轮片段，可能尚未完成；不要猜测其后续内容或重复执行父会话的工具。' : '已继承创建时的原生上下文。'}\n请以用户在本子会话提出的问题为准。\n\n` + partial.map(message => `## ${message.role}\n${message.userText ?? message.text}\n`).join('\n');
+        const sourceId = randomUUID(), localPath = path.join(directory, sourceId + '-fork-context.md'), snapshotHash = createHash('sha256').update(context).digest('hex');
+        await fs.writeFile(localPath, context, { flag: 'wx' });
+        child.sources.push({ id: sourceId, name: '创建时的上下文', localPath, sourcePath: 'session-handoff:fork:' + parentId, sha256: snapshotHash, size: Buffer.byteLength(context), fetchedAt: capturedAt });
+        const accepted = acceptedSessionContext(captured).sourceHashes, inheritedSourceIds: string[] = [];
+        for (const original of captured.sources.filter(source => accepted[source.id] === source.sha256 || source.id === captured.fork?.sourceId || captured.fork?.inheritedSourceIds.includes(source.id))) {
+          const frozen = await freezeFile(original.localPath, directory);
+          Object.assign(frozen, { name: original.name, sourcePath: original.sourcePath, contentRef: original.contentRef });
+          if (frozen.sha256 !== original.sha256) throw new Error('父会话引用已改变，请重新创建');
+          child.sources.push(frozen); inheritedSourceIds.push(frozen.id);
+        }
+        child.title = title; child.reasoningEffort = captured.reasoningEffort; child.mode = captured.mode;
+        child.followProjectBrief = captured.followProjectBrief;
+        child.fork = { parentId, capturedAt, parentMessageId: captured.messages.at(-1)?.id, parentMessageCount: captured.messages.length, snapshotHash, sourceId, inheritedSourceIds, workspaceKind: 'shared-directory', workspaceRoot: captured.cwd, nativeFork: !!native, parentWasRunning: active, visibleSnapshotPath };
+        if (native) {
+          child.nativeId = native.id; child.nativePath = native.path;
+          if (native.desktop) { child.codexDesktop = true; child.nativeLive = true; }
+          else child.codexStorage = 'workbench';
+        }
+        this.store.inputs[child.id] = { text: selectedText.trim() ? quoteSessionText(selectedText) : '', sourceIds: [], answers: {} };
+        this.session(parentId);
+        this.store.sessions.unshift(child);
+        await this.store.save(); this.broadcast(); return child;
+      } catch (error) {
+        if (child) { this.store.sessions = this.store.sessions.filter(value => value.id !== child!.id); delete this.store.inputs[child.id]; await this.store.save().catch(() => {}); }
+        throw error;
       }
-      child.followProjectBrief = parent.followProjectBrief !== false;
-      child.title = title;
-      child.fork = { parentId: parent.id, capturedAt: new Date().toISOString(), parentMessageId: parent.messages.at(-1)?.id, parentMessageCount: parent.messages.length, snapshotHash, sourceId, inheritedSourceIds, workspaceKind: workspace.kind, workspaceRoot: workspace.root, baseRevision: workspace.baseRevision };
-      this.store.inputs[child.id] = { text: title, sourceIds: [], answers: {} };
-      this.session(parentId); // Reject an account switch before saving a child under the wrong identity.
-      await this.store.save(); this.broadcast(); return child;
-    } catch (error) {
-      if (child) {
-        this.store.sessions = this.store.sessions.filter(session => session.id !== child!.id);
-        delete this.store.inputs[child.id];
-        await fs.rm(this.store.sessionDir(child.id), { recursive: true, force: true }).catch(() => {});
-        await this.store.save().catch(() => {});
-      }
-      await removeForkWorkspace(workspace, parent.cwd).catch(() => {});
-      throw error;
-    }
+    }, false);
+  }
+  async promoteSubsession(id: string) {
+    return this.edit('subsession-tree', async () => {
+      const session = this.session(id);
+      if (!subsessionParentId(session)) throw new Error('此会话已经是独立会话');
+      const parentId = session.parentId, fork = session.fork;
+      // Sources are already child-owned snapshots. Native history is retained on
+      // workbench deletion; never call the provider's cascading thread/delete.
+      session.parentId = undefined; session.fork = { ...fork!, promotedAt: new Date().toISOString() };
+      try { await this.store.save(); } catch (error) { session.parentId = parentId; session.fork = fork; throw error; }
+      this.broadcast(); return session;
+    }, false);
+  }
+  async subsessionHistory(id: string) {
+    const session = this.session(id);
+    const file = session.fork?.visibleSnapshotPath;
+    if (!file || !localWithin(this.store.sessionDir(id), file)) return [];
+    return JSON.parse(await fs.readFile(file, 'utf8')) as Message[];
   }
   async previewSubsessionReport(childId: string): Promise<SubsessionReportPreview> {
     if (!this.betaFeatureEnabled('subsessions')) throw new Error('请先在 Beta 功能中开启 Subsession');

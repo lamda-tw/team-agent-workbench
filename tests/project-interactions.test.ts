@@ -19,6 +19,18 @@ test('shared project panel has two accessible tabs and one close action', () => 
   assert.match(html, /收起项目工作区/); assert.match(html, /定位误差/);
   assert.doesNotMatch(html, /问题内容/); // Questions are lazy-mounted and not marked read just by viewing recommendations.
 });
+test('collapsed project panel keeps explicit reopen controls and children share the same tabs', () => {
+  const props = { projectName: '比赛', select() {}, close() {}, inbox, call, reload, questionCount: 2, questions: React.createElement('div', null, '问题草稿'), subsessions: React.createElement('div', null, '子会话内容') };
+  const collapsed = renderToStaticMarkup(React.createElement(ProjectInteractionPanel, { ...props, active: '' }));
+  assert.match(collapsed, /aria-label="展开 AI推荐"/);
+  assert.match(collapsed, /aria-label="展开提问"/); assert.match(collapsed, /aria-label="展开子会话"/);
+  assert.match(collapsed, /<aside[^>]+hidden=""/);
+  const expanded = renderToStaticMarkup(React.createElement(ProjectInteractionPanel, { ...props, active: 'subsessions' }));
+  assert.equal((expanded.match(/role="tab"/g) || []).length, 3);
+  assert.match(expanded, /id="project-subsessions-tab" role="tab" aria-selected="true"/);
+  assert.match(expanded, /展开侧栏宽度/); assert.match(expanded, /子会话内容/);
+  assert.doesNotMatch(expanded, /aria-label="展开侧栏"/);
+});
 test('accepted optional supplements, rejected feedback, and independent closure render correctly', () => {
   const render = (decision: 'accepted' | 'rejected', closed = false) => renderToStaticMarkup(React.createElement(RsiRecommendations, { inbox: { ...inbox, items: [{ ...inbox.items[0], review: { ...inbox.items[0].review, decision, closed } }] }, call, reload }));
   assert.match(render('accepted'), /关联会话/); assert.match(render('accepted'), /推荐反馈/); assert.doesNotMatch(render('accepted'), /required=/);

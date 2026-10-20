@@ -6,14 +6,15 @@ import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { Workbench } from '../src/core/workbench';
+import { AgentRuntime } from '../src/core/agents';
+import { subsessionFamily, subsessionParentId } from '../src/shared/subsessions';
 import { sessionContext } from '../src/core/session-context';
 import { grantTestWorkspace, offlineProjectId } from './fixtures/offline-workspace';
 import { forkWorkspace, removeForkWorkspace } from '../src/core/subsession-workspace';
 
-test('the Subsession Beta switch gates independent children and freezes the parent boundary', async () => {
+test('Codex forks while streaming, freezes visible deltas and sources, and publishes a complete child', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'wb-subsession-'));
   const cwd = path.join(root, 'work'); await fs.mkdir(cwd);
-  await fs.writeFile(path.join(cwd, 'model.py'), 'BASE = 1\n');
   const wb = new Workbench(path.join(root, 'data'), () => {}, () => {});
   try {
     await wb.store.init(); grantTestWorkspace(wb, cwd);
@@ -21,41 +22,97 @@ test('the Subsession Beta switch gates independent children and freezes the pare
     const referencePath = path.join(cwd, 'reference.md'); await fs.writeFile(referencePath, '已验证的测试条件');
     const referenceId = randomUUID(), referenceHash = createHash('sha256').update('已验证的测试条件').digest('hex');
     parent.sources.push({ id: referenceId, name: '测试条件', localPath: referencePath, sourcePath: '/project/reference.md', sha256: referenceHash, size: Buffer.byteLength('已验证的测试条件'), fetchedAt: new Date().toISOString() });
-    parent.nativeId = 'parent-native';
+    parent.nativeId = 'parent-native'; parent.status = 'running';
     parent.messages.push({ id: randomUUID(), role: 'user', text: '比较两种实现', createdAt: new Date().toISOString(), context: { nativeId: 'parent-native', accepted: true, workRecord: true, sourceHashes: { [referenceId]: referenceHash } } });
-    parent.messages.push({ id: randomUUID(), role: 'assistant', text: '先从精度入手。', createdAt: new Date().toISOString() });
-    parent.messages.push({ id: randomUUID(), role: 'user', text: '未送达的要求', createdAt: new Date().toISOString(), context: { nativeId: 'parent-native', accepted: false, workRecord: false, sourceHashes: {} } });
-    await wb.saveHandoff(parent.id, '# 阶段摘要\n\n精度问题待验证。');
-    await assert.rejects(wb.forkSubsession(parent.id, '方案 A'), /Beta 功能/);
-    await wb.setBetaFeature('sessionHandoff', true);
-    assert.equal(wb.betaFeatureEnabled('subsessions'), false, 'cross-session references do not turn on Subsessions');
-    await assert.rejects(wb.forkSubsession(parent.id, '方案 A'), /Beta 功能/);
-    await wb.setBetaFeature('sessionHandoff', false);
-    await wb.setBetaFeature('subsessions', true);
-    assert.equal(wb.betaFeatureEnabled('sessionHandoff'), false, 'Subsessions do not turn on cross-session references');
-    await assert.rejects(wb.listSessionHandoffs(parent.id), /Beta 功能/);
-    const child = await wb.forkSubsession(parent.id, '方案 A');
-    assert.equal(child.parentId, parent.id); assert.equal(child.fork?.parentMessageCount, 3);
-    assert.equal(child.nativeId, undefined); assert.equal(child.provider, parent.provider);
-    assert.notEqual(child.cwd, parent.cwd); assert.equal(await fs.readFile(path.join(child.cwd, 'model.py'), 'utf8'), 'BASE = 1\n');
-    await fs.writeFile(path.join(child.cwd, 'model.py'), 'BASE = 2\n');
-    assert.equal(await fs.readFile(path.join(parent.cwd, 'model.py'), 'utf8'), 'BASE = 1\n');
+    parent.messages.push({ id: randomUUID(), role: 'assistant', text: '已生成的半句', createdAt: new Date().toISOString() });
+    let finish!: () => void;
+    const native = new Promise<void>(resolve => { finish = resolve; });
+    let captured!: () => void; const ready = new Promise<void>(resolve => { captured = resolve; });
+    const runtime = Object.create(AgentRuntime.prototype);
+    runtime.forkCodexThread = async (capture: () => void) => { capture(); captured(); await native; return { id: 'child-native', path: '/fake/child.jsonl', desktop: false }; };
+    (wb as any).runtime = async () => runtime;
+    const pending = wb.forkSubsession(parent.id, '方案 A', '引用的问题');
+    await ready;
+    assert.equal(wb.store.sessions.length, 1, 'no provisional session before fork succeeds');
+    parent.messages.at(-1)!.text += '——创建以后才生成'; finish();
+    const child = await pending;
+    assert.equal(child.parentId, parent.id); assert.equal(child.fork?.parentMessageCount, 2);
+    assert.equal(child.nativeId, 'child-native'); assert.equal(child.fork?.nativeFork, true);
+    assert.equal(parent.nativeId, 'parent-native'); assert.equal(parent.status, 'running');
+    assert.equal(child.cwd, parent.cwd); assert.notEqual(child.handoffPath, parent.handoffPath);
+    assert.equal(child.approvals.length, 0); assert.equal(child.status, 'idle');
     const snapshot = await fs.readFile(child.sources.find(source => source.id === child.fork?.sourceId)!.localPath, 'utf8');
-    assert.match(snapshot, /比较两种实现/); assert.match(snapshot, /精度问题待验证/);
-    assert.doesNotMatch(snapshot, /未送达的要求/);
-    parent.messages.push({ id: randomUUID(), role: 'assistant', text: '父会话后来做了另一件事', createdAt: new Date().toISOString() });
-    assert.doesNotMatch(await fs.readFile(child.sources[0].localPath, 'utf8'), /父会话后来做了另一件事/);
-    assert.equal(wb.store.inputs[child.id].text, '方案 A');
+    assert.match(snapshot, /比较两种实现/); assert.match(snapshot, /已生成的半句/);
+    assert.doesNotMatch(snapshot, /创建以后才生成/);
+    assert.equal((await wb.subsessionHistory(child.id)).at(-1)!.text, '已生成的半句');
+    assert.equal(wb.store.inputs[child.id].text, '> 引用的问题\n\n');
     assert.equal(sessionContext(child, '开始探索', []).sources.some(source => source.id === child.fork?.sourceId), true);
     assert.equal(child.fork?.inheritedSourceIds.length, 1);
     assert.equal(await fs.readFile(child.sources.find(source => source.id === child.fork?.inheritedSourceIds[0])!.localPath, 'utf8'), '已验证的测试条件');
-    assert.equal(parent.sources.length, 1, 'creating a child does not inject new content into the parent');
-    await wb.setBetaFeature('sessionHandoff', true);
-    await wb.setBetaFeature('subsessions', false);
-    await assert.rejects(wb.forkSubsession(parent.id, '方案 B'), /Beta 功能/);
-    assert.equal(wb.betaFeatureEnabled('sessionHandoff'), true, 'turning off Subsessions leaves references enabled');
-    assert((await wb.listSessionHandoffs(child.id)).some(item => item.id === parent.id));
-    assert.equal(wb.session(child.id).id, child.id, 'turning Beta off retains the child');
+    assert.equal(parent.sources.length, 1, 'creating a child never injects into the parent');
+    await wb.store.save();
+    const persisted = JSON.parse(await fs.readFile(path.join(wb.store.root, 'sessions.json'), 'utf8'));
+    assert.equal(persisted.find((value: any) => value.id === child.id).fork.nativeFork, true);
+  } finally { await wb.close(); await fs.rm(root, { recursive: true, force: true }); }
+});
+
+test('nested forks retain independent snapshots; promotion excludes a subtree from cascading deletion', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'wb-subsession-tree-'));
+  const wb = new Workbench(root, () => {}, () => {});
+  try {
+    await wb.store.init(); grantTestWorkspace(wb, root);
+    const parent = await wb.createSession('codex', root, offlineProjectId);
+    parent.messages.push({ id: randomUUID(), role: 'user', text: '最初问题', createdAt: new Date().toISOString() });
+    const [keep, remove] = await Promise.all([wb.forkSubsession(parent.id, '保留'), wb.forkSubsession(parent.id, '删除')]);
+    const grandchild = await wb.forkSubsession(keep.id, '第三层');
+    const doomed = await wb.forkSubsession(remove.id, '同时删除');
+    assert.equal(subsessionFamily(wb.store.sessions, parent.id).length, 5);
+    assert.equal(grandchild.fork?.inheritedSourceIds.length, 1, 'inherits the unsent snapshot even before its parent starts a new turn');
+    const inherited = grandchild.sources.find(source => source.id === grandchild.fork!.inheritedSourceIds[0])!;
+    assert.match(await fs.readFile(inherited.localPath, 'utf8'), /最初问题/);
+    await wb.journal.commit(remove, '', 1, '待删除的摘要', { turnId: randomUUID(), at: new Date().toISOString(), text: '待删除的日志' });
+    await wb.promoteSubsession(keep.id);
+    assert.equal(subsessionParentId(keep), undefined); assert.equal(keep.parentId, undefined);
+    assert.equal(subsessionFamily(wb.store.sessions, parent.id).length, 3);
+    assert.equal(subsessionParentId(grandchild), keep.id);
+    let stopped = 0;
+    remove.status = 'running';
+    await wb.closeSession(parent.id);
+    (wb as any).runtimes.set(remove.id, { cancel: async () => { throw new Error('cancel failed'); }, close: async () => {} });
+    await assert.rejects(wb.deleteSession(parent.id), /cancel failed/);
+    assert.equal(wb.store.sessions.length, 5, 'failed cancellation must retain the tree and its controls');
+    (wb as any).runtimes.set(remove.id, { cancel: async () => { stopped++; }, close: async () => {} });
+    const result = await wb.deleteSession(parent.id);
+    assert.equal(stopped, 1);
+    assert.deepEqual(new Set(result.deletedIds), new Set([parent.id, remove.id, doomed.id]));
+    assert.deepEqual(new Set(wb.store.sessions.map(value => value.id)), new Set([keep.id, grandchild.id]));
+    assert.doesNotMatch((await wb.projectJournal(keep.id)).text, /待删除的日志/);
+    await assert.rejects(fs.stat(path.join(root, 'project-journals', remove.id + '.json')), { code: 'ENOENT' });
+    assert.match(await fs.readFile(inherited.localPath, 'utf8'), /最初问题/, 'retained snapshot is owned by the child');
+    assert.equal(wb.store.inputs[doomed.id], undefined);
+    assert(await fs.stat(keep.handoffPath));
+  } finally { await wb.close(); await fs.rm(root, { recursive: true, force: true }); }
+});
+
+test('failed native fork and failed persistence never publish a partial child or mutate the parent', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'wb-subsession-failure-'));
+  const wb = new Workbench(root, () => {}, () => {});
+  try {
+    await wb.store.init(); grantTestWorkspace(wb, root);
+    const parent = await wb.createSession('codex', root, offlineProjectId);
+    parent.nativeId = 'parent-native';
+    const runtime = Object.create(AgentRuntime.prototype);
+    runtime.forkCodexThread = async () => { throw new Error('native-fork-failed'); };
+    (wb as any).runtime = async () => runtime;
+    await assert.rejects(wb.forkSubsession(parent.id, '失败'), /native-fork-failed/);
+    assert.equal(wb.store.sessions.length, 1); assert.equal(parent.nativeId, 'parent-native');
+    runtime.forkCodexThread = async (capture: () => void) => { capture(); return { id: 'child-native', path: '/fake/child.jsonl' }; };
+    const save = wb.store.save.bind(wb.store);
+    wb.store.save = async () => { throw new Error('disk-full'); };
+    await assert.rejects(wb.forkSubsession(parent.id, '保存失败'), /disk-full/);
+    wb.store.save = save;
+    assert.equal(wb.store.sessions.length, 1); assert.equal(Object.keys(wb.store.inputs).length, 0);
+    assert.equal(parent.nativeId, 'parent-native'); assert.equal(parent.sources.length, 0);
   } finally { await wb.close(); await fs.rm(root, { recursive: true, force: true }); }
 });
 
@@ -107,7 +164,8 @@ test('cross-project, wrong parent and running-turn report operations are rejecte
   try {
     await wb.store.init(); grantTestWorkspace(wb, cwd); await wb.setBetaFeature('subsessions', true);
     const parent = await wb.createSession('codex', cwd, offlineProjectId);
-    parent.status = 'running'; await assert.rejects(wb.forkSubsession(parent.id, '不能复制半轮结果'), /当前回复结束/); parent.status = 'idle';
+    const cursor = await wb.createSession('cursor', cwd, offlineProjectId);
+    await assert.rejects(wb.forkSubsession(cursor.id, '不支持'), /仅支持.*Codex/);
     const child = await wb.forkSubsession(parent.id, '精度探索');
     child.status = 'running'; await assert.rejects(wb.previewSubsessionReport(child.id), /当前回复结束/); child.status = 'idle';
     const preview = await wb.previewSubsessionReport(child.id), report = await wb.publishSubsessionReport(child.id, preview.sourceHash, '仅为探索记录');

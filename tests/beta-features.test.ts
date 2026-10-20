@@ -29,12 +29,12 @@ test('legacy combined Beta choice remains enabled for both abilities', () => {
 
 test('the Beta dialog shows independent switches', () => {
   const html = renderToStaticMarkup(React.createElement(BetaFeaturesModal, { features: { sessionHandoff: true, subsessions: false }, close: () => {}, changed: async () => {} }));
-  assert.equal((html.match(/role="switch"/g) || []).length, 4);
+  assert.equal((html.match(/role="switch"/g) || []).length, 3);
   assert.match(html, /aria-label="开启跨会话引用" checked=""/);
   assert.doesNotMatch(html, /aria-label="开启 Subsession" checked=""/);
   assert.doesNotMatch(html, /aria-label="开启 Codex 桌面联动" checked=""/);
   assert.doesNotMatch(html, /aria-label="开启 Cursor Agents 联动" checked=""/);
-  assert.match(html, /关闭后不能新建 Subsession 或回报/);
+  assert.doesNotMatch(html, /开启 Subsession|关闭后不能新建 Subsession/);
   const desktopOnly = renderToStaticMarkup(React.createElement(BetaFeaturesModal, { features: { codexDesktopSync: true }, close: () => {}, changed: async () => {} }));
   assert.match(desktopOnly, /aria-label="开启 Codex 桌面联动" checked=""/);
   assert.doesNotMatch(desktopOnly, /aria-label="开启跨会话引用" checked=""|aria-label="开启 Subsession" checked=""/);

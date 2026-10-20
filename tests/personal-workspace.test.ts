@@ -55,6 +55,23 @@ test('first use has no seeded records, and local sessions/groups/results survive
   } finally { await f.close(); }
 });
 
+test('moving a subsession family preserves its frozen sources and transcript at the destination', async () => {
+  const f = await fixture();
+  try {
+    const parent = await f.local.createSession('codex', f.cwd);
+    parent.messages.push({ id: randomUUID(), role: 'user', text: '迁移前的上下文', createdAt: new Date().toISOString() });
+    const child = await f.local.forkSubsession(parent.id, '子会话');
+    const project = await f.connect();
+    const result = await f.local.movePersonalTo(f.team, project.id, { sessionId: child.id });
+    assert.equal(result.count, 2);
+    const moved = f.team.session(child.id);
+    assert.equal((await f.team.subsessionHistory(child.id))[0].text, '迁移前的上下文');
+    assert(moved.fork!.visibleSnapshotPath!.startsWith(f.team.store.root));
+    assert(moved.sources.every(source => source.localPath.startsWith(f.team.store.root)));
+    assert.match(await fs.readFile(moved.sources[0].localPath, 'utf8'), /迁移前的上下文/);
+  } finally { await f.close(); }
+});
+
 test('whole-group migration checks all members and preserves session/draft/result identity and local files', async () => {
   const f = await fixture();
   try {

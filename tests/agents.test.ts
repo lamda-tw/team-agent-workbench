@@ -7,6 +7,28 @@ import { randomUUID } from 'node:crypto';
 import { AgentRuntime } from '../src/core/agents';
 import type { AgentSession, Provider } from '../src/shared/types';
 async function until(predicate: () => boolean) { const deadline = Date.now() + 10000; while (!predicate()) { if (Date.now() > deadline) throw new Error('timeout'); await new Promise(r => setTimeout(r, 20)); } }
+test('native Codex forks return while the source turn is awaiting approval without compaction or interruption', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'workbench-native-fork-'));
+  const s: AgentSession = { id: randomUUID(), provider: 'codex', title: 'test', cwd: root, createdAt: new Date().toISOString(), purpose: 'work', status: 'idle', messages: [], approvals: [], sources: [], autoUpload: false, handoffPath: path.join(root, 'handoff.md') };
+  let completed = false;
+  const runtime = new AgentRuntime(s, path.resolve('tests/fixtures/rpc-agent.mjs'), { changed() {}, event() {}, done() { completed = true; } }, undefined, { TEST_PROVIDER: 'codex' });
+  const requests: string[] = [];
+  const request = runtime.rpc.request.bind(runtime.rpc);
+  runtime.rpc.request = async (method, ...args) => { requests.push(method); return request(method, ...args); };
+  try {
+    const pending = runtime.prompt('hello'); void pending.catch(() => {});
+    await until(() => s.status === 'approval');
+    let visible = '';
+    const first = await runtime.forkCodexThread(() => { visible = s.messages.find(value => value.role === 'assistant')!.text; });
+    const second = await runtime.forkCodexThread();
+    assert.equal(first.id, 'fork-1'); assert.equal(second.id, 'fork-2'); assert.notEqual(first.path, second.path);
+    assert.equal(visible, '中文回复'); assert.equal(completed, false);
+    assert.equal(s.status, 'approval'); assert.equal(s.approvals.length, 1); assert.equal(s.nativeId, 'native-session-1');
+    assert.equal(requests.filter(value => value === 'turn/start').length, 1);
+    assert(!requests.some(value => /compact|interrupt|delete/.test(value)));
+    runtime.answer(s.approvals[0].id, 'decline'); await pending; await until(() => completed);
+  } finally { await runtime.close(); await fs.rm(root, { recursive: true, force: true }); }
+});
 for (const mode of ['codex', 'cursor', 'codex-files', 'codex-double']) test(mode + ': native session mapping, streaming, approvals and completion', async () => {
   const provider: Provider = mode === 'cursor' ? 'cursor' : 'codex';
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'workbench-agent-'));

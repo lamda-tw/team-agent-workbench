@@ -74,19 +74,27 @@ export function RsiRecommendations({ inbox, error, call, reload }: { inbox?: Rsi
   </section>;
 }
 
-export function ProjectInteractionPanel({ projectName, active, select, close, inbox, error, call, reload, questionCount, questions }: {
-  projectName: string; active: 'recommendations' | 'questions' | ''; select: (tab: 'recommendations' | 'questions') => void; close: () => void;
+export type InteractionTab = 'recommendations' | 'questions' | 'subsessions';
+export function ProjectInteractionPanel({ projectName, active, select, close, inbox, error, call, reload, questionCount, questions, subsessions, team = true }: {
+  projectName: string; active: InteractionTab | ''; select: (tab: InteractionTab) => void; close: () => void;
   inbox?: RsiInbox; error?: string; call: WorkbenchAPI['call']; reload: () => Promise<void>; questionCount: number; questions: React.ReactNode;
+  subsessions?: React.ReactNode; team?: boolean;
 }) {
   const [visitedQuestions, setVisitedQuestions] = useState(active === 'questions');
+  const [wide, setWide] = useState(false);
   useEffect(() => { if (active === 'questions') setVisitedQuestions(true); }, [active]);
-  return <aside className="project-interaction-panel" aria-label="项目推荐与提问" hidden={!active}>
-    <header><span>{projectName}</span><button className="icon" aria-label="收起项目工作区" title="收起" onClick={close}><PanelRightClose size={17}/></button></header>
+  return <>{!active && <nav className="interaction-reopen" aria-label="展开侧栏">
+    {team && <><button aria-label="展开 AI推荐" onClick={() => select('recommendations')}><Sparkles size={16}/><span>AI推荐</span></button><button aria-label="展开提问" onClick={() => select('questions')}><MessageSquare size={16}/><span>提问</span></button></>}
+    {subsessions && <button aria-label="展开子会话" onClick={() => select('subsessions')}><MessageSquare size={16}/><span>子会话</span></button>}
+  </nav>}<aside className={'project-interaction-panel' + (wide ? ' is-wide' : '')} aria-label="项目推荐与提问" hidden={!active}>
+    <header><span>{projectName}</span><div className="row"><button className="text-button" aria-label={wide ? '还原侧栏宽度' : '展开侧栏宽度'} onClick={() => setWide(value => !value)}>{wide ? '还原' : '展开'}</button><button className="icon" aria-label="收起项目工作区" title="收起" onClick={close}><PanelRightClose size={17}/></button></div></header>
     <div className="project-interaction-tabs" role="tablist" aria-label="项目工作区内容">
-      <button id="project-ai-tab" role="tab" aria-selected={active === 'recommendations'} aria-controls="project-ai-panel" onClick={() => select('recommendations')}><Sparkles size={14}/>AI推荐{pendingRecommendations(inbox) > 0 && <span>{pendingRecommendations(inbox)}</span>}</button>
-      <button id="project-questions-tab" role="tab" aria-selected={active === 'questions'} aria-controls="project-questions-panel" onClick={() => select('questions')}><MessageSquare size={14}/>提问{questionCount > 0 && <span>{questionCount}</span>}</button>
+      {team && <><button id="project-ai-tab" role="tab" aria-selected={active === 'recommendations'} aria-controls="project-ai-panel" onClick={() => select('recommendations')}><Sparkles size={14}/>AI推荐{pendingRecommendations(inbox) > 0 && <span>{pendingRecommendations(inbox)}</span>}</button>
+      <button id="project-questions-tab" role="tab" aria-selected={active === 'questions'} aria-controls="project-questions-panel" onClick={() => select('questions')}><MessageSquare size={14}/>提问{questionCount > 0 && <span>{questionCount}</span>}</button></>}
+      {subsessions && <button id="project-subsessions-tab" role="tab" aria-selected={active === 'subsessions'} aria-controls="project-subsessions-panel" onClick={() => select('subsessions')}><MessageSquare size={14}/>子会话</button>}
     </div>
     <div className="project-interaction-pane" id="project-ai-panel" role="tabpanel" aria-labelledby="project-ai-tab" hidden={active !== 'recommendations'}><RsiRecommendations inbox={inbox} error={error} call={call} reload={reload}/></div>
     <div className="project-interaction-pane" id="project-questions-panel" role="tabpanel" aria-labelledby="project-questions-tab" hidden={active !== 'questions'}>{(visitedQuestions || active === 'questions') && questions}</div>
-  </aside>;
+    {subsessions && <div className="project-interaction-pane" id="project-subsessions-panel" role="tabpanel" aria-labelledby="project-subsessions-tab" hidden={active !== 'subsessions'}>{subsessions}</div>}
+  </aside></>;
 }

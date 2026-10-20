@@ -18,7 +18,7 @@ export type AgentCapabilityKind = 'skill' | 'plugin';
 export interface AgentCapabilitySelection { id: string; kind: AgentCapabilityKind; name: string }
 export interface AgentCapabilityOption extends AgentCapabilitySelection { description: string; invocation: string; path?: string; source?: string; enabled: boolean; unavailableReason?: string }
 export interface AgentCapabilityCatalog { provider: Provider; skills: AgentCapabilityOption[]; plugins: AgentCapabilityOption[]; checkedAt: string; skillError?: string; pluginError?: string }
-export interface SessionInput { text: string; sourceIds: string[]; answers: Record<string, string>; capabilities?: AgentCapabilitySelection[] }
+export interface SessionInput { nextTurnOnly?: boolean; text: string; sourceIds: string[]; answers: Record<string, string>; capabilities?: AgentCapabilitySelection[] }
 export interface WorkspaceAccess { path: string; canonicalPath: string; canCreateProject: boolean; role?: import('./team-groups').GroupRole; creator?: string; groupName?: string; groupLabel?: string; accessError?: string; isEmpty?: boolean }
 export interface RemoteEntry { name: string; path: string; kind: 'directory' | 'file' | 'link'; size: number; modified: number }
 export interface FilePreview { name: string; path: string; type: 'text' | 'image' | 'binary'; content: string; truncated: boolean; size: number }
@@ -30,7 +30,7 @@ export interface CursorQueuedRequest { id: string; text: string; createdAt: stri
 export interface ApprovalOption { id: string; label: string; kind: 'allow' | 'deny' | 'answer' }
 export interface Approval { id: string; method: string; title: string; summary?: string; details: string; options: ApprovalOption[]; questions?: { id: string; text: string; options: { id: string; label: string }[]; allowMultiple?: boolean }[] }
 export interface RemoteBinding { connectionId: string; host: string; port: number; username: string; fingerprint: string; project: Project }
-export interface SubsessionFork { parentId: string; capturedAt: string; parentMessageId?: string; parentMessageCount: number; snapshotHash: string; sourceId: string; inheritedSourceIds: string[]; workspaceKind: 'git-worktree' | 'directory-copy'; workspaceRoot: string; baseRevision?: string }
+export interface SubsessionFork { parentId: string; capturedAt: string; parentMessageId?: string; parentMessageCount: number; snapshotHash: string; sourceId: string; inheritedSourceIds: string[]; workspaceKind: 'git-worktree' | 'directory-copy' | 'shared-directory'; workspaceRoot: string; baseRevision?: string; nativeFork?: boolean; parentWasRunning?: boolean; promotedAt?: string; visibleSnapshotPath?: string }
 export interface SubsessionReport { id: string; version: number; createdAt: string; reviewedAt?: string; title: string; body: string; sourceHash: string; messageCount: number; latestReply: string; changedFiles: string[] }
 export interface SubsessionReportPreview { childId: string; parentId: string; title: string; body: string; latestReply: string; changedFiles: string[]; messageCount: number; sourceHash: string; nextVersion: number }
 export type SessionNetworkRoute = 'direct' | 'management';
