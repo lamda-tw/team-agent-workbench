@@ -686,6 +686,7 @@ export class Workbench {
   async setActivityProject(windowId: string, projectId: string) {
     if (projectId) { const profile = this.remote.profile || this.store.settings.workspaceSnapshot?.profile; if (!profile?.projects.some(p => p.id === projectId)) throw new Error('项目不可访问'); }
     this.activity.setProject(windowId, projectId);
+    if (projectId) void this.rsi.activate(projectId).catch(() => {});
     if (!this.contentWatch) { this.contentWatch = setInterval(() => { if (!this.configuring && !this.closing) void this.syncContentUpdates().catch(() => {}); }, 15000); this.contentWatch.unref(); }
     await this.syncContentUpdates();
   }
@@ -1817,7 +1818,7 @@ export class Workbench {
         const before = await fs.stat(file).catch(() => undefined);
         let read = true;
         for (const session of sessions) {
-          try { if (await this.readNativeTranscriptInto(session, false)) changed = true; }
+          try { if (await this.readNativeTranscriptInto(session, false)) { changed = true; if (session.binding && !['starting', 'running', 'approval'].includes(session.status)) void this.rsi.completed(session.binding.project.id).catch(() => {}); } }
           catch { read = false; }
         }
         const after = await fs.stat(file).catch(() => undefined);

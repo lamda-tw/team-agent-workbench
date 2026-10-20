@@ -1,4 +1,6 @@
 import fs from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import { createInterface } from 'node:readline';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import type { Workbench } from './workbench';
@@ -7,7 +9,7 @@ import { RsiEngine } from './rsi';
 import { accountIdentity } from '../shared/account-data';
 import { ownsBinding } from '../shared/account-scope';
 import type { RsiObservation } from '../shared/rsi';
-import type { RemoteBinding } from '../shared/types';
+import type { AgentSession, RemoteBinding } from '../shared/types';
 
 export function workbenchRsi(workbench: Workbench, runText: TextTask, changed: () => void) {
   const profile = () => workbench.remote.connected ? workbench.remote.profile : workbench.store.settings.workspaceSnapshot?.profile;
@@ -18,7 +20,7 @@ export function workbenchRsi(workbench: Workbench, runText: TextTask, changed: (
     const value = { connectionId: account.id, host: account.host, port: account.port, username: account.username, fingerprint: account.fingerprint, project };
     workbench.assertCanWork(value); return value;
   };
-  const sessions = (projectId: string) => workbench.store.sessions.filter(session => session.binding?.project.id === projectId && ownsBinding(profile(), session.binding) && session.purpose === 'work' && !session.closedAt);
+  const sessions = (projectId: string) => workbench.store.sessions.filter(session => session.binding?.project.id === projectId && ownsBinding(profile(), session.binding) && session.purpose === 'work');
   return new RsiEngine(workbench.store.root, {
     scope: projectId => { const value = binding(projectId), account = accountIdentity(value); return { key: JSON.stringify([account, projectId]), account, projectId, user: value.username }; },
     sessions: projectId => { binding(projectId); return sessions(projectId); },
@@ -27,25 +29,57 @@ export function workbenchRsi(workbench: Workbench, runText: TextTask, changed: (
       const session = sessions(projectId).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
       return session && !session.model && session.resolvedModel ? { ...session, model: session.resolvedModel } : session;
     },
+    execution: (projectId, config) => {
+      const bound = binding(projectId), execution = config.execution || { provider: 'codex' as const, model: '', networkRoute: 'direct' as const };
+      return { id: `rsi:${projectId}`, title: 'AI推荐', purpose: 'background', ...execution, model: execution.model || undefined,
+        cwd: workbench.store.root, binding: bound, createdAt: '', status: 'idle', messages: [], sources: [], approvals: [], autoUpload: false, handoffPath: '' };
+    },
+    resolveExecution: async session => {
+      await workbench.requireAuth(session.provider, session.cwd, session.networkRoute);
+      if (!session.model) {
+        const catalog = await workbench.catalog(session.provider, session.cwd, session.networkRoute);
+        const model = catalog.defaultModel || catalog.models.find(item => item.isDefault)?.id;
+        if (!model) throw new Error('无法确定 AI推荐的默认模型，请在项目设置中选择模型');
+        return { ...session, model };
+      }
+      return session;
+    },
     changed,
     collect: async projectId => {
       const bound = binding(projectId), items: RsiObservation[] = [], at = new Date().toISOString();
-      for (const session of sessions(projectId).slice(-20)) {
-        // Freeze messages before any awaited I/O; subsequent user turns become a new observation.
-        const messages = structuredClone(session.messages).slice(-30);
-        for (const message of messages) items.push({ source: message.role === 'tool' ? 'execution' : 'session', sourceId: `${session.id}/${message.id}`, factKey: `${session.id}/${message.id}`, version: createHash('sha256').update(message.text).digest('hex'), actor: message.role === 'user' ? bound.username : `${session.provider}:assistant`, eventAt: message.createdAt, assertion: message.role === 'user' ? 'explicit' : message.role === 'tool' ? 'observed' : 'inferred', sessionId: session.id, taskId: session.assignment?.id, text: `${message.role}: ${(message.userText ?? message.text).slice(0, 8000)}` });
-        items.push({ source: 'project', sourceId: `${session.id}/environment`, factKey: `${session.id}/environment`, eventAt: at, version: session.cwd, actor: bound.username, assertion: 'observed', sessionId: session.id, text: `会话：${session.title}\n本地目录：${session.cwd}\n提供方：${session.provider}\n模型：${session.model || '默认'}\n状态：${session.status}\n${session.error || ''}` });
-        const file = path.join(workbench.store.sessionDir(session.id), 'events.jsonl');
-        const handle = await fs.open(file, 'r').catch((error: any) => { if (error.code === 'ENOENT') return undefined; throw error; });
-        if (handle) {
-          try {
-            const stat = await handle.stat(), start = Math.max(0, stat.size - 24000), buffer = Buffer.alloc(Math.min(stat.size, 24000));
-            const { bytesRead } = await handle.read(buffer, 0, buffer.length, start);
-            const lines = buffer.subarray(0, bytesRead).toString('utf8').split('\n');
-            if (start) lines.shift();
-            const tools = lines.filter(line => /command_execution|function_call_output|tool_result|toolCall|tool_result|command\/exec|item\/completed/.test(line)).slice(-6).join('\n').slice(-12000);
-            if (tools) items.push({ source: 'execution', sourceId: `${session.id}/tools`, factKey: `${session.id}/tools/${stat.size}`, eventAt: at, version: String(stat.size), actor: session.provider, assertion: 'observed', sessionId: session.id, artifact: file, text: tools });
-          } finally { await handle.close(); }
+      // One native history may be imported through several UI aliases. Collect it once.
+      const unique = new Map<string, AgentSession>();
+      for (const session of sessions(projectId)) {
+        const key = session.nativeId ? `${session.provider}:${session.nativeId}:${session.nativePath || session.cwd}` : session.id;
+        const prior = unique.get(key);
+        if (!prior || session.createdAt < prior.createdAt) unique.set(key, structuredClone(session));
+      }
+      for (const session of unique.values()) {
+        let messages = session.messages;
+        const running = ['starting', 'running', 'approval'].includes(session.status);
+        if (running) { let lastUser = -1; messages.forEach((message, index) => { if (message.role === 'user') lastUser = index; }); messages = messages.slice(0, Math.max(0, lastUser)); }
+        let turnId = '', sequence = 0;
+        for (const message of messages) {
+          sequence++; if (message.role === 'user') turnId = message.nativeItemId || message.id;
+          const messageId = message.nativeItemId || message.id;
+          const text = `${message.role}: ${message.userText ?? message.text}` + (message.nativeDetails ? '\n原生执行详情：' + JSON.stringify(message.nativeDetails) : '');
+          items.push({ source: message.role === 'tool' ? 'execution' : 'session', sourceId: `${session.id}/${messageId}`, factKey: `${session.id}/${messageId}`, version: createHash('sha256').update(text).digest('hex'), actor: message.role === 'user' ? bound.username : session.provider, eventAt: message.createdAt, assertion: message.role === 'user' ? 'explicit' : message.role === 'tool' ? 'observed' : 'inferred', sessionId: session.id, sessionTitle: session.title, nativeSessionId: session.nativeId, messageId, turnId, sequence, contentType: message.role, taskId: session.assignment?.id, text });
+        }
+        // Execution logs are streamed completely; no last-N/last-byte truncation. Busy turns wait for completion.
+        if (!running) {
+          const file = path.join(workbench.store.sessionDir(session.id), 'events.jsonl');
+          if (await fs.stat(file).catch(() => undefined)) {
+            let lineNumber = 0;
+            const stream = createReadStream(file, { encoding: 'utf8' });
+            const lines = createInterface({ input: stream, crlfDelay: Infinity });
+            try { for await (const line of lines) {
+              lineNumber++;
+              if (!/command_execution|function_call_output|tool_result|toolCall|command\/exec|item\/completed/.test(line)) continue;
+              let parsed: any; try { parsed = JSON.parse(line); } catch { continue; }
+              const version = createHash('sha256').update(line).digest('hex');
+              items.push({ source: 'execution', sourceId: `${session.id}/event/${lineNumber}`, factKey: `${session.id}/event/${lineNumber}`, eventAt: parsed.at || session.createdAt, version, actor: session.provider, assertion: 'observed', sessionId: session.id, sessionTitle: session.title, nativeSessionId: session.nativeId, turnId: parsed.event?.params?.turnId, sequence: lineNumber, contentType: 'tool-result', artifact: file, text: line });
+            } } finally { lines.close(); stream.destroy(); }
+          }
         }
       }
       if (workbench.remote.connected) {
@@ -53,7 +87,11 @@ export function workbenchRsi(workbench: Workbench, runText: TextTask, changed: (
         if (brief.brief) items.push({ source: 'project', sourceId: 'project-brief', factKey: `brief/${brief.revision}`, eventAt: brief.updatedAt || at, version: String(brief.revision), actor: '项目正式资料', assertion: 'explicit', text: JSON.stringify(brief.brief) });
         for (const event of workbench.store.settings.contentUpdates || []) if (event.projectId === projectId && !event.path?.includes('/trajectories/')) items.push({ source: 'project', sourceId: event.eventId, factKey: `${event.id}/${event.revision}`, eventAt: event.occurredAt, version: String(event.revision), actor: event.updatedBy || event.author || '未知', assertion: 'observed', text: JSON.stringify(event) });
       }
-      for (const conclusion of workbench.store.conclusions.filter(item => item.projectId === projectId && !item.deletedAt && !item.archived && !item.supersededBy && item.accountOwner === accountIdentity(bound)).slice(-12)) items.push({ source: 'project', sourceId: conclusion.id, factKey: `${conclusion.id}/${conclusion.version}`, eventAt: conclusion.updatedAt, version: String(conclusion.version), actor: bound.username, assertion: 'observed', text: `${conclusion.title}\n${conclusion.content.slice(0, 5000)}` });
+      for (const conclusion of workbench.store.conclusions.filter(item => item.projectId === projectId && item.accountOwner === accountIdentity(bound))) {
+        const obsolete = conclusion.deletedAt || conclusion.archived || conclusion.supersededBy;
+        const text = obsolete ? `${conclusion.title}：已删除或转为历史，不再作为当前结论。` : `${conclusion.title}\n${conclusion.content}`;
+        items.push({ source: 'project', sourceId: conclusion.id, factKey: conclusion.id, eventAt: conclusion.updatedAt, version: createHash('sha256').update(JSON.stringify([conclusion.version, obsolete, text])).digest('hex'), actor: bound.username, assertion: 'observed', contentType: obsolete ? 'withdrawn' : 'result', text });
+      }
       binding(projectId); return items;
     },
   }, runText);

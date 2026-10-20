@@ -27,6 +27,21 @@ async function fixture(t: { after: (fn: () => Promise<void>) => void }) {
   return { root, first, profile };
 }
 
+test('account migration retains evolved RSI policies and progress without importing another account', async t => {
+  const { first, profile } = await fixture(t), owner = accountIdentity(profile);
+  await first.rsi.observe(offlineProjectId, [{ source: 'project', sourceId: 'goal', factKey: 'goal', version: '1', eventAt: new Date().toISOString(), text: '保留策略与学习记录', actor: 'alice', assertion: 'explicit' }]);
+  const view = await first.rsi.view(offlineProjectId), file = path.join(first.store.root, 'rsi-v2.json');
+  const original = JSON.parse(await fs.readFile(file, 'utf8'));
+  original.projects['foreign'] = { ...structuredClone(original.projects[view.scope.key]), scope: { ...view.scope, account: 'another-account' } };
+  await atomicJson(file, original);
+  const destination = await migrateAccountWorkspace(first.store.root, profile);
+  const migrated = JSON.parse(await fs.readFile(path.join(destination, 'rsi-v2.json'), 'utf8'));
+  assert.equal(migrated.projects[view.scope.key].scope.account, owner);
+  assert.deepEqual(migrated.projects[view.scope.key].policies, view.policies);
+  assert.deepEqual(migrated.projects[view.scope.key].evidence, JSON.parse(JSON.stringify(view.evidence)));
+  assert.equal(migrated.projects.foreign, undefined);
+});
+
 test('account migration retries a transient Windows directory lock without publishing partial data', async t => {
   const { root, first, profile } = await fixture(t), destination = accountDirectory(first.store.root, profile);
   const rename = fs.rename.bind(fs); let blocked = 0;

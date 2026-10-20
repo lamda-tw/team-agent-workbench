@@ -21,8 +21,10 @@ test('shared project panel has two accessible tabs and one close action', () => 
 });
 test('accepted optional supplements, rejected feedback, and independent closure render correctly', () => {
   const render = (decision: 'accepted' | 'rejected', closed = false) => renderToStaticMarkup(React.createElement(RsiRecommendations, { inbox: { ...inbox, items: [{ ...inbox.items[0], review: { ...inbox.items[0].review, decision, closed } }] }, call, reload }));
-  assert.match(render('accepted'), /关联会话/); assert.match(render('accepted'), /反馈意见/); assert.doesNotMatch(render('accepted'), /required=/);
-  assert.doesNotMatch(render('rejected'), /<select/); assert.match(render('rejected'), /反馈意见/);
+  assert.match(render('accepted'), /关联会话/); assert.match(render('accepted'), /推荐反馈/); assert.doesNotMatch(render('accepted'), /required=/);
+  assert.doesNotMatch(render('rejected'), /<select/); assert.match(render('rejected'), /推荐反馈/);
+  assert.match(render('accepted'), /评价这条推荐/); assert.match(render('rejected'), /背景是否充分/);
+  assert.match(render('accepted'), /改为拒绝/); assert.match(render('rejected'), /改为接受/);
   assert.match(render('accepted', true), /已关闭 · 已接受/); assert.match(render('accepted', true), /重新打开/);
   assert.equal(pendingRecommendations(inbox), 1); assert.equal(pendingRecommendations({ ...inbox, items: [{ ...inbox.items[0], review: { ...inbox.items[0].review, closed: true } }] }), 0);
 });

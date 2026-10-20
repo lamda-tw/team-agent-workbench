@@ -90,7 +90,8 @@ test('ordinary members can edit their local directory even when shared project s
   assert.match(settings, /<input aria-label="代码目录（选填）"[^>]*value="D:\/project\/code"/);
   assert.doesNotMatch(settings, /<input aria-label="代码目录（选填）"[^>]*disabled/);
   assert.match(settings, /<button class="primary">保存代码目录<\/button>/);
-  assert.doesNotMatch(settings, /项目助手|AI推荐/);
+  assert.doesNotMatch(settings, /项目助手/);
+  assert.match(settings, /role="tab"[^>]*>AI推荐/);
   assert.doesNotMatch(settings, /暂不设置/);
   const withMembers = renderToStaticMarkup(createElement(ProjectSettingsDialog, { project, admin: false, contextKey: props.contextKey, directorySaved: async () => {}, briefSaved: async () => {}, close() {}, members: { groupId: 'group-test', groupLabel: '研发组', connected: false, call: async () => { throw Error('SSR must not call the server'); }, changed: async () => {} } }));
   assert.match(withMembers, /role="tab"[^>]*>成员与权限/);

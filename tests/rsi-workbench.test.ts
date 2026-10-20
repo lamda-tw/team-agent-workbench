@@ -7,9 +7,41 @@ import { randomUUID } from 'node:crypto';
 import { Workbench } from '../src/core/workbench';
 import { grantTestWorkspace, offlineProjectId } from './fixtures/offline-workspace';
 
+test('collection includes every project session and closed history, deduplicates native aliases, and skips unfinished turns', async () => fixture(async (workbench, root) => {
+  for (let index = 0; index < 25; index++) {
+    const session = await workbench.createSession('codex', root, offlineProjectId);
+    for (let turn = 0; turn < 35; turn++) session.messages.push({ id: `message-${index}-${turn}`, role: 'user', text: `SOURCE_${index}_${turn}`, createdAt: new Date().toISOString() });
+    if (index === 0) session.closedAt = new Date().toISOString();
+  }
+  const session = workbench.store.sessions[0]; session.nativeId = 'shared-native';
+  workbench.store.sessions.push({ ...structuredClone(session), id: randomUUID(), createdAt: '2099-01-01T00:00:00.000Z' });
+  session.status = 'running'; session.messages.push({ id: 'unfinished', role: 'user', text: 'UNFINISHED_TURN', createdAt: new Date().toISOString() });
+  await workbench.rsi.collect(offlineProjectId); const view = await workbench.rsi.view(offlineProjectId);
+  assert.equal(view.evidence.filter(item => item.source === 'session').length, 25 * 35);
+  assert(!JSON.stringify(view.evidence).includes('UNFINISHED_TURN'));
+  assert(view.evidence.some(item => item.text.includes('SOURCE_0_0')));
+  assert(view.evidence.every(item => item.sessionId && item.messageId && item.turnId && item.sessionTitle));
+}));
+
+test('project model is frozen independently of later foreground session creation and works after all sessions close', async () => fixture(async (workbench, root) => {
+  const first = await workbench.createSession('codex', root, offlineProjectId, 'work', undefined, 'model-A');
+  first.messages.push({ id: randomUUID(), role: 'user', text: '验证独立模型配置', createdAt: new Date().toISOString() });
+  await workbench.rsi.configureShadow(offlineProjectId, { execution: { provider: 'codex', model: 'project-model', networkRoute: 'direct' } });
+  const second = await workbench.createSession('cursor', root, offlineProjectId, 'work', undefined, 'model-B');
+  first.closedAt = second.closedAt = new Date().toISOString();
+  let actual = '';
+  workbench.rsi.runText = async (session, prompt) => { actual = session.provider + '/' + session.model; const data = JSON.parse(prompt.split('REFERENCE_DATA=')[1]); return JSON.stringify({ state: { progress: '', blockers: [], unknowns: [], evidenceIds: data.evidence.map((item: any) => item.id) }, suggestions: [] }); };
+  await workbench.rsi.start(offlineProjectId, 'recommend'); await workbench.rsi.settled();
+  assert.equal(actual, 'codex/project-model');
+  assert.equal((await workbench.rsi.view(offlineProjectId)).lastError, undefined);
+  assert.equal(first.model, 'model-A'); assert.equal(second.model, 'model-B');
+}));
+
 async function fixture(run: (workbench: Workbench, root: string) => Promise<void>) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'rsi-workbench-'));
   const workbench = new Workbench(path.join(root, 'store'), () => {}, () => {});
+  workbench.requireAuth = async () => {};
+  workbench.catalog = async () => ({ defaultModel: 'fixture-model', models: [], quota: { windows: [], url: '', detail: '' }, checkedAt: new Date().toISOString() });
   try { await workbench.store.init(); grantTestWorkspace(workbench, root); await run(workbench, root); }
   finally { await workbench.close(); await fs.rm(root, { recursive: true, force: true }); }
 }
@@ -47,6 +79,7 @@ test('default-on shadow analysis stays asynchronous without changing the convers
   session.messages.push({ id: randomUUID(), role: 'assistant', text: '实验成功', createdAt: new Date().toISOString() });
   const before = structuredClone(session), inputs = structuredClone(workbench.store.inputs), results = structuredClone(workbench.store.conclusions);
   await workbench.rsi.completed(offlineProjectId);
+  await workbench.rsi.start(offlineProjectId, 'recommend');
   for (let index = 0; index < 30 && !workbench.rsi.busy; index++) await new Promise(resolve => setTimeout(resolve, 10));
   assert.equal(session.status, 'idle'); assert.equal(workbench.rsi.busy, true);
   release(); await workbench.rsi.settled(); const view = await workbench.rsi.view(offlineProjectId);

@@ -143,6 +143,20 @@ export async function migrateAccountWorkspace(root: string, profile: ConnectionP
   // Keep the latest merge base, so remote deletions are not mistaken for new local results.
   for (const source of sources) for (const suffix of ['.json', '.json.pending']) await copy(path.join(source.directory, 'accounts', hash + suffix), path.join(staging, 'accounts', hash + suffix));
   if (seed) await copy(path.join(seed.directory, 'egress-access.bin'), path.join(staging, 'egress-access.bin'));
+  // Learned policies and their evidence are account data, never installation defaults.
+  const rsi: any = { version: 3, projects: {}, preferences: {} };
+  for (const source of sources) {
+    const saved = await json<any>(path.join(source.directory, 'rsi-v2.json'), undefined);
+    if (!saved) continue;
+    if (![2, 3].includes(saved.version)) throw new Error('AI推荐数据版本不兼容，原目录已保留');
+    for (const [key, project] of Object.entries(saved.projects || {}) as [string, any][]) {
+      if (project.scope?.account !== owner) continue;
+      const prior = rsi.projects[key];
+      if (!prior || project.revision > prior.revision) rsi.projects[key] = project;
+    }
+    if (!rsi.preferences[owner] && saved.preferences?.[owner]) rsi.preferences[owner] = saved.preferences[owner];
+  }
+  if (Object.keys(rsi.projects).length) await atomicJson(path.join(staging, 'rsi-v2.json'), rsi);
   await atomicJson(path.join(staging, 'settings.json'), settingsSchema.parse(settings));
   for (const [index, name] of ['sessions', 'drafts', 'transfers', 'conclusions'].entries()) await atomicJson(path.join(staging, name + '.json'), [...selected[index].values()]);
   await atomicJson(path.join(staging, 'inputs.json'), inputs);

@@ -4,6 +4,7 @@ import type { Project } from '../shared/types';
 import type { GroupCommand } from '../shared/team-groups';
 import { ProjectBriefSettings } from './project-brief-editor';
 import { TeamGroupDialog } from './team-groups';
+import { RsiProjectSettings } from './rsi-project-settings';
 
 export function ProjectDirectoryForm({ projectId, projectName, contextKey, directory = '', initial = false, embedded = false, saved }: { projectId: string; projectName: string; contextKey: string; directory?: string; initial?: boolean; embedded?: boolean; saved: () => Promise<void> }) {
   const [value, setValue] = useState(directory), [busy, setBusy] = useState(false), [error, setError] = useState('');
@@ -34,16 +35,18 @@ export function ProjectDirectoryDialog(props: React.ComponentProps<typeof Projec
 type ProjectMembers = { groupId: string; groupLabel: string; connected: boolean; call: (command: GroupCommand) => Promise<any>; changed: () => Promise<void> };
 
 export function ProjectSettingsDialog({ project, admin, contextKey, directory, members, close, directorySaved, briefSaved }: { project: Project; admin: boolean; contextKey: string; directory?: string; members?: ProjectMembers; close: () => void; directorySaved: () => Promise<void>; briefSaved: (revision: number) => Promise<void> }) {
-  const [tab, setTab] = useState<'project' | 'members'>('project'), [membersOpened, setMembersOpened] = useState(false);
+  const [tab, setTab] = useState<'project' | 'members' | 'recommendations'>('project'), [membersOpened, setMembersOpened] = useState(false), [recommendationsOpened, setRecommendationsOpened] = useState(false);
   return <div className="modal-backdrop"><section className="modal wide" role="dialog" aria-label={'项目设置 · ' + project.name}>
     <header><h2>项目设置 · {project.name}</h2><button className="icon" aria-label="关闭窗口" onClick={close}>×</button></header>
-    {members && <div className="project-settings-tabs" role="tablist" aria-label="项目设置分类">
+    <div className="project-settings-tabs" role="tablist" aria-label="项目设置分类">
       <button role="tab" id="project-settings-project-tab" aria-selected={tab === 'project'} aria-controls="project-settings-project-panel" onClick={() => setTab('project')}>项目资料</button>
-      <button role="tab" id="project-settings-members-tab" aria-selected={tab === 'members'} aria-controls="project-settings-members-panel" onClick={() => { setMembersOpened(true); setTab('members'); }}>成员与权限</button>
-    </div>}
+      <button role="tab" id="project-settings-ai-tab" aria-selected={tab === 'recommendations'} aria-controls="project-settings-ai-panel" onClick={() => { setRecommendationsOpened(true); setTab('recommendations'); }}>AI推荐</button>
+      {members && <button role="tab" id="project-settings-members-tab" aria-selected={tab === 'members'} aria-controls="project-settings-members-panel" onClick={() => { setMembersOpened(true); setTab('members'); }}>成员与权限</button>}
+    </div>
     <div className="project-settings-pane" id="project-settings-project-panel" role="tabpanel" aria-labelledby={members ? 'project-settings-project-tab' : undefined} hidden={tab !== 'project'}>
       <ProjectBriefSettings project={project} admin={admin} cancel={close} saveLabel="保存项目设置" saved={briefSaved} localSettings={<ProjectDirectoryForm projectId={project.id} projectName={project.name} contextKey={contextKey} directory={directory} saved={directorySaved} embedded/>}/>
     </div>
+    <div className="project-settings-pane" id="project-settings-ai-panel" role="tabpanel" aria-labelledby="project-settings-ai-tab" hidden={tab !== 'recommendations'}>{recommendationsOpened && <RsiProjectSettings projectId={project.id}/>}</div>
     {members && <div className="project-settings-pane" id="project-settings-members-panel" role="tabpanel" aria-labelledby="project-settings-members-tab" hidden={tab !== 'members'}>
       <p className="project-members-scope">成员与权限对项目组「{members.groupLabel}」内所有项目生效。</p>
       {members.connected ? membersOpened && <TeamGroupDialog embedded groupId={members.groupId} call={members.call} close={close} changed={members.changed}/> : <div className="modal-body"><p className="muted small">连接团队账号后，可查看和管理成员与权限。</p></div>}

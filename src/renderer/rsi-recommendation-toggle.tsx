@@ -18,7 +18,7 @@ export function RsiRecommendationToggle({ projectId, projectName, call, open, pe
     if (!config || locked.current) return;
     locked.current = true; setBusy(true); setError('');
     try {
-      const next = await call<RsiShadowSettings['config']>('rsi.shadow.configure', { projectId, config: { enabled: !enabled, dailyCalls: config.dailyCalls } });
+      const next = await call<RsiShadowSettings['config']>('rsi.shadow.configure', { projectId, config: { enabled: !enabled } });
       if (alive.current) setConfig(next);
     } catch (reason: any) { if (alive.current) setError(reason.message); }
     finally { locked.current = false; if (alive.current) setBusy(false); }

@@ -6,8 +6,8 @@ import { ProviderAuthPanel } from './provider-auth';
 import { EgressRouteChoice } from './egress-route';
 import { checkProviderConnection, type ProviderConnectionCheck } from './provider-connection-check';
 
-export function ProviderConnectionSettings({ provider, cwd, auth, egress, activeTaskCount, busyChanged, pendingChanged, checked, showCatalog = true, routeEditable = true, sessionRoute, savedRoute, sessionId, routeChanged }: {
-  provider: Provider; cwd: string; auth: ProviderAuth; egress?: UserEgressStatus; activeTaskCount: number; busyChanged?: (busy: boolean) => void;
+export function ProviderConnectionSettings({ provider, cwd, auth, egress, activeTaskCount, busyChanged, pendingChanged, checked, showCatalog = true, routeEditable = true, sessionRoute, savedRoute, sessionId, routeChanged, scopeLabel }: {
+  scopeLabel?: string; provider: Provider; cwd: string; auth: ProviderAuth; egress?: UserEgressStatus; activeTaskCount: number; busyChanged?: (busy: boolean) => void;
   checked?: (result: ProviderConnectionCheck) => void; pendingChanged?: (pending: boolean) => void; showCatalog?: boolean; routeEditable?: boolean; sessionRoute?: SessionNetworkRoute; savedRoute?: SessionNetworkRoute; sessionId?: string; routeChanged?: (route: SessionNetworkRoute) => void;
 }) {
   const [accountEnabled, setAccountEnabled] = useState(!!egress?.enabled), [invite, setInvite] = useState('');
@@ -50,7 +50,7 @@ export function ProviderConnectionSettings({ provider, cwd, auth, egress, active
   }, [provider, cwd, sessionRoute]);
   return <section className="provider-connection-settings" aria-label="网络与登录设置">
     <div className="row"><Network size={17}/><strong>网络连接</strong><span className="spacer"/><span className="muted small">{enabled ? '管理端出口' : '本机网络'}</span></div>
-    {routeEditable && <p className="muted small">{sessionId ? '应用后，这个会话从下一轮开始使用所选出口。改成管理端时，没有接入码就先粘贴管理端提供的接入码。其他会话保持原来的连接。' : '连接方式只应用于这次新建的会话；运行中的其他会话继续使用原出口。'}</p>}
+    {routeEditable && <p className="muted small">{sessionId ? '应用后，这个会话从下一轮开始使用所选出口。改成管理端时，没有接入码就先粘贴管理端提供的接入码。其他会话保持原来的连接。' : scopeLabel ? `连接方式用于${scopeLabel}，使用你的个人 AI 账号。` : '连接方式只应用于这次新建的会话；运行中的其他会话继续使用原出口。'}</p>}
     {routeEditable && <fieldset disabled={busy}>
       <label className={'provider-route-option' + (enabled ? ' selected' : '')}>
         <span className="provider-route-icon" aria-hidden="true"><Network size={22}/></span>

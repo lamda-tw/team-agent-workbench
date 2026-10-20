@@ -240,7 +240,10 @@ test('a linked Codex session follows later writes to the original rollout', asyn
   const previous = process.env.CODEX_HOME;
   let broadcasts = 0, publishedReply = '';
   const wb: Workbench = new Workbench(path.join(root, 'data'), () => {
-    broadcasts += 1; publishedReply = wb.store.sessions.find(session => session.nativeId === codexId)?.messages.at(-1)?.text || '';
+    // RSI collection also publishes state events. Count transcript changes, not unrelated background updates.
+    const reply = wb.store.sessions.find(session => session.nativeId === codexId)?.messages.at(-1)?.text || '';
+    if (reply !== publishedReply) broadcasts += 1;
+    publishedReply = reply;
   }, () => {});
   const waitFor = async (check: () => boolean, timeoutMs = 3000) => {
     const started = Date.now();

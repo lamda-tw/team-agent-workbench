@@ -266,7 +266,7 @@ async function dispatch(action: string, raw: unknown, owner: BrowserWindow, pref
     case 'content.history': { const p = z.object({ projectId: z.string(), id: z.string().uuid().optional(), revision: z.number().int().positive().optional() }).parse(raw); return workbench.remote.contentHistory(workbench.remote.binding(p.projectId), p.id, p.revision); }
     case 'conclusion.publish': { const p = z.object({ id: z.string().uuid(), version: z.number().int().positive().optional(), disclose: z.array(resultReferenceSchema).max(30).default([]) }).parse(raw); return workbench.publishConclusion(p.id, p.disclose, p.version); }
     case 'content.alias.save': { const p = z.object({ projectId: z.string(), contentId: id, alias: z.string().trim().max(200) }).parse(raw); return workbench.saveContentAlias(p.projectId, p.contentId, p.alias); }
-    case 'rsi.settings': { const p = z.object({ projectId: text }).parse(raw); const view = await workbench.rsi.view(p.projectId); return { config: view.config, sourceSession: view.sourceSession }; }
+    case 'rsi.settings': { const p = z.object({ projectId: text }).parse(raw); const view = await workbench.rsi.view(p.projectId); return { config: view.config, sourceSession: view.sourceSession, cwd: workbench.store.root }; }
     case 'rsi.shadow.configure': { const p = z.object({ projectId: text, config: z.unknown() }).parse(raw); return workbench.rsi.configureShadow(p.projectId, p.config); }
     case 'rsi.preference': { const p = z.object({ projectId: text, text: z.string().max(2000) }).parse(raw); return workbench.rsi.personalPreference(p.projectId, p.text); }
     case 'rsi.reuse': { const p = z.object({ projectId: text, sourceProjectId: text, policyId: text }).parse(raw); return workbench.rsi.reuse(p.projectId, p.sourceProjectId, p.policyId); }
@@ -277,6 +277,7 @@ async function dispatch(action: string, raw: unknown, owner: BrowserWindow, pref
     case 'rsi.run': { const p = z.object({ projectId: text, operation: z.enum(['recommend', 'learn', 'evaluate']), candidateId: text.optional() }).parse(raw); await workbench.rsi.start(p.projectId, p.operation, 'manual', p.candidateId); return true; }
     case 'rsi.feedback': { const p = z.object({ projectId: text, reaction: z.unknown() }).parse(raw); return workbench.rsi.feedback(p.projectId, p.reaction); }
     case 'rsi.case': { const p = z.object({ projectId: text, value: z.unknown() }).parse(raw); return workbench.rsi.addCase(p.projectId, p.value); }
+    case 'rsi.evaluation.review': { const p = z.object({ projectId: text, evaluationId: text, review: z.unknown() }).parse(raw); return workbench.rsi.reviewEvaluation(p.projectId, p.evaluationId, p.review); }
     case 'rsi.publish': { const p = z.object({ projectId: text, candidateId: text }).parse(raw); return workbench.rsi.publish(p.projectId, p.candidateId); }
     case 'rsi.rollback': return workbench.rsi.rollback(z.object({ projectId: text }).parse(raw).projectId);
     case 'activity.project': { const p = z.object({ projectId: z.string() }).parse(raw); for (const current of contexts.values()) if (current.workbench !== workbench) current.workbench.activity.removeWindow(String(owner.id)); await workbench.setActivityProject(String(owner.id), p.projectId); return true; }
