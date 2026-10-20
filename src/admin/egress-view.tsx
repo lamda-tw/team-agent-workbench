@@ -47,6 +47,8 @@ export function EgressView({ snapshot, remote, refresh }: { snapshot: AdminEgres
   const savedServices = egressServices.filter(service => snapshot.config[service.id]).map(service => service.label).join('、');
   const reverseReady = snapshot.reverse?.state === 'connected' && snapshot.reverse.memberAccessConfigured;
 
+  if (snapshot.standalone) return <div className="egress-view"><div className="page-title"><h1>网络出口</h1><span className="badge">独立后台托管</span></div><p>出口由 Windows 开机任务维护，关闭管理端不会停止转发。接入码、证书和端口保持不变。</p><p>请使用 standalone-egress.ps1 的 Status、Start、Stop 操作查看或管理后台任务。此页不代表后台任务当前已连通。</p><p>修改出口设置前，请先运行 Uninstall，再重新打开管理端；更新设置后重新安装托管。</p><button className="secondary" disabled={!!action} onClick={() => void run('copy', () => window.admin.call('egress.copy'))}>复制原直连接入码</button>{error && <p className="inline-error">{error}</p>}</div>;
+
   return <div className="egress-view">
     <div className="page-title egress-title">
       <div><span className="eyebrow">NETWORK EGRESS</span><h1>网络出口</h1><p>管理本机转发、成员接入与连接状态。</p></div>

@@ -8,11 +8,12 @@ import { atomicJson } from '../core/store';
 const exec = promisify(execFile);
 type CertificateFiles = { pfx: string; cer: string; password: string };
 
-export async function ensureEgressCertificate(root: string) {
+export async function ensureEgressCertificate(root: string, existingOnly = false) {
   const metadata = path.join(root, 'egress-certificate.json');
   let files: CertificateFiles | undefined;
   try { files = JSON.parse(await fs.readFile(metadata, 'utf8')); } catch {}
   if (!files || !(await fs.stat(files.pfx).catch(() => undefined))?.isFile() || !(await fs.stat(files.cer).catch(() => undefined))?.isFile()) {
+    if (existingOnly) throw new Error('独立出口的原证书缺失，不会自动更换接入身份');
     if (process.platform !== 'win32') throw new Error('网络出口证书自动生成目前仅支持 Windows');
     await fs.mkdir(root, { recursive: true });
     files = { pfx: path.join(root, 'egress-certificate.pfx'), cer: path.join(root, 'egress-certificate.cer'), password: randomBytes(24).toString('base64url') };

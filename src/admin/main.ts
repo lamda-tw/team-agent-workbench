@@ -17,6 +17,7 @@ import { EgressHost } from './egress-host';
 import { ReverseEgressController } from './reverse-egress-controller';
 import { EgressClientProxy } from '../core/egress';
 import { ensureEgressCertificate } from './egress-certificate';
+import { isStandaloneEgress } from './standalone-egress-state';
 import type { AdminEgressConfig } from '../shared/egress';
 app.setName('Team Agent Admin');
 app.setPath('userData', process.env.WORKBENCH_ADMIN_DATA_DIR || path.join(app.getPath('appData'), 'TeamAgentAdmin'));
@@ -27,20 +28,21 @@ const entry = path.join(__dirname, runtimeAssets, 'index.html');
 if (ownDataDirectory(() => window)) app.whenReady().then(async () => {
   const config = path.join(app.getPath('userData'), 'connection.json');
   const egressConfigFile = path.join(app.getPath('userData'), 'egress.json'), egressSecretFile = path.join(app.getPath('userData'), 'egress-secrets.bin');
+  const standaloneEgress = await isStandaloneEgress(app.getPath('userData'));
   const changed = () => { if (window && !window.isDestroyed()) window.webContents.send('admin:changed'); };
   reverse = new ReverseEgressController(path.join(app.getPath('userData'), 'reverse-egress.json'), changed); await reverse.init();
   const protect = (value: string) => safeStorage.isEncryptionAvailable() ? safeStorage.encryptString(value) : Buffer.from(value, 'utf8');
   const unprotect = (value: Buffer) => safeStorage.isEncryptionAvailable() ? safeStorage.decryptString(value) : value.toString('utf8');
   egressConfig = { enabled: false, listenHost: '0.0.0.0', listenPort: 18443, publicHost: os.hostname(), upstreamMode: 'direct', upstreamHost: '', upstreamPort: 0, upstreamUsername: '', codex: true, cursor: true, claude: false };
-  try { egressConfig = adminEgressConfigSchema.parse(JSON.parse(await fs.readFile(egressConfigFile, 'utf8'))); } catch {}
-  try { egressSecret = JSON.parse(unprotect(await fs.readFile(egressSecretFile))); } catch { egressSecret = { accessCode: randomBytes(24).toString('base64url') }; }
-  const certificate = await ensureEgressCertificate(path.join(app.getPath('userData'), 'egress-tls'));
+  try { egressConfig = adminEgressConfigSchema.parse(JSON.parse(await fs.readFile(egressConfigFile, 'utf8'))); } catch { if (standaloneEgress) throw new Error('独立出口的原配置读取失败，不会重置接入地址'); }
+  try { egressSecret = JSON.parse(unprotect(await fs.readFile(egressSecretFile))); } catch { if (standaloneEgress) throw new Error('独立出口身份读取失败；请使用原 Windows 账号，接入码未改动'); egressSecret = { accessCode: randomBytes(24).toString('base64url') }; }
+  const certificate = await ensureEgressCertificate(path.join(app.getPath('userData'), 'egress-tls'), standaloneEgress);
   egress = new EgressHost(path.join(__dirname, runtimeAssets, 'egress-worker.cjs'), egressConfig, egressSecret, certificate,
     entry => utilityProcess.fork(entry, [], { serviceName: 'Team Agent Network Relay', stdio: 'ignore' })); egress.on('changed', () => {
       changed(); void reverse.setGateway(egressConfig.enabled && egress.snapshot().running, egressConfig.listenHost, egressConfig.listenPort);
     });
   const saveEgress = async () => { await fs.mkdir(app.getPath('userData'), { recursive: true }); await fs.writeFile(egressConfigFile, JSON.stringify(egressConfig, null, 2)); await fs.writeFile(egressSecretFile, protect(JSON.stringify(egressSecret)), { mode: 0o600 }); };
-  await saveEgress(); if (egressConfig.enabled) await egress.start().catch(() => {});
+  if (!standaloneEgress) { await saveEgress(); if (egressConfig.enabled) await egress.start().catch(() => {}); }
   remote = new AdminConnection(path.join(__dirname, 'admin.py'), changed);
   try {
     const profile = adminProfileSchema.parse(JSON.parse(await fs.readFile(config, 'utf8')));
@@ -59,7 +61,8 @@ if (ownDataDirectory(() => window)) app.whenReady().then(async () => {
     if (event.sender !== window.webContents || event.senderFrame?.url !== pathToFileURL(entry).href) return { ok: false, error: '不允许的调用来源' };
     try {
       let value;
-      if (action === 'snapshot') value = { ...remote.snapshot, busy: remote.snapshot.busy || reverse.busy, egress: { config: egressConfig, ...egress.snapshot(), inviteCode: encodeEgressInvite({ version: 1, host: egressConfig.publicHost, port: egressConfig.listenPort, fingerprint: certificate.fingerprint, accessCode: egressSecret.accessCode }), hasUpstreamPassword: !!egressSecret.upstreamPassword, reverse: reverse.snapshot(remote.snapshot.state ? remote.snapshot.state.egressJumpTargets || [] : undefined) } };
+      if (standaloneEgress && action.startsWith('egress.') && action !== 'egress.copy') throw new Error('出口已由独立开机任务托管，请使用 standalone-egress.ps1 管理；卸载托管并重开管理端后才能修改配置');
+      if (action === 'snapshot') value = { ...remote.snapshot, busy: remote.snapshot.busy || reverse.busy, egress: { standalone: standaloneEgress, config: egressConfig, ...egress.snapshot(), inviteCode: encodeEgressInvite({ version: 1, host: egressConfig.publicHost, port: egressConfig.listenPort, fingerprint: certificate.fingerprint, accessCode: egressSecret.accessCode }), hasUpstreamPassword: !!egressSecret.upstreamPassword, reverse: reverse.snapshot(remote.snapshot.state ? remote.snapshot.state.egressJumpTargets || [] : undefined) } };
       else if (action === 'egress.save') {
         if (reverse.busy) throw new Error('请等待反向隧道设置完成');
         const input = payload as any; const next = adminEgressConfigSchema.parse(input?.config);
@@ -101,7 +104,7 @@ if (ownDataDirectory(() => window)) app.whenReady().then(async () => {
           buttons: ['取消', '确认并连接'], defaultId: 0, cancelId: 0,
         })).response === 1);
         await fs.mkdir(path.dirname(config), { recursive: true }); await fs.writeFile(config, JSON.stringify(value, null, 2));
-        if (remote.snapshot.role === 'administrator' && remote.snapshot.profile?.mode !== 'local') await reverse.login(remote.snapshot.profile!, input.password);
+        if (!standaloneEgress && remote.snapshot.role === 'administrator' && remote.snapshot.profile?.mode !== 'local') await reverse.login(remote.snapshot.profile!, input.password);
       } else if (action === 'choose.directory') value = (await dialog.showOpenDialog(window, { properties: ['openDirectory', 'createDirectory'] })).filePaths[0] || '';
       else if (action === 'disconnect') { if (remote.snapshot.busy || reverse.busy) throw new Error('请等待操作完成'); storageAbort?.abort(); storageAbort = undefined; reverse.disconnect(); remote.disconnect(); value = true; }
       else if (action === 'operation') { if (reverse.busy) throw new Error('请等待反向隧道设置完成'); value = await remote.operation(adminOperationSchema.parse(payload)); }

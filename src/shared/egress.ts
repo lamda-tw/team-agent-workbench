@@ -54,6 +54,7 @@ export interface EgressMonitor {
 export type EgressRelaySnapshot = { running: boolean; activeConnections: number; lastError?: string; events: EgressConnectionEvent[]; fingerprint: string; monitor?: EgressMonitor };
 
 export interface AdminEgressSnapshot {
+  standalone?: boolean;
   config: AdminEgressConfig;
   running: boolean;
   fingerprint: string;
