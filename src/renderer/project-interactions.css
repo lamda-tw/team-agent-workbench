@@ -1,6 +1,20 @@
-.project-interaction-panel{--border:#e0e6e2;--muted:#718578;--text:#26352f;--primary:#287554;width:570px;min-width:350px;max-width:48vw;min-height:0;display:flex;flex-direction:column;border-left:1px solid var(--border);background:var(--surface,#fff);container-type:inline-size;container-name:project-interaction}
+.project-interaction-shell{position:relative;display:flex;flex:none;min-width:0;min-height:0}
+.project-interaction-shell.is-collapsed{width:60px}
+.project-interaction-shell>.interaction-toggle{position:absolute;top:13px;right:16px;width:28px;height:28px;padding:5px;z-index:1}
+.interaction-toggle:focus-visible{outline:2px solid #388766;outline-offset:2px}
+.project-interaction-shell>.interaction-resize{position:absolute;left:-6px;top:0;bottom:0;width:13px;padding:0;border:0;border-radius:0;background:transparent;z-index:2;cursor:col-resize;touch-action:none}
+.interaction-resize::after{content:"";position:absolute;left:6px;top:0;bottom:0;width:1px;background:#e0e6e2;transition:background-color .1s,width .1s,left .1s}
+.project-interaction-shell>.interaction-resize:hover,.project-interaction-shell>.interaction-resize:focus-visible{background:#28755414}
+.interaction-resize:hover::after,.interaction-resize:focus-visible::after,.project-interaction-shell.is-resizing>.interaction-resize::after{left:5px;width:3px;background:#287554}
+.project-interaction-shell.is-resizing>.interaction-resize{background:#28755424}
+.interaction-resizing,.interaction-resizing *{cursor:col-resize!important;user-select:none!important}
+@media(prefers-reduced-motion:reduce){.interaction-resize::after{transition:none}}
+.interaction-reopen{display:flex;flex-direction:column;gap:12px;width:100%;padding:60px 5px 12px;border-left:1px solid #e0e6e2;background:#f7faf8;flex:none}
+.interaction-reopen button{display:flex;flex-direction:column;align-items:center;gap:6px;background:transparent;border:0;color:#42614f;font-size:11px;padding:8px 4px}
+.interaction-reopen button:hover{background:#edf5ef;border-radius:6px}
+.project-interaction-panel{--border:#e0e6e2;--muted:#718578;--text:#26352f;--primary:#287554;width:100%;min-width:0;min-height:0;display:flex;flex-direction:column;border-left:1px solid var(--border);background:var(--surface,#fff);container-type:inline-size;container-name:project-interaction}
 .project-interaction-panel[hidden],.project-interaction-pane[hidden]{display:none}
-.project-interaction-panel>header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 16px;border-bottom:1px solid var(--border)}
+.project-interaction-panel>header{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:55px;padding:13px 56px 13px 16px;border-bottom:1px solid var(--border)}
 .project-interaction-panel>header>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;font-size:13px}
 .project-interaction-tabs{display:flex;gap:18px;padding:0 16px;border-bottom:1px solid var(--border);flex:none}
 .project-interaction-tabs>button{display:flex;align-items:center;gap:6px;border:0;border-bottom:2px solid transparent;border-radius:0;background:transparent;color:var(--muted);padding:12px 2px}

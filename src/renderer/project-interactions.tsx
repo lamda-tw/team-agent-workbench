@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { MessageSquare, Sparkles, PanelRightClose } from 'lucide-react';
+import { MessageSquare, Sparkles, PanelRightClose, PanelRightOpen } from 'lucide-react';
 import type { RsiInbox, RsiReaction } from '../shared/rsi';
 import type { WorkbenchAPI } from '../shared/types';
+import { useInteractionPanelResize } from './interaction-panel-resize';
 
 export function useRsiInbox(projectId: string | undefined, api: WorkbenchAPI) {
   const [value, setValue] = useState<{ projectId: string; inbox?: RsiInbox; error?: string }>();
@@ -81,13 +82,21 @@ export function ProjectInteractionPanel({ projectName, active, select, close, in
   subsessions?: React.ReactNode; team?: boolean;
 }) {
   const [visitedQuestions, setVisitedQuestions] = useState(active === 'questions');
-  const [wide, setWide] = useState(false);
+  const resize = useInteractionPanelResize(!!active);
+  const lastTab = useRef<InteractionTab>(active || (team ? 'recommendations' : 'subsessions'));
+  useEffect(() => { if (active) lastTab.current = active; }, [active]);
   useEffect(() => { if (active === 'questions') setVisitedQuestions(true); }, [active]);
-  return <>{!active && <nav className="interaction-reopen" aria-label="展开侧栏">
+  const toggleLabel = active ? '收起侧栏' : '展开侧栏';
+  const reopenTab = lastTab.current === 'subsessions' ? (subsessions ? 'subsessions' : 'recommendations') : (team ? lastTab.current : 'subsessions');
+  return <div ref={resize.shell} className={'project-interaction-shell' + (!active ? ' is-collapsed' : '') + (resize.dragging ? ' is-resizing' : '')} style={{ width: active ? resize.width : 60 }}>
+    <button type="button" className="icon interaction-toggle" aria-label={toggleLabel} title={toggleLabel} aria-expanded={!!active} aria-controls="project-interaction-panel" onClick={() => active ? close() : select(reopenTab)}>{active ? <PanelRightClose size={17}/> : <PanelRightOpen size={17}/>}</button>
+    {active && <button type="button" className="interaction-resize" role="separator" aria-label="调整侧栏宽度" aria-orientation="vertical" aria-controls="project-interaction-panel" aria-valuemin={resize.limits.min} aria-valuemax={resize.limits.max} aria-valuenow={resize.width} aria-valuetext={`${resize.width} 像素`}
+      onPointerDown={resize.begin} onPointerMove={resize.move} onPointerUp={resize.end} onPointerCancel={resize.end} onLostPointerCapture={resize.end} onKeyDown={resize.keyDown}/>}
+    {!active && <nav className="interaction-reopen" aria-label="侧栏内容">
     {team && <><button aria-label="展开 AI推荐" onClick={() => select('recommendations')}><Sparkles size={16}/><span>AI推荐</span></button><button aria-label="展开提问" onClick={() => select('questions')}><MessageSquare size={16}/><span>提问</span></button></>}
     {subsessions && <button aria-label="展开子会话" onClick={() => select('subsessions')}><MessageSquare size={16}/><span>子会话</span></button>}
-  </nav>}<aside className={'project-interaction-panel' + (wide ? ' is-wide' : '')} aria-label="项目推荐与提问" hidden={!active}>
-    <header><span>{projectName}</span><div className="row"><button className="text-button" aria-label={wide ? '还原侧栏宽度' : '展开侧栏宽度'} onClick={() => setWide(value => !value)}>{wide ? '还原' : '展开'}</button><button className="icon" aria-label="收起项目工作区" title="收起" onClick={close}><PanelRightClose size={17}/></button></div></header>
+  </nav>}<aside id="project-interaction-panel" className="project-interaction-panel" aria-label="项目工作区" hidden={!active}>
+    <header><span>{projectName}</span></header>
     <div className="project-interaction-tabs" role="tablist" aria-label="项目工作区内容">
       {team && <><button id="project-ai-tab" role="tab" aria-selected={active === 'recommendations'} aria-controls="project-ai-panel" onClick={() => select('recommendations')}><Sparkles size={14}/>AI推荐{pendingRecommendations(inbox) > 0 && <span>{pendingRecommendations(inbox)}</span>}</button>
       <button id="project-questions-tab" role="tab" aria-selected={active === 'questions'} aria-controls="project-questions-panel" onClick={() => select('questions')}><MessageSquare size={14}/>提问{questionCount > 0 && <span>{questionCount}</span>}</button></>}
@@ -96,5 +105,5 @@ export function ProjectInteractionPanel({ projectName, active, select, close, in
     <div className="project-interaction-pane" id="project-ai-panel" role="tabpanel" aria-labelledby="project-ai-tab" hidden={active !== 'recommendations'}><RsiRecommendations inbox={inbox} error={error} call={call} reload={reload}/></div>
     <div className="project-interaction-pane" id="project-questions-panel" role="tabpanel" aria-labelledby="project-questions-tab" hidden={active !== 'questions'}>{(visitedQuestions || active === 'questions') && questions}</div>
     {subsessions && <div className="project-interaction-pane" id="project-subsessions-panel" role="tabpanel" aria-labelledby="project-subsessions-tab" hidden={active !== 'subsessions'}>{subsessions}</div>}
-  </aside></>;
+  </aside></div>;
 }

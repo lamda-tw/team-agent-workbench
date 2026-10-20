@@ -1,6 +1,3 @@
-.interaction-reopen{display:flex;flex-direction:column;gap:12px;padding:12px 5px;border-left:1px solid #e0e6e2;background:#f7faf8;flex:none}
-.interaction-reopen button{display:flex;flex-direction:column;align-items:center;gap:6px;background:transparent;border:0;color:#42614f;font-size:11px;padding:8px 4px}
-.project-interaction-panel.is-wide{width:850px;max-width:70vw}
 .session-tree-node{min-width:0}.session-tree-children{margin-left:12px;border-left:1px solid #dce6df;padding-left:5px}.session-tree-children>.text-button{font-size:11px;padding:6px}
 .session-tree-node .session-row{min-width:0}.session-tree-node .personal-session-row>.icon{flex:none}
 .subsession-chat{display:flex;flex-direction:column;min-height:0;flex:1;overflow:hidden}

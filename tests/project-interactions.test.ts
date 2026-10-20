@@ -16,19 +16,25 @@ const reload = async () => {};
 test('shared project panel has two accessible tabs and one close action', () => {
   const html = renderToStaticMarkup(React.createElement(ProjectInteractionPanel, { projectName: '比赛', active: 'recommendations', select() {}, close() {}, inbox, call, reload, questionCount: 2, questions: React.createElement('div', null, '问题内容') }));
   assert.match(html, /role="tablist"/); assert.equal((html.match(/role="tab"/g) || []).length, 2);
-  assert.match(html, /收起项目工作区/); assert.match(html, /定位误差/);
+  assert.match(html, /aria-label="收起侧栏"[^>]*aria-expanded="true"/); assert.match(html, /定位误差/);
   assert.doesNotMatch(html, /问题内容/); // Questions are lazy-mounted and not marked read just by viewing recommendations.
 });
 test('collapsed project panel keeps explicit reopen controls and children share the same tabs', () => {
   const props = { projectName: '比赛', select() {}, close() {}, inbox, call, reload, questionCount: 2, questions: React.createElement('div', null, '问题草稿'), subsessions: React.createElement('div', null, '子会话内容') };
   const collapsed = renderToStaticMarkup(React.createElement(ProjectInteractionPanel, { ...props, active: '' }));
+  assert.match(collapsed, /class="icon interaction-toggle" aria-label="展开侧栏"[^>]*aria-expanded="false" aria-controls="project-interaction-panel"/);
   assert.match(collapsed, /aria-label="展开 AI推荐"/);
   assert.match(collapsed, /aria-label="展开提问"/); assert.match(collapsed, /aria-label="展开子会话"/);
   assert.match(collapsed, /<aside[^>]+hidden=""/);
+  assert.doesNotMatch(collapsed, /role="separator"/);
   const expanded = renderToStaticMarkup(React.createElement(ProjectInteractionPanel, { ...props, active: 'subsessions' }));
   assert.equal((expanded.match(/role="tab"/g) || []).length, 3);
   assert.match(expanded, /id="project-subsessions-tab" role="tab" aria-selected="true"/);
-  assert.match(expanded, /展开侧栏宽度/); assert.match(expanded, /子会话内容/);
+  assert.match(expanded, /class="icon interaction-toggle" aria-label="收起侧栏"[^>]*aria-expanded="true" aria-controls="project-interaction-panel"/);
+  assert.equal((expanded.match(/class="icon interaction-toggle"/g) || []).length, 1);
+  assert.match(expanded, /role="separator" aria-label="调整侧栏宽度" aria-orientation="vertical" aria-controls="project-interaction-panel"/);
+  assert.match(expanded, /子会话内容/);
+  assert.doesNotMatch(expanded, /展开侧栏宽度|加宽侧栏|恢复宽度/);
   assert.doesNotMatch(expanded, /aria-label="展开侧栏"/);
 });
 test('accepted optional supplements, rejected feedback, and independent closure render correctly', () => {
