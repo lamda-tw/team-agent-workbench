@@ -9,6 +9,7 @@ import { SessionTranscript } from './session-transcript';
 import { SelectionActions } from './selection-actions';
 import { RequestCard } from './request-card';
 import { SessionStatusIndicator, useSessionCompletionRead } from './session-status';
+import { SessionMoreMenu } from './session-more-menu';
 
 export function SessionTree({ sessions, selectedId, childId, open, create, promote, organize }: {
   sessions: AgentSession[]; selectedId: string; childId?: string;
@@ -72,21 +73,29 @@ export function SubsessionChat({ session, sessions, input, edit, api, active, op
   };
   const render = (message: Message) => <article className={'message ' + message.role} key={message.id}><div className="message-author"><b>{message.role === 'user' ? '你' : message.role === 'assistant' ? 'Codex' : '运行信息'}</b></div><ReactMarkdown remarkPlugins={[remarkGfm]}>{sessionMessageText(session, message)}</ReactMarkdown></article>;
   return <section className="subsession-chat" aria-label={'子会话：' + session.title}>
-    <header><b>{session.title}</b><SessionStatusIndicator session={session}/><p className="muted small">上下文独立；与父会话共用工作目录，文件修改会相互可见。</p><div className="row">
-      {rename && <button className="text-button" onClick={() => rename(session)}>重命名</button>}
-      {parent && <button className="text-button" onClick={() => open(parent)}>返回 {parent.title}</button>}
-      {!session.closedAt && session.provider === 'codex' && <button className="text-button" onClick={() => create(session)}>创建子会话</button>}
-      {parent && <button className="text-button" onClick={() => promote(session)}>升级为独立会话</button>}
-      <button className="text-button" onClick={() => void action(() => api.call(session.closedAt ? 'session.reopen' : 'session.close', { id: session.id }))}>{session.closedAt ? '重新打开' : '关闭会话'}</button>
-      {session.closedAt && <button className="text-button" onClick={() => remove(session)}>删除会话</button>}
-    </div></header>
-    {children.length > 0 && <nav className="subsession-child-links" aria-label="下级子会话">{children.map(child => <button key={child.id} onClick={() => open(child)}>{child.title}<SessionStatusIndicator session={child}/></button>)}</nav>}
+    <header>
+      <div className="subsession-heading"><b title={session.title}>{session.title}</b><SessionStatusIndicator session={session}/>
+        <SessionMoreMenu label="更多子会话操作">
+          <div className="session-menu-group">
+            {rename && <button type="button" onClick={() => rename(session)}>重命名</button>}
+            {parent && <button type="button" onClick={() => promote(session)}>升级为独立会话</button>}
+          </div>
+          <div className="session-menu-group">
+            <button type="button" onClick={() => void action(() => api.call(session.closedAt ? 'session.reopen' : 'session.close', { id: session.id }))}>{session.closedAt ? '重新打开' : '关闭会话'}</button>
+            {session.closedAt && <button type="button" className="danger" onClick={() => remove(session)}>删除会话</button>}
+          </div>
+        </SessionMoreMenu>
+      </div>
+      {parent && <button className="subsession-parent text-button" title={'返回 ' + parent.title} onClick={() => open(parent)}>← {parent.title}</button>}
+      <p className="subsession-context-note" title="上下文独立；与父会话共用工作目录，文件修改会相互可见。">上下文独立 · 共用工作目录</p>
+    </header>
+    {children.length > 0 && <details className="subsession-child-list"><summary>下级子会话 · {children.length}</summary><nav className="subsession-child-links" aria-label="下级子会话">{children.map(child => <button key={child.id} title={child.title} onClick={() => open(child)}><span>{child.title}</span><SessionStatusIndicator session={child}/></button>)}</nav></details>}
     <div className="subsession-messages" ref={messages}>
       <SelectionActions sessionId={session.id} add={!session.closedAt ? text => edit(session.id, { text: current.text + (current.text ? '\n\n' : '') + quoteSessionText(text) }) : undefined} fork={!session.closedAt && session.provider === 'codex' ? text => create(session, text) : undefined}>
         {session.fork && <details className="inherited-conversation" onToggle={event => { if (event.currentTarget.open && !history) void api.call<Message[]>('subsession.history', { id: session.id }).then(setHistory, reason => setError(reason.message)); }}><summary>创建时的上下文 · {new Date(session.fork.capturedAt).toLocaleTimeString('zh-CN')}{session.fork.parentWasRunning ? ' · 包含当时未完成的回复' : ''}</summary>{history ? <SessionTranscript session={{ ...session, messages: history, status: 'idle' }} renderMessage={render}/> : <p>正在读取固定快照…</p>}</details>}
         <SessionTranscript session={session} renderMessage={render}/>
       </SelectionActions>
-      {running && <p className="muted small">本轮尚未结束，可以继续创建子会话。</p>}
+      {running && <p className="muted small">本轮尚未结束。</p>}
       {session.approvals.map(request => <RequestCard key={request.id} request={request} onAnswer={(option, answers) => void action(() => api.call('session.answer', { id: session.id, requestId: request.id, option, answers }))}/>)}
       {(error || session.error) && <p role="alert" className="inline-error">{error || session.error}</p>}
     </div>

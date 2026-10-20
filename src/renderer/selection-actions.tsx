@@ -11,8 +11,8 @@ export function SelectionActions({ sessionId, add, fork, children }: {
       const selected = window.getSelection();
       if (!selected || selected.isCollapsed || !root.current?.contains(selected.anchorNode) || !root.current.contains(selected.focusNode)) { setSelection(undefined); return; }
       if (selected.anchorNode?.parentElement?.closest('textarea,input,button,[role=toolbar]')) return;
-      const text = selected.toString().trim();
-      if (!text || text.length > 128 * 1024) { setSelection(undefined); return; }
+      const text = selected.toString();
+      if (!text.trim() || text.length > 128 * 1024) { setSelection(undefined); return; }
       const rect = selected.getRangeAt(0).getBoundingClientRect();
       setSelection({ text, x: Math.max(8, Math.min(rect.left, window.innerWidth - 280)), y: Math.max(8, Math.min(rect.bottom + 6, window.innerHeight - 46)) });
     };

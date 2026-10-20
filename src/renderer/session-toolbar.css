@@ -1,0 +1,16 @@
+.main-content{container-type:inline-size;container-name:session-content}
+.session-toolbar .session-toolbar-actions{flex:none}
+.session-toolbar .session-draft-status{max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.session-toolbar .native-desktop-status{margin-left:8px}
+.native-desktop-status>span+span::before{content:" · "}
+.session-more-actions{min-width:190px;max-width:min(320px,calc(100vw - 32px));max-height:min(520px,65vh);overflow-y:auto}
+.session-more-actions .session-menu-group+.session-menu-group{border-top:1px solid #e7ece8;margin-top:5px;padding-top:5px}
+.session-more-actions button{border:0;white-space:normal;text-align:left}
+.session-more-actions .danger{color:#ac5145}
+.session-more-actions .danger:hover{background:#fff1ed}
+.session-more-actions .native-desktop-status{display:block;padding:5px 9px;font-size:11px}
+@container session-content (max-width:600px){
+  .session-toolbar{flex-wrap:wrap}
+  .session-toolbar>div:first-child{flex-basis:100%}
+  .session-toolbar .session-toolbar-actions{margin-left:auto;max-width:100%;flex-wrap:wrap;justify-content:flex-end}
+}

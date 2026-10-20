@@ -4,8 +4,12 @@
 .session-tree-node{min-width:0}.session-tree-children{margin-left:12px;border-left:1px solid #dce6df;padding-left:5px}.session-tree-children>.text-button{font-size:11px;padding:6px}
 .session-tree-node .session-row{min-width:0}.session-tree-node .personal-session-row>.icon{flex:none}
 .subsession-chat{display:flex;flex-direction:column;min-height:0;flex:1;overflow:hidden}
-.subsession-chat>header{padding:12px 16px;border-bottom:1px solid #e0e6e2;font-size:13px}.subsession-chat>header .row{flex-wrap:wrap;margin-top:8px}.subsession-chat>header .text-button{font-size:11px}
-.subsession-child-links{display:flex;gap:6px;flex-wrap:wrap;padding:8px 16px;border-bottom:1px solid #e0e6e2}.subsession-child-links button{font-size:12px}
+.subsession-chat>header{padding:10px 16px;border-bottom:1px solid #e0e6e2;font-size:13px;flex:none}
+.subsession-heading{display:flex;align-items:center;gap:8px;min-width:0}.subsession-heading>b{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.subsession-parent.text-button{display:block;max-width:100%;padding:3px 0;font-size:11px;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.subsession-context-note{font-size:11px;color:#718578;margin:4px 0 0}
+.subsession-child-list{flex:none;border-bottom:1px solid #e0e6e2;font-size:12px;color:#60796b}.subsession-child-list>summary{cursor:pointer;padding:9px 16px}
+.subsession-child-links{display:flex;flex-direction:column;gap:4px;max-height:160px;overflow:auto;padding:0 12px 8px}.subsession-child-links button{font-size:12px;justify-content:flex-start;min-width:0;padding:6px;background:transparent;border-radius:6px}.subsession-child-links button:hover{background:#edf5ef}.subsession-child-links button>span:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .subsession-messages{flex:1;min-height:0;overflow:auto;padding:12px 16px}.subsession-messages .message{padding:10px 0;max-width:none;font-size:13px;overflow-wrap:anywhere}.subsession-messages pre{overflow:auto;max-width:100%;white-space:pre-wrap}
 .subsession-composer{padding:12px;border-top:1px solid #e0e6e2}.subsession-composer textarea{width:100%;min-height:100px;resize:vertical;max-height:35vh}.subsession-composer>.row{margin-top:8px}.subsession-empty{padding:20px;color:#718578;font-size:13px;line-height:1.7}
 .inherited-conversation{font-size:12px;margin-bottom:12px;color:#60796b}.inherited-conversation>summary{cursor:pointer;padding:6px 0}.inherited-conversation .message{opacity:.85}

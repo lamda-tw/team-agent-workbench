@@ -65,7 +65,7 @@ import { linkConclusionPublications } from './conclusion-publications';
 import { applyPreparation, contributionCategoryDirectory, preparationFieldContract, preparationWritingGuide } from './preparation';
 import { attachedConclusion, conclusionTitle, isConclusionSource } from '../shared/conclusion-context';
 import { acceptedSessionContext, isPersonalHandoffSource, sourceIdentity, sourceWasAccepted } from '../shared/session-context';
-import { subsessionFamily, subsessionParentId, quoteSessionText } from '../shared/subsessions';
+import { subsessionFamily, subsessionParentId } from '../shared/subsessions';
 import { changedWorkspaceFiles, reportSourceHash } from './subsession-report';
 import { safeFilename, localWithin } from './paths';
 import { ProviderAccounts, authReady } from './provider-auth';
@@ -2800,7 +2800,7 @@ export class Workbench {
           if (native.desktop) { child.codexDesktop = true; child.nativeLive = true; }
           else child.codexStorage = 'workbench';
         }
-        this.store.inputs[child.id] = { text: selectedText.trim() ? quoteSessionText(selectedText) : '', sourceIds: [], answers: {} };
+        this.store.inputs[child.id] = { text: selectedText.trim() ? selectedText : '', sourceIds: [], answers: {} };
         this.session(parentId);
         this.store.sessions.unshift(child);
         await this.store.save(); this.broadcast(); return child;

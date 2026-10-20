@@ -31,7 +31,8 @@ test('Codex forks while streaming, freezes visible deltas and sources, and publi
     const runtime = Object.create(AgentRuntime.prototype);
     runtime.forkCodexThread = async (capture: () => void) => { capture(); captured(); await native; return { id: 'child-native', path: '/fake/child.jsonl', desktop: false }; };
     (wb as any).runtime = async () => runtime;
-    const pending = wb.forkSubsession(parent.id, '方案 A', '引用的问题');
+    const selectedText = '  选中的原文\n保留换行和缩进。';
+    const pending = wb.forkSubsession(parent.id, '方案 A', selectedText);
     await ready;
     assert.equal(wb.store.sessions.length, 1, 'no provisional session before fork succeeds');
     parent.messages.at(-1)!.text += '——创建以后才生成'; finish();
@@ -45,7 +46,7 @@ test('Codex forks while streaming, freezes visible deltas and sources, and publi
     assert.match(snapshot, /比较两种实现/); assert.match(snapshot, /已生成的半句/);
     assert.doesNotMatch(snapshot, /创建以后才生成/);
     assert.equal((await wb.subsessionHistory(child.id)).at(-1)!.text, '已生成的半句');
-    assert.equal(wb.store.inputs[child.id].text, '> 引用的问题\n\n');
+    assert.equal(wb.store.inputs[child.id].text, selectedText, 'selection is the editable message body, with no added quotation syntax');
     assert.equal(sessionContext(child, '开始探索', []).sources.some(source => source.id === child.fork?.sourceId), true);
     assert.equal(child.fork?.inheritedSourceIds.length, 1);
     assert.equal(await fs.readFile(child.sources.find(source => source.id === child.fork?.inheritedSourceIds[0])!.localPath, 'utf8'), '已验证的测试条件');

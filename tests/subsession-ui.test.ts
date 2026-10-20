@@ -30,11 +30,11 @@ test('next-turn quotation keeps the stop control and does not become a current-t
   const finished = renderToStaticMarkup(React.createElement(ComposerActions, { ...props, session: { ...props.session, status: 'idle' } }));
   assert.match(finished, /aria-label="发送任务"/); assert.doesNotMatch(finished, /disabled=/);
 });
-test('child chat allows another fork while streaming, presents inherited context folded, and retains its draft', () => {
+test('child chat keeps management actions folded, presents inherited context folded, and retains its draft', () => {
   const parent = session('root'), child = session('child', parent.id);
   const api = { call: async () => { throw new Error('no IPC during render'); } } as unknown as WorkbenchAPI;
   const html = renderToStaticMarkup(React.createElement(SubsessionChat, { session: child, sessions: [parent, child], input: { text: '> 引用\n\n继续问', sourceIds: [], answers: {} }, api, active: true, edit() {}, open() {}, create() {}, promote() {}, remove() {}, changed: async () => {} }));
-  assert.match(html, /创建子会话/); assert.match(html, /包含当时未完成的回复/);
+  assert.match(html, /更多子会话操作/); assert.doesNotMatch(html, /<button[^>]*>创建子会话/); assert.match(html, /包含当时未完成的回复/);
   assert.match(html, /共用工作目录/); assert.match(html, /继续问/);
   assert.match(html, /<details class="inherited-conversation">/);
   assert.match(html, /<button class="primary" disabled="">发送/);
