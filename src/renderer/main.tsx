@@ -177,6 +177,7 @@ function AccountWorkspace({ state, refresh }: { state: Snapshot; refresh: () => 
   const [networkSessionId, setNetworkSessionId] = useState('');
   const [networkBusy, setNetworkBusy] = useState(false);
   const [sessionFiles, setSessionFiles] = useState<{ id: string; path?: string }>();
+  const [referenceSessionId, setReferenceSessionId] = useState('');
   const [assignments, setAssignments] = useState<ProjectAssignment[]>([]), [assignmentError, setAssignmentError] = useState(''), [assignmentLoading, setAssignmentLoading] = useState(false), [startingAssignment, setStartingAssignment] = useState<ProjectAssignment>();
   const assignmentSequence = useRef(0);
   const [libraryFocus, setLibraryFocus] = useState<{ projectId: string; path: string }>(); const [contentUpdates, setContentUpdates] = useState<ContentUpdate[]>([]);
@@ -290,7 +291,9 @@ function AccountWorkspace({ state, refresh }: { state: Snapshot; refresh: () => 
   const acceptedSources = session ? acceptedSessionContext(session).sourceHashes : {};
   const references = uniqueSources(session?.sources || []);
   const pendingSources = references.filter(source => acceptedSources[source.id] !== source.sha256);
-  const includedSources = references.filter(source => acceptedSources[source.id] === source.sha256);
+  const referenceSession = state.sessions.find(s => s.id === referenceSessionId);
+  const referenceHashes = referenceSession ? acceptedSessionContext(referenceSession).sourceHashes : {};
+  const includedSources = uniqueSources(referenceSession?.sources || []).filter(source => referenceHashes[source.id] === source.sha256);
   const workSessions = state.sessions.filter(s => s.purpose === 'work' && (personal ? isPersonalBinding(s.binding) && (personalGroup === '*' || (s.personalGroupId || '') === personalGroup) : !isPersonalBinding(s.binding) && s.binding?.project.groupName === project?.groupName));
   const preparingCount = state?.drafts.filter(d => !d.submitted && d.generation === 'running').length || 0;
   const readyCount = state?.drafts.filter(needsPreparationConfirmation).length || 0;
@@ -510,12 +513,13 @@ function AccountWorkspace({ state, refresh }: { state: Snapshot; refresh: () => 
     {waitingApprovals.length > 0 && <div className="pending-approvals" role="status" aria-label="待授权提醒"><ShieldCheck size={17}/><b>{waitingApprovals.reduce((n, s) => n + s.approvals.filter(a => !isQuestionRequest(a) && !isPlanRequest(a)).length, 0)} 项操作等待你的授权</b>{waitingApprovals.map(s => <button className="secondary compact" key={s.id} onClick={() => { if (s.purpose === 'prepare') { const d = state.drafts.find(d => d.prepareSessionId === s.id); if (d) { setDraftReturnToList(false); setDraftId(d.id); setView('drafts'); } } else selectSession(s); }}>{s.purpose === 'prepare' ? '成果整理' : s.title} · 查看授权</button>)}</div>}
     {view === 'sessions' && (session ? <><div className="session-toolbar"><div><div className="session-title-row"><h2>{session.title}</h2></div><span className="muted small" title={session.cwd}>{providerLabel(session.provider)}{session.nativeLive ? ' · 同一条' : ''} <span className="separator">/</span> {session.binding ? [session.binding.project.groupLabel, session.binding.project.name].filter(Boolean).join(' / ') : '本地会话'} <span className="separator">/</span> {session.closedAt ? '已关闭' : session.stoppedAt && ['starting', 'running', 'approval'].includes(session.status) ? '正在停止' : session.status === 'idle' && session.stoppedAt ? '已停止' : session.status === 'approval' && session.approvals.some(isQuestionRequest) ? '等待回答' : session.status === 'approval' && session.approvals.some(isPlanRequest) ? '等待确认计划' : session.cliConnection?.state === 'reconnecting' ? '重连中' : session.cliConnection?.state === 'failed' ? (session.cliConnection.httpStatus ? `HTTP ${session.cliConnection.httpStatus} · 请求失败` : 'CLI 请求失败') : statusLabels[session.status]}<NativeDesktopStatus session={session}/></span></div>
         <div className="row session-toolbar-actions">
-          <details className="session-materials" key={session.id}><summary title="查看已带入的成果、参考文件和阶段摘要">AI 参考内容{includedSources.length > 0 && <span className="materials-count">已带入 {includedSources.length} 项</span>}{session.handoffState?.error && <span className="materials-update">摘要待更新</span>}</summary><div className="session-materials-content"><p className="materials-purpose">已带入的资料会保留在当前对话中，无需再次选择。</p>{includedSources.length > 0 && <ul className="session-reference-list" aria-label="已带入的参考资料">{includedSources.map(source => <li key={source.id}><FileText size={13}/><span>{resultLabelTitle(source.name)}</span><small>已带入</small></li>)}</ul>}<button className="secondary compact" title="AI 自动记录的本地摘要，不会直接上传" onClick={() => void run(async () => setHandoff({ id: session.id, text: await api.call<string>('handoff.read', { id: session.id }) }))}><FileText size={14}/>查看阶段摘要</button><SummaryUpdateStatus session={session}/></div></details>
+          <button className="secondary compact" disabled={isPersonalBinding(session.binding)} title={isPersonalBinding(session.binding) ? '迁入团队项目后可向团队提问' : '向项目成员提问'} onClick={() => { setQuestionPanel('session'); openInteraction('questions'); }}><MessageSquare size={14}/>提问</button>
           <button aria-label="整理成果" className="primary compact" disabled={!!session.cursorNative || session.purpose === 'prepare' || busy} title={session.cursorNative ? '此 Beta 暂不支持成果整理' : undefined} onClick={() => { if (sessionDraft) { setDraftReturnToList(false); setDraftId(sessionDraft.id); setView('drafts'); } else setPreparingSession(session); }}><Sparkles size={14}/>整理成果{sessionDraft && <span className="session-draft-status">{draftStatus(sessionDraft, state.transfers.find(t => t.id === sessionDraft.submitted))}</span>}</button>
           <SessionMoreMenu key={'more-' + session.id}>
             <div className="session-menu-group">
               <button type="button" onClick={() => setRenamingSession(session)}><Pencil size={14}/>重命名会话</button>
               <button type="button" onClick={() => setSessionFiles({ id: session.id })}><FolderOpen size={14}/>会话文件</button>
+              <button type="button" onClick={() => setReferenceSessionId(session.id)}><FileText size={14}/>AI 参考内容</button>
               <button type="button" onClick={() => void run(async () => setHistory({ id: session.id, text: await api.call<string>('session.history', { id: session.id }) }))}><Upload size={14}/>{isPersonalBinding(session.binding) ? '会话记录' : '轨迹上传'}</button>
             </div>
             {session.provider !== 'claude' && <div className="session-menu-group">
@@ -573,6 +577,15 @@ function AccountWorkspace({ state, refresh }: { state: Snapshot; refresh: () => 
     {conclusionMatch && <ConclusionMatchModal matches={conclusionMatch.matches} close={() => setConclusionMatch(undefined)}
       skip={async () => { const pending = conclusionMatch; setConclusionMatch(undefined); await sendInput(pending.sessionId, { text: pending.text, sourceIds: pending.sourceIds, answers: {}, capabilities: pending.capabilities }); }}
       confirm={async ids => { const pending = conclusionMatch, sourceIds = [...pending.sourceIds]; for (const conclusionId of ids) { const source = await api.call<SourceFile>('session.attachConclusion', { id: pending.sessionId, conclusionId }); sourceIds.push(source.id); } const sent = { text: pending.text, sourceIds: [...new Set(sourceIds)], answers: {}, capabilities: pending.capabilities }; editInput(pending.sessionId, sent); setConclusionMatch(undefined); await sendInput(pending.sessionId, sent); }}/>}
+    {referenceSession && <Modal title="AI 参考内容" close={() => setReferenceSessionId('')}>
+      <div className="modal-body">
+        <p className="muted small">已带入的资料会保留在当前对话中，无需再次选择。阶段摘要和日志由后台自动维护。</p>
+        {includedSources.length > 0 ? <ul className="session-reference-list" aria-label="已带入的参考资料">{includedSources.map(source => <li key={source.id}><FileText size={13}/><span>{resultLabelTitle(source.name)}</span><small>已带入</small></li>)}</ul> : <p className="muted small">尚未带入成果或参考文件。</p>}
+        <button className="secondary compact" title="AI 自动记录的本地摘要，不会直接上传" onClick={() => void run(async () => { const text = await api.call<string>('handoff.read', { id: referenceSession.id }); setReferenceSessionId(''); setHandoff({ id: referenceSession.id, text }); })}><FileText size={14}/>查看阶段摘要</button>
+        <SummaryUpdateStatus session={referenceSession}/>
+      </div>
+      <footer><button className="secondary" onClick={() => setReferenceSessionId('')}>关闭</button></footer>
+    </Modal>}
     {handoff && <AgentNotesPanel key={handoff.id} handoff={handoff} close={() => setHandoff(undefined)}/>}
     {handoffPickerId && <SessionHandoffPicker key={handoffPickerId} targetId={handoffPickerId} close={() => setHandoffPickerId('')} attached={source => { const current = localInputs.current[handoffPickerId] || state.inputs[handoffPickerId]; const old = state.sessions.find(item => item.id === handoffPickerId)?.sources.filter(item => item.sourcePath === source.sourcePath && item.id !== source.id).map(item => item.id) || []; editInput(handoffPickerId, { sourceIds: [...new Set([...(current?.sourceIds || []).filter(id => !old.includes(id)), source.id])] }); setNotice(state.sessions.find(item => item.id === handoffPickerId)?.autoUpload ? '个人会话摘要已选入下一条消息；此会话的轨迹自动上传已关闭' : '个人会话摘要已选入下一条消息，发送后才会进入模型上下文'); setHandoffPickerId(''); }}/>}
 
