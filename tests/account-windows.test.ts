@@ -8,6 +8,7 @@ import { EventEmitter } from 'node:events';
 import { pathToFileURL } from 'node:url';
 import { Workbench } from '../src/core/workbench';
 import { SharedFiles } from '../src/core/shared-files';
+import { accountIdentity } from '../src/shared/account-data';
 import { accountDirectory } from '../src/core/account-workspaces';
 import type { Snapshot } from '../src/shared/types';
 import { encodeEgressInvite } from '../src/core/egress-config';
@@ -16,7 +17,7 @@ import { teamServer } from './fixtures/team-server.mjs';
 
 // Exercise the production IPC/window lifecycle with in-memory Electron objects.
 // No browser, desktop process, input simulation or real model is started.
-test('production window routing restores the account in any window, isolates failed logins and survives switching/closing shared views', async t => {
+test('production window routing reuses project connections, separates nodes and accounts into windows, and preserves shared runtimes', async t => {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'workbench-window-routing-'))), base = path.join(root, 'data'), server = await teamServer();
   const seed = new Workbench(base, () => {}, () => {}); await seed.store.init();
   await seed.configureWorkspace(server.profile('alice'), 'test-password', '', async () => true);
@@ -70,10 +71,10 @@ test('production window routing restores the account in any window, isolates fai
   const login = (window: FakeWindow, username: string, password = 'test-password') => call(window, 'remote.connect', { profile: server.profile(username), password, localPath: '' });
   const first = opened[0]; assert.deepEqual((await snapshot(first)).sessions.map(s => s.id), [session.id]);
   await login(first, 'alice');
-  app.emit('second-instance'); await until(() => !!opened[1]?.entry); const second = opened[1];
+  app.emit('second-instance'); await until(() => !!opened[1]?.entry); let second = opened[1];
   assert.equal((await snapshot(second)).settings.workspaceSnapshot?.profile.username, 'bob', 'relaunch restores an unopened account first');
   assert.equal((await snapshot(second)).sessions.length, 0);
-  await login(second, 'alice'); assert.deepEqual((await snapshot(second)).sessions.map(s => s.id), [session.id]);
+  const originalBob = second; await login(second, 'alice'); second = opened.at(-1)!; assert.notEqual(second, originalBob); assert.equal((await snapshot(originalBob)).settings.workspaceSnapshot?.profile.username, 'bob'); originalBob.close(); await until(() => originalBob.destroyed); assert.deepEqual((await snapshot(second)).sessions.map(s => s.id), [session.id]);
   await call(first, 'layout.sidebar', { height: 320 }); await call(second, 'layout.sidebar', { height: 640 });
   assert.equal((await snapshot(first)).settings.sidebarProjectHeight, 320); assert.equal((await snapshot(second)).settings.sidebarProjectHeight, 640);
   await call(second, 'session.rename', { id: session.id, title: '任意窗口都能看到' });
@@ -88,17 +89,54 @@ test('production window routing restores the account in any window, isolates fai
   const readHandoff = Workbench.prototype.readHandoff;
   let finishRead!: (value: string) => void;
   Workbench.prototype.readHandoff = async () => new Promise<string>(resolve => { finishRead = resolve; });
-  const oldRead = assert.rejects(call(second, 'handoff.read', { id: session.id }), /账号已改变/);
+  const oldRead = call(second, 'handoff.read', { id: session.id });
   await until(() => !!finishRead);
-  await call(second, 'remote.connect', { profile: server.profile('bob'), password: 'test-password', egress: selectedEgress }); finishRead('private prior account text'); await oldRead; Workbench.prototype.readHandoff = readHandoff;
-  assert.equal((await snapshot(second)).settings.egress?.viaSharedServer, true);
-  assert.deepEqual((await snapshot(second)).settings.egress?.sharedServer, selectedServer);
-  assert.equal((await snapshot(second)).egress?.viaSharedServer, true);
+  await call(second, 'remote.connect', { profile: server.profile('bob'), password: 'test-password', egress: selectedEgress }); const bobView = opened.at(-1)!; assert.notEqual(bobView, second); finishRead('private prior account text'); assert.equal(await oldRead, 'private prior account text'); Workbench.prototype.readHandoff = readHandoff;
+  assert.equal((await snapshot(bobView)).settings.egress?.viaSharedServer, true);
+  assert.deepEqual((await snapshot(bobView)).settings.egress?.sharedServer, selectedServer);
+  assert.equal((await snapshot(bobView)).egress?.viaSharedServer, true);
   assert.equal((await snapshot(first)).settings.egress, undefined, 'new login choices belong only to the authenticated account');
-  assert.equal((await snapshot(second)).sessions.length, 0);
+  assert.equal((await snapshot(bobView)).sessions.length, 0);
   assert.equal((await snapshot(first)).sessions[0].id, session.id); assert.equal((await snapshot(first)).connection?.connected, true);
-  await assert.rejects(call(second, 'session.rename', { id: session.id, title: '不能修改' }), /不属于当前账号/);
-  await login(second, 'alice');
+  await assert.rejects(call(bobView, 'session.rename', { id: session.id, title: '不能修改' }), /不属于当前账号/);
+  assert.equal((await snapshot(second)).connection?.profile.username, 'alice');
+  bobView.close(); await until(() => bobView.destroyed);
+  const otherServer = await teamServer();
+  try {
+    const seedRemote = new SharedFiles(() => {}); await seedRemote.connect(otherServer.profile('alice'), 'test-password', async () => true); await seedRemote.loadManifest();
+    const otherProject = await seedRemote.createProject('算法大赛'); seedRemote.disconnect();
+    const marker = otherServer.nodes.get(otherProject.remoteRoot + '/.workbench-project.json');
+    const metadata = JSON.parse(marker.data.toString()); metadata.id = project.id; marker.data = Buffer.from(JSON.stringify(metadata));
+    // Nodes may independently assign the same project id/name.
+    await call(first, 'remote.connect', { profile: otherServer.profile('alice'), password: 'test-password', createProject: { name: '第二节点新项目' } });
+    const nodeTwo = opened.at(-1)!;
+    assert.notEqual(nodeTwo, first);
+    assert.equal((await snapshot(nodeTwo)).projectCreation?.name, '第二节点新项目');
+    assert.equal((await snapshot(first)).projectCreation, undefined);
+    assert.equal((await snapshot(first)).connection?.profile.port, server.profile('alice').port);
+    assert.equal((await snapshot(nodeTwo)).connection?.profile.port, otherServer.profile('alice').port);
+    assert.equal((await snapshot(nodeTwo)).sessions.length, 0);
+    const nodeTwoProfile = (await snapshot(nodeTwo)).connection!.profile;
+    assert.equal(nodeTwoProfile.projects[0].id, project.id);
+    const connectBeforeReuse = SharedFiles.prototype.connect;
+    SharedFiles.prototype.connect = async () => { throw new Error('reuse must not ask for another password'); };
+    try {
+      const sameWindow = await call(first, 'project.connection.open', { key: accountIdentity(profile), projectId: project.id });
+      assert.equal(sameWindow.newWindow, false);
+      const reused = await call(first, 'project.connection.open', { key: accountIdentity(nodeTwoProfile), createProject: { name: '复用节点新项目' } });
+      assert.equal(reused.newWindow, true);
+      const nodeTwoAlias = opened.at(-1)!;
+      assert.equal((await snapshot(nodeTwoAlias)).projectCreation?.name, '复用节点新项目');
+      assert.equal((await snapshot(nodeTwo)).projectCreation?.name, '第二节点新项目');
+      assert.equal((await snapshot(nodeTwoAlias)).selectedProjectId, project.id);
+      await assert.rejects(call(first, 'project.connection.open', { key: accountIdentity(nodeTwoProfile), projectId: 'revoked' }), /访问权限/);
+      nodeTwo.close(); await until(() => nodeTwo.destroyed);
+      assert.equal((await snapshot(nodeTwoAlias)).connection?.connected, true);
+      assert.equal((await snapshot(first)).connection?.connected, true);
+      nodeTwoAlias.close(); await until(() => nodeTwoAlias.destroyed);
+      await assert.rejects(call(first, 'project.connection.open', { key: accountIdentity(nodeTwoProfile), projectId: project.id }), /已经断开/);
+    } finally { SharedFiles.prototype.connect = connectBeforeReuse; }
+  } finally { await otherServer.close(); }
   // A duplicate stored slot is not another dormant account. Once the two
   // existing windows are open, relaunching must still create a login window.
   await fs.writeFile(path.join(base, 'window-state', '3.json'), JSON.stringify({ profile }));
@@ -112,9 +150,9 @@ test('production window routing restores the account in any window, isolates fai
   const additional = opened.slice(extraStart);
   for (const window of additional) {
     const state = await snapshot(window);
-    assert.equal(state.settings.workspaceSnapshot, undefined);
-    assert.equal(state.settings.defaultServer?.host, profile.host);
-    assert.equal(state.settings.defaultServer?.port, profile.port);
+    // A closed node/account may be restored offline; it must not borrow the live Alice connection.
+    assert.equal(state.connection?.connected, undefined);
+    if (state.settings.workspaceSnapshot) assert.notEqual(accountIdentity(state.settings.workspaceSnapshot.profile), accountIdentity(profile));
     assert.deepEqual(state.sessions, []);
   }
   assert.equal((await snapshot(first)).connection?.profile.username, 'alice');
@@ -126,7 +164,7 @@ test('production window routing restores the account in any window, isolates fai
   await call(second, 'session.rename', { id: session.id, title: '原窗口关闭后继续' });
   // Closing during password verification must not attach a context to a dead window.
   const nextIndex = opened.length;
-  await call(second, 'window.new'); await until(() => !!opened[nextIndex]?.entry); const third = opened[nextIndex];
+  app.emit('second-instance'); await until(() => !!opened[nextIndex]?.entry); const third = opened[nextIndex];
   const connect = SharedFiles.prototype.connect;
   let resumeLogin!: () => void, entered = false;
   SharedFiles.prototype.connect = async function (...args) { entered = true; await new Promise<void>(resolve => { resumeLogin = resolve; }); return connect.apply(this, args); };
@@ -143,6 +181,52 @@ test('production window routing restores the account in any window, isolates fai
     await assert.rejects(call(second, 'session.send', { id: offlineSession.id, text: '开始任务' }), /CLI 尚未登录/);
     assert.deepEqual(checkedRoutes, ['management', 'direct'], 'creation and sending check the actual route of each session');
   } finally { Workbench.prototype.requireAuth = requireAuth; }
+  // Start project creation without a connection. Authentication only continues
+  // the form; it must not create remote resources before the final confirmation.
+  const createStart = opened.length;
+  app.emit('second-instance'); await until(() => !!opened[createStart]?.entry);
+  const restoredWindows: FakeWindow[] = [];
+  let creationSource = opened[createStart];
+  // Repeated launches restore unopened saved accounts before offering a fresh window.
+  while ((await snapshot(creationSource)).settings.workspaceSnapshot) {
+    restoredWindows.push(creationSource); assert(restoredWindows.length < 10);
+    const nextLaunch = opened.length; app.emit('second-instance');
+    await until(() => !!opened[nextLaunch]?.entry); creationSource = opened[nextLaunch];
+  }
+  let creationWindow = creationSource;
+  assert.equal((await snapshot(creationWindow)).connection?.connected, undefined);
+  const countBeforeCreation = (await snapshot(second)).connection!.profile.projects.length;
+  const creationLogin = { profile: server.profile('alice'), password: 'test-password', createProject: { name: '  未连接直接建项目  ' } };
+  await assert.rejects(call(creationWindow, 'remote.connect', { ...creationLogin, password: 'wrong-password' }));
+  assert.equal((await snapshot(creationWindow)).projectCreation, undefined);
+  await call(creationWindow, 'remote.connect', creationLogin);
+  if (!(await snapshot(creationWindow)).projectCreation) creationWindow = opened.at(-1)!;
+  const creationState = await snapshot(creationWindow);
+  assert.equal(creationState.projectCreation?.name, '未连接直接建项目');
+  assert.equal(creationState.connection!.profile.projects.length, countBeforeCreation);
+  assert.equal((await snapshot(second)).projectCreation, undefined, 'draft belongs to a window, not all windows sharing the account');
+  await call(creationWindow, 'project.creation.dismiss', { id: 'stale-draft' });
+  assert.equal((await snapshot(creationWindow)).projectCreation?.id, creationState.projectCreation!.id);
+  const newProject = await call(creationWindow, 'project.create', { name: creationState.projectCreation!.name, groupName: creationState.connection!.workspaces.find(w => w.canCreateProject)!.groupName });
+  assert(newProject.id);
+  await call(creationWindow, 'project.creation.dismiss', { id: creationState.projectCreation!.id });
+  assert.equal((await snapshot(creationWindow)).projectCreation, undefined);
+  assert.equal((await snapshot(second)).connection!.profile.projects.length, countBeforeCreation + 1);
+  const reuseConnect = SharedFiles.prototype.connect;
+  SharedFiles.prototype.connect = async () => { throw new Error('creation reuse must not reauthenticate'); };
+  try {
+    await call(creationWindow, 'project.connection.open', { key: accountIdentity(profile), createProject: { name: '取消的项目' } });
+    const pending = (await snapshot(creationWindow)).projectCreation!;
+    assert.equal(pending.name, '取消的项目');
+    await assert.rejects(call(creationWindow, 'project.connection.open', { key: accountIdentity(profile), projectId: project.id, createProject: { name: '冲突意图' } }), /创建新项目/);
+    await call(creationWindow, 'project.creation.dismiss', { id: pending.id });
+    assert.equal((await snapshot(creationWindow)).connection!.profile.projects.length, countBeforeCreation + 1, 'cancel never creates remote directories');
+  } finally { SharedFiles.prototype.connect = reuseConnect; }
+  creationWindow.close(); await until(() => creationWindow.destroyed);
+  if (creationSource !== creationWindow) { creationSource.close(); await until(() => creationSource.destroyed); }
+  for (const restored of restoredWindows) restored.close();
+  await until(() => restoredWindows.every(window => window.destroyed));
+
   // Repeated launcher invocations must create a window for every request,
   // including bursts after all stored account slots are already in use.
   const burstStart = opened.length;

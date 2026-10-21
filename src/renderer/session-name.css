@@ -1,0 +1,13 @@
+.session-name{min-width:0}
+.session-name-label{display:block;max-width:100%;padding:2px 4px;margin-left:-4px;border-radius:4px;background:transparent;color:inherit;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:inherit}
+.session-name-label:hover,.session-name-label:focus-visible{background:#edf3ef;color:#287554}
+.session-name-editor{position:relative;min-width:0}
+.session-name-editor input{display:block;width:100%;padding:5px 7px;font:inherit;line-height:1.4;border-radius:5px}
+.session-name-editor input[readonly]{color:#75867c}
+.session-name-error,.session-name-saving{display:block;margin-top:3px;font-size:11px;font-weight:400;line-height:1.4;overflow-wrap:anywhere}
+.session-name-error{color:#a63b31}.session-name-saving{color:#75867c}
+.personal-session-row>.session-name-sidebar{flex:1;min-width:0}
+.session-name-sidebar .session-name-editor{padding:12px 3px;margin-bottom:3px;min-height:61px;font-size:12px;font-weight:550}
+.session-name-heading{width:360px;max-width:100%;margin-bottom:5px;font-size:16px;font-weight:700}
+.session-toolbar>div:first-child{flex:1;min-width:0}
+.subsession-heading>.session-name-subsession{flex:1;font-weight:700}

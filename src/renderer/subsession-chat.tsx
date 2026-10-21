@@ -10,11 +10,13 @@ import { SelectionActions } from './selection-actions';
 import { RequestCard } from './request-card';
 import { SessionStatusIndicator, useSessionCompletionRead } from './session-status';
 import { SessionMoreMenu } from './session-more-menu';
+import { SessionName } from './session-name';
 
-export function SessionTree({ sessions, selectedId, childId, open, create, promote, organize }: {
+export function SessionTree({ sessions, selectedId, childId, open, create, promote, organize, rename }: {
   sessions: AgentSession[]; selectedId: string; childId?: string;
   open: (session: AgentSession) => void; create: (session: AgentSession) => void;
   promote: (session: AgentSession) => void; organize?: (session: AgentSession) => React.ReactNode;
+  rename: (id: string, title: string) => Promise<void>;
 }) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const selectedAncestors = new Set<string>();
@@ -34,7 +36,7 @@ export function SessionTree({ sessions, selectedId, childId, open, create, promo
     return <div className="session-tree-node" key={session.id}>
       <div className="personal-session-row">
         <button className="icon" aria-label={`展开会话菜单：${session.title}`} aria-expanded={isExpanded} onClick={() => setExpanded(value => ({ ...value, [session.id]: !isExpanded }))}>{isExpanded ? '▾' : '▸'}</button>
-        <button className={'session-row ' + ([selectedId, childId].includes(session.id) ? 'selected' : '')} data-session-id={session.id} onClick={() => open(session)}><span className={'provider-icon ' + session.provider}>{session.provider === 'codex' ? 'G' : session.provider === 'cursor' ? 'C' : 'A'}</span><span><b>{session.title}</b><small>{session.closedAt ? '已关闭' : subsessionParentId(session) ? '子会话' : session.provider}</small></span><SessionStatusIndicator session={session}/></button>
+        <SessionName title={session.title} variant="sidebar" save={title => rename(session.id, title)}>{begin => <button className={'session-row ' + ([selectedId, childId].includes(session.id) ? 'selected' : '')} data-session-id={session.id} title={session.title + ' · 双击修改名称'} onClick={() => open(session)} onDoubleClick={begin}><span className={'provider-icon ' + session.provider}>{session.provider === 'codex' ? 'G' : session.provider === 'cursor' ? 'C' : 'A'}</span><span><b>{session.title}</b><small>{session.closedAt ? '已关闭' : subsessionParentId(session) ? '子会话' : session.provider}</small></span><SessionStatusIndicator session={session}/></button>}</SessionName>
         {organize?.(session)}
       </div>
       {isExpanded && <div className="session-tree-children">
@@ -47,10 +49,10 @@ export function SessionTree({ sessions, selectedId, childId, open, create, promo
   return <>{sessions.filter(value => !subsessionParentId(value) || !sessions.some(parent => parent.id === subsessionParentId(value))).map(value => row(value, new Set()))}</>;
 }
 
-export function SubsessionChat({ session, sessions, input, edit, api, active, open, create, promote, remove, rename, locked, changed }: {
+export function SubsessionChat({ session, sessions, input, edit, api, active, open, create, promote, remove, locked, changed }: {
   session?: AgentSession; sessions: AgentSession[]; input?: SessionInput; edit: (id: string, patch: Partial<SessionInput>) => void;
   api: WorkbenchAPI; active: boolean; open: (session: AgentSession) => void; create: (session: AgentSession, text?: string) => void;
-  promote: (session: AgentSession) => void; remove: (session: AgentSession) => void; rename?: (session: AgentSession) => void; locked?: boolean; changed: () => Promise<void>;
+  promote: (session: AgentSession) => void; remove: (session: AgentSession) => void; locked?: boolean; changed: () => Promise<void>;
 }) {
   const [error, setError] = useState(''), [sending, setSending] = useState(false), [history, setHistory] = useState<Message[]>();
   const lock = useRef(false), messages = useRef<HTMLDivElement>(null);
@@ -74,12 +76,9 @@ export function SubsessionChat({ session, sessions, input, edit, api, active, op
   const render = (message: Message) => <article className={'message ' + message.role} key={message.id}><div className="message-author"><b>{message.role === 'user' ? '你' : message.role === 'assistant' ? 'Codex' : '运行信息'}</b></div><ReactMarkdown remarkPlugins={[remarkGfm]}>{sessionMessageText(session, message)}</ReactMarkdown></article>;
   return <section className="subsession-chat" aria-label={'子会话：' + session.title}>
     <header>
-      <div className="subsession-heading"><b title={session.title}>{session.title}</b><SessionStatusIndicator session={session}/>
+      <div className="subsession-heading"><SessionName key={session.id} title={session.title} variant="subsession" save={async title => { await api.call('session.rename', { id: session.id, title }); await changed(); }}/><SessionStatusIndicator session={session}/>
         <SessionMoreMenu label="更多子会话操作">
-          <div className="session-menu-group">
-            {rename && <button type="button" onClick={() => rename(session)}>重命名</button>}
-            {parent && <button type="button" onClick={() => promote(session)}>升级为独立会话</button>}
-          </div>
+          {parent && <div className="session-menu-group"><button type="button" onClick={() => promote(session)}>升级为独立会话</button></div>}
           <div className="session-menu-group">
             <button type="button" onClick={() => void action(() => api.call(session.closedAt ? 'session.reopen' : 'session.close', { id: session.id }))}>{session.closedAt ? '重新打开' : '关闭会话'}</button>
             {session.closedAt && <button type="button" className="danger" onClick={() => remove(session)}>删除会话</button>}

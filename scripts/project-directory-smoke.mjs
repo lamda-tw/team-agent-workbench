@@ -87,7 +87,7 @@ try {
   await expect(page.getByRole('heading', { name: '登录团队工作台', exact: true })).toBeVisible();
   assert(new URL(page.url()).pathname.includes(originalAssets));
   const additional = app.waitForEvent('window');
-  await page.evaluate(() => window.workbench.call('window.new'));
+  await app.evaluate(({ app }) => app.emit('second-instance'));
   const next = await additional;
   await expect(next.getByRole('heading', { name: '登录团队工作台', exact: true })).toBeVisible();
   assert(new URL(next.url()).pathname.includes(originalAssets), 'additional account windows must match their running main process');

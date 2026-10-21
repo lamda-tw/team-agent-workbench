@@ -2,7 +2,7 @@
 .session-tree-node .session-row{min-width:0}.session-tree-node .personal-session-row>.icon{flex:none}
 .subsession-chat{display:flex;flex-direction:column;min-height:0;flex:1;overflow:hidden}
 .subsession-chat>header{padding:10px 16px;border-bottom:1px solid #e0e6e2;font-size:13px;flex:none}
-.subsession-heading{display:flex;align-items:center;gap:8px;min-width:0}.subsession-heading>b{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.subsession-heading{display:flex;align-items:center;gap:8px;min-width:0}
 .subsession-parent.text-button{display:block;max-width:100%;padding:3px 0;font-size:11px;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .subsession-context-note{font-size:11px;color:#718578;margin:4px 0 0}
 .subsession-child-list{flex:none;border-bottom:1px solid #e0e6e2;font-size:12px;color:#60796b}.subsession-child-list>summary{cursor:pointer;padding:9px 16px}

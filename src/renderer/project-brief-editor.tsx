@@ -1,4 +1,6 @@
+import { errorMessage } from '../shared/errors';
 import React, { useEffect, useState } from 'react';
+import { groupCommandSchema, type TeamGroup } from '../shared/team-groups';
 import type { Project, ProjectBriefState, WorkspaceAccess } from '../shared/types';
 import { briefFields, type ProjectBrief } from '../shared/project-brief';
 
@@ -22,7 +24,7 @@ export function ProjectBriefSettings({ project, admin, cancel, saved, saveLabel 
     setBusy(true); setError(''); setBrief(blank()); setRevision(0);
     void window.workbench.call<ProjectBriefState>('project.brief', { projectId: project.id }).then(data => {
       if (active) { setBrief(data.brief || blank()); setRevision(data.revision); }
-    }, reason => { if (active) setError(reason.message); }).finally(() => { if (active) setBusy(false); });
+    }, reason => { if (active) setError(errorMessage(reason)); }).finally(() => { if (active) setBusy(false); });
     return () => { active = false; };
   }, [project.id]);
   const invalid = briefFields.filter(field => field.required).some(field => !brief[field.key].trim());
@@ -38,27 +40,42 @@ export function ProjectBriefSettings({ project, admin, cancel, saved, saveLabel 
       const result = await window.workbench.call<ProjectBriefState & { briefRevision?: number }>('project.brief.save', { projectId: project.id, brief, revision });
       const nextRevision = result.revision ?? result.briefRevision ?? revision + 1;
       setRevision(nextRevision); await saved(nextRevision);
-    } catch (reason: any) { setError(reason.message); } finally { setBusy(false); }
+    } catch (reason: any) { setError(errorMessage(reason)); } finally { setBusy(false); }
   }}>{busy ? '保存中…' : saveLabel}</button>}</footer></>;
 }
 
-export function ProjectBriefEditor({ project, groups, initialGroup, admin, close, saved }: { project?: Project; groups: WorkspaceAccess[]; initialGroup?: string; admin: boolean; close: () => void; saved: (project?: Project) => Promise<void> }) {
-  const [name, setName] = useState(''), [group, setGroup] = useState(initialGroup || groups[0]?.groupName || '');
+export function ProjectBriefEditor({ project, groups, initialGroup, initialName = '', connectionLabel, admin, close, saved }: { project?: Project; groups: WorkspaceAccess[]; initialGroup?: string; initialName?: string; connectionLabel?: string; admin: boolean; close: () => void; saved: (project?: Project) => Promise<void> }) {
+  const [name, setName] = useState(initialName), [group, setGroup] = useState(initialGroup || groups[0]?.groupName || 'new');
+  const [groupLabel, setGroupLabel] = useState(''), [createdGroup, setCreatedGroup] = useState<TeamGroup>();
+  const [createdProject, setCreatedProject] = useState<Project>();
   const [brief, setBrief] = useState<ProjectBrief>(blank), [skip, setSkip] = useState(false);
   const [busy, setBusy] = useState(false), [error, setError] = useState('');
   if (project) return <div className="modal-backdrop"><section className="modal wide" role="dialog" aria-label="项目资料"><header><h2>项目资料 · {project.name}</h2><button className="secondary compact" disabled={busy} onClick={close}>关闭</button></header><ProjectBriefSettings project={project} admin={admin} cancel={close} saved={async () => saved()}/></section></div>;
-  const invalid = !name.trim() || (!skip && briefFields.filter(field => field.required).some(field => !brief[field.key].trim()));
-  return <div className="modal-backdrop"><section className="modal wide" role="dialog" aria-label="项目资料"><header><h2>创建项目</h2><button className="secondary compact" disabled={busy} onClick={close}>关闭</button></header><div className="modal-body">
+  const available = groups.filter(item => item.canCreateProject && !item.accessError);
+  const invalid = !name.trim() || (group === 'new' ? !groupLabel.trim() : !available.some(item => item.groupName === group) && createdGroup?.id !== group) || (!skip && briefFields.filter(field => field.required).some(field => !brief[field.key].trim()));
+  const locked = busy || !!createdProject;
+  return <div className="modal-backdrop"><section className="modal wide" role="dialog" aria-label="项目资料"><header><h2>创建项目{connectionLabel ? ' · 项目资料' : ''}</h2><button className="secondary compact" disabled={busy} onClick={close}>关闭</button></header><div className="modal-body">
+    {connectionLabel && <p className="muted small">中央节点：{connectionLabel}</p>}
     {error && <div className="inline-error" role="alert">{error}</div>}
-    <label className="field">所属工作组<select aria-label="所属工作组" value={group} onChange={event => setGroup(event.target.value)}>{groups.map(item => <option value={item.groupName} key={item.groupName}>{item.groupLabel || item.groupName}</option>)}</select></label>
-    <label className="field">项目名称<input aria-label="项目名称" value={name} onChange={event => setName(event.target.value)}/></label>
-    <label className="check-row"><input type="checkbox" checked={skip} onChange={event => setSkip(event.target.checked)}/>先创建目录，稍后完善项目资料</label>
-    {!skip && (
-      <BriefFields brief={brief} setBrief={setBrief} busy={busy} readOnly={!admin}/>
-    )}
-  </div><footer><button className="secondary" disabled={busy} onClick={close}>取消</button><button className="primary" disabled={busy || invalid} onClick={async () => {
+    {createdProject && <p role="status">项目已创建，可继续打开。不会重复创建。</p>}
+    <label className="field">所属工作组<select aria-label="所属工作组" disabled={locked} value={group} onChange={event => setGroup(event.target.value)}>{available.map(item => <option value={item.groupName} key={item.groupName}>{item.groupLabel || item.groupName}</option>)}{createdGroup && !available.some(item => item.groupName === createdGroup.id) && <option value={createdGroup.id}>{createdGroup.label}</option>}<option value="new">新建工作组…</option></select></label>
+    {group === 'new' && <><label className="field">工作组名称<input aria-label="工作组名称" maxLength={24} disabled={locked} value={groupLabel} onChange={event => setGroupLabel(event.target.value)}/></label><p className="muted small">创建后，你是这个工作组的创建者，可在项目设置中添加成员。</p></>}
+    <label className="field">项目名称<input aria-label="项目名称" maxLength={180} disabled={locked} value={name} onChange={event => setName(event.target.value)}/></label>
+    <label className="check-row"><input type="checkbox" disabled={locked} checked={skip} onChange={event => setSkip(event.target.checked)}/>先创建目录，稍后完善项目资料</label>
+    {!skip && <BriefFields brief={brief} setBrief={setBrief} busy={locked} readOnly={!admin}/>}
+  </div><footer><button className="secondary" disabled={busy} onClick={close}>取消</button><button className="primary" disabled={busy || (!createdProject && invalid)} onClick={async () => {
     setBusy(true); setError('');
-    try { const result = await window.workbench.call<Project>('project.create', { name, groupName: group, brief: skip ? undefined : brief }); await saved(result); }
-    catch (reason: any) { setError(reason.message); } finally { setBusy(false); }
-  }}>{busy ? '保存中…' : '创建项目'}</button></footer></section></div>;
+    try {
+      if (createdProject) { await saved(createdProject); return; }
+      let groupName = group;
+      if (group === 'new') {
+        const command = groupCommandSchema.parse({ action: 'create', label: groupLabel });
+        const created = await window.workbench.call<TeamGroup>('group.control', command);
+        // Retain the successful group when a later project operation fails.
+        groupName = created.id; setCreatedGroup(created); setGroup(created.id);
+      }
+      const result = await window.workbench.call<Project>('project.create', { name: name.trim(), groupName, brief: skip ? undefined : brief });
+      setCreatedProject(result); await saved(result);
+    } catch (reason: any) { setError(errorMessage(reason)); } finally { setBusy(false); }
+  }}>{busy ? '保存中…' : createdProject ? '打开项目' : '创建项目'}</button></footer></section></div>;
 }

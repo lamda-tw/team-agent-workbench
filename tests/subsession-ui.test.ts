@@ -14,7 +14,7 @@ const session = (id: string, parent?: string): AgentSession => ({
 });
 test('deep child selection expands its full ancestor path and keeps running parents actionable', () => {
   const root = session('root'), child = session('child', root.id), grandchild = session('grandchild', child.id);
-  const html = renderToStaticMarkup(React.createElement(SessionTree, { sessions: [grandchild, child, root], selectedId: root.id, childId: grandchild.id, open() {}, create() {}, promote() {} }));
+  const html = renderToStaticMarkup(React.createElement(SessionTree, { sessions: [grandchild, child, root], selectedId: root.id, childId: grandchild.id, open() {}, create() {}, promote() {}, rename: async () => {} }));
   assert(html.indexOf('data-session-id="root"') < html.indexOf('data-session-id="child"'));
   assert(html.indexOf('data-session-id="child"') < html.indexOf('data-session-id="grandchild"'));
   assert.match(html, /创建子会话/); assert.match(html, /升级为独立会话/);
@@ -35,6 +35,7 @@ test('child chat keeps management actions folded, presents inherited context fol
   const api = { call: async () => { throw new Error('no IPC during render'); } } as unknown as WorkbenchAPI;
   const html = renderToStaticMarkup(React.createElement(SubsessionChat, { session: child, sessions: [parent, child], input: { text: '> 引用\n\n继续问', sourceIds: [], answers: {} }, api, active: true, edit() {}, open() {}, create() {}, promote() {}, remove() {}, changed: async () => {} }));
   assert.match(html, /更多子会话操作/); assert.doesNotMatch(html, /<button[^>]*>创建子会话/); assert.match(html, /包含当时未完成的回复/);
+  assert.match(html, /aria-label="修改会话名称：child"/);
   assert.match(html, /共用工作目录/); assert.match(html, /继续问/);
   assert.match(html, /<details class="inherited-conversation">/);
   assert.match(html, /<button class="primary" disabled="">发送/);
