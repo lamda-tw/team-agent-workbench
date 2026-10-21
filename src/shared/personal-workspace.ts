@@ -19,5 +19,5 @@ export const personalProfile: ConnectionProfile = {
 };
 // A local namespace for existing preparation/result records; never an SSH connection or a team account.
 export function personalWorkspace(): WorkspaceSnapshot { return { profile: structuredClone(personalProfile), workspaces: [] }; }
-export function personalBinding(): RemoteBinding { return { connectionId: personalProfile.id, host: personalProfile.host, port: 22, username: 'local', fingerprint: 'PERSONAL', project: structuredClone(personalProfile.projects[0]) }; }
+export function personalBinding(project = personalProfile.projects[0]): RemoteBinding { return { connectionId: personalProfile.id, host: personalProfile.host, port: 22, username: 'local', fingerprint: 'PERSONAL', project: structuredClone(project) }; }
 export function isPersonalBinding(binding?: RemoteBinding) { return binding?.connectionId === PERSONAL_PROJECT_ID && binding.host === 'personal' && binding.fingerprint === 'PERSONAL'; }

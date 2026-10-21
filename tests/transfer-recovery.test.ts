@@ -1,3 +1,4 @@
+import { syncedProject } from './fixtures/synced-project';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -64,7 +65,7 @@ test('SFTP upload reuses its request receipt after acknowledgement is lost', asy
   const server = await teamServer(), wb = new Workbench(path.join(root, 'data'), () => {}, () => {});
   try {
     await wb.store.init(); await wb.configureWorkspace(server.profile('alice'), 'test-password', root, async () => true);
-    const project = await wb.createProject('回执恢复'), binding = wb.remote.binding(project.id);
+    const project = await syncedProject(wb, '回执恢复'), binding = wb.remote.binding(project.id);
     const file = path.join(root, 'source.txt'); await fs.writeFile(file, 'payload');
     const target = binding.project.uploadPath + '/result.txt', requestId = randomUUID();
     const payload = { op: 'publish', projectId: project.id, target, sha256: sha('payload'), metadata: { kind: 'file', title: '结果' } };

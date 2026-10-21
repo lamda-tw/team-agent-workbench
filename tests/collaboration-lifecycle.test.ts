@@ -1,3 +1,4 @@
+import { syncedProject } from './fixtures/synced-project';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -25,7 +26,7 @@ async function fixture() {
   const clients: Workbench[] = [];
   const connect = async (name: string) => { const wb = new Workbench(path.join(root, name), () => {}, () => {}); clients.push(wb); await wb.store.init(); await wb.configureWorkspace(memberProfile(admin.snapshot.profile!, admin.snapshot.state!, name), '1', root, async () => false); return wb; };
   const alice = await connect('alice'), bob = await connect('bob'), newbie = await connect('newbie');
-  const project = await alice.createProject('实体抽取', 'local_relation', brief); await bob.refreshGroups();
+  const project = await syncedProject(alice, '实体抽取', 'local_relation', brief); await bob.refreshGroups();
   return { root, shared, admin, alice, bob, newbie, project, close: async () => { await Promise.all(clients.map(c => c.close())); admin.disconnect(); assert(root.startsWith(path.join(os.tmpdir(), 'team-lifecycle-'))); await fs.rm(root, { recursive: true, force: true, maxRetries: 5 }); } };
 }
 async function done(transfer: Transfer) { const end = Date.now() + 5000; while (['queued', 'running'].includes(transfer.status)) { if (Date.now() > end) throw new Error('queue stalled'); await new Promise(resolve => setTimeout(resolve, 20)); } }
@@ -237,7 +238,7 @@ test('one SSH identity spans groups; author revisions, admin curation, merge and
     await assert.rejects(x.bob.remote.upload(b, file, item.path, () => {}), /自己的公共/);
     await assert.rejects(x.newbie.createSession('codex', x.root, x.project.id), /没有加入工作组/);
     assert.equal(x.newbie.workspaceReady, false);
-    const other = await x.bob.createProject('OCR', 'local_ocr'); await x.alice.refreshGroups();
+    const other = await syncedProject(x.bob, 'OCR', 'local_ocr'); await x.alice.refreshGroups();
     await assert.rejects(x.alice.remote.saveProjectBrief(x.alice.remote.binding(other.id), brief, 0), /组管理员/);
     await x.bob.remote.upload(b, file, b.project.uploadPath + '/补充.md', () => {}, { kind: 'contribution', title: '新的补充', description: '补充' });
     const second = (await x.bob.remote.contentList(b)).find(i => i.id !== item.id)!;
@@ -268,13 +269,13 @@ test('concurrent revisions have one winner; lost upload acknowledgement retries 
 test('project briefs are independently versioned; a newer brief is adopted on the next send', async () => {
   const x = await fixture();
   try {
-    const second = await x.alice.createProject('另一个项目', 'local_relation'); const a = x.alice.remote.binding(second.id);
+    const second = await syncedProject(x.alice, '另一个项目', 'local_relation'); const a = x.alice.remote.binding(second.id);
     assert.equal((await x.alice.remote.projectBrief(a)).revision, 0);
     await x.alice.remote.saveProjectBrief(a, brief, 0);
     await assert.rejects(x.alice.remote.saveProjectBrief(a, brief, 0), /已更新/);
-    await x.bob.refreshGroups(); const s = await x.bob.createSession('codex', x.root, second.id);
+    await x.bob.refreshGroups(); await x.bob.projectSync.sync(); const s = await x.bob.createSession('codex', x.root, second.id);
     assert.equal(s.projectBrief?.revision, 1); const snapshot = s.sources.find(f => f.id === s.projectBrief?.sourceId)!; const old = await fs.readFile(snapshot.localPath, 'utf8');
-    await x.alice.remote.saveProjectBrief(a, { ...brief, objectives: '第二版目标' }, 1);
+    await x.alice.remote.saveProjectBrief(a, { ...brief, objectives: '第二版目标' }, 1); await x.bob.projectSync.sync();
     assert.equal(await fs.readFile(snapshot.localPath, 'utf8'), old); assert.equal(s.projectBrief?.revision, 1);
     s.followProjectBrief = false; await x.bob.adoptLatestProjectBrief(s); assert.equal(s.projectBrief?.revision, 1);
     s.followProjectBrief = true; await x.bob.adoptLatestProjectBrief(s); assert.equal(s.projectBrief?.revision, 2);

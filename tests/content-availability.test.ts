@@ -1,3 +1,4 @@
+import { syncedProject } from './fixtures/synced-project';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -26,7 +27,7 @@ async function fixture() {
   await admin.operation({ op: 'initialize' }); await admin.operation({ op: 'group_create', label: 'availability' });
   for (const username of ['alice', 'bob']) await admin.operation({ op: 'user_create', username, name: username, password: '1', groups: ['local_availability'], contentAdminGroups: username === 'alice' ? ['local_availability'] : [] });
   for (const wb of [alice, bob]) { await wb.store.init(); await wb.configureWorkspace(memberProfile(admin.snapshot.profile!, admin.snapshot.state!, wb === alice ? 'alice' : 'bob'), '1', root, async () => false); }
-  const project = await alice.createProject('文件状态', 'local_availability'); await bob.refreshGroups();
+  const project = await syncedProject(alice, '文件状态', 'local_availability'); await bob.refreshGroups();
   const binding = alice.remote.binding(project.id), local = path.join(root, 'result.md'); await fs.writeFile(local, '可信的原始记录');
   const publish = async (title: string, attachments?: SharedContent['attachments']) => {
     await alice.remote.upload(binding, local, binding.project.uploadPath + '/explorations/' + randomUUID() + '.md', () => {}, { kind: 'contribution', category: 'exploration', title, description: title, attachments });

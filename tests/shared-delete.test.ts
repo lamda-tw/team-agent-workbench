@@ -1,3 +1,4 @@
+import { syncedProject } from './fixtures/synced-project';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -20,7 +21,7 @@ async function fixture() {
   for (const username of ['alice', 'bob']) await admin.operation({ op: 'user_create', username, name: username, password: '1', groups: ['local_delete'], contentAdminGroups: username === 'alice' ? ['local_delete'] : [] });
   const clients: Workbench[] = [];
   const connect = async (name: string) => { const wb = new Workbench(path.join(root, name), () => {}, () => {}); clients.push(wb); await wb.store.init(); await wb.configureWorkspace(memberProfile(admin.snapshot.profile!, admin.snapshot.state!, name), '1', root, async () => false); return wb; };
-  const alice = await connect('alice'), bob = await connect('bob'), project = await alice.createProject('批量删除验证', 'local_delete'); await bob.refreshGroups();
+  const alice = await connect('alice'), bob = await connect('bob'), project = await syncedProject(alice, '批量删除验证', 'local_delete'); await bob.refreshGroups();
   const file = path.join(root, 'result.md'); await fs.writeFile(file, '需要保留的本地引用');
   const publish = async (wb: Workbench, title: string, kind: SharedContent['kind'] = 'contribution') => { const binding = wb.remote.binding(project.id); await wb.remote.upload(binding, file, (kind === 'trajectory' ? binding.project.historyPath : binding.project.uploadPath) + '/' + title + '.md', () => {}, { kind, title, description: title }); return (await wb.remote.contentList(binding)).find(item => item.title === title)!; };
   const list = () => alice.remote.contentList(alice.remote.binding(project.id));

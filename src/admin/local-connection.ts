@@ -8,6 +8,8 @@ import { adminOperationSchema, storageScanSchema } from './types';
 import { diskPath, localRoot, passwordHash, readRegistry, registryLock, writeRegistry, type LocalRegistry } from '../core/local-space';
 import { scanLocalStorage } from './storage-usage';
 import { catalogProjects, purgeProject, type ProjectPurgeMode } from './project-purge';
+import { bumpMemberAccess, memberDelta, memberPublicState, prepareMemberOperation, type MemberRegistryState } from './member-registry';
+import type { MemberDelta } from './member-protocol';
 
 export class LocalAdminConnection {
   snapshot: AdminSnapshot = { connected: false, verified: false, busy: false };
@@ -21,6 +23,7 @@ export class LocalAdminConnection {
     let data: LocalRegistry | undefined;
     try { data = await readRegistry(this.root); } catch (e: any) { if (e.code !== 'ENOENT') throw e; }
     if (data) {
+      if (profile.teamId && profile.teamId !== data.state.teamId) throw new Error('[MEMBER_TEAM] 团队身份已变化，请重新连接原共享区');
       if (profile.fingerprint && profile.fingerprint !== 'LOCAL:' + data.state.teamId) throw new Error('本地共享区身份已改变，请重新选择共享目录');
       this.teamId = data.state.teamId;
     } else {
@@ -30,13 +33,13 @@ export class LocalAdminConnection {
     // Local mode is a permission test stub. The admin application opens the
     // selected folder directly; the legacy administrator label is metadata only.
     const saved = { ...profile, username: data?.administrator || 'admin', host: 'local', localRoot: this.root, fingerprint: data ? 'LOCAL:' + data.state.teamId : '', mode: 'local' as const };
-    this.snapshot = { profile: saved, connected: true, verified: true, busy: false, actor: '本地管理员', role: 'administrator', state: data?.state || { initialized: false, users: {}, groups: {} } };
+    this.snapshot = { profile: saved, connected: true, verified: true, busy: false, actor: '本地管理员', role: 'administrator', state: data ? memberPublicState(data.state) : { initialized: false, users: {}, groups: {} } };
     this.changed(); return saved;
   }
   async operation(raw: AdminOperation) {
     if (raw.op === 'egress_jump' || raw.op === 'egress_jump_probe') throw new Error('本地共享目录不支持中转，请连接 Linux 共享服务器');
     if (raw.op === "environment_prepare") throw new Error("本地模拟共享区无需安装服务器组件");
-    const request = adminOperationSchema.parse(raw);
+    let request = adminOperationSchema.parse(raw);
     if (!this.snapshot.connected) throw new Error('请先连接本地共享区');
     if (this.snapshot.busy) throw new Error('请等待当前管理操作完成');
     const generation = this.generation;
@@ -56,9 +59,21 @@ export class LocalAdminConnection {
           await fs.mkdir(await diskPath(this.root, '/projects', true));
         }
         if ((!created && data.state.teamId !== this.teamId) || generation !== this.generation) throw new Error('本地共享区已改变，请重新连接');
-        const state = data.state;
+        const state: MemberRegistryState = data.state;
+        if (request.op === 'members_sync') {
+          const before = JSON.stringify(state.memberIndex), result = memberDelta(state, request.teamId, request.since, request.requestIds);
+          if (JSON.stringify(state.memberIndex) !== before) await writeRegistry(this.root, data);
+          return result;
+        }
+        let memberRequestId: string | undefined;
+        if (request.op === 'members_apply') {
+          memberRequestId = request.requestId;
+          const prepared = prepareMemberOperation(state, request);
+          if (prepared.duplicate) { this.snapshot.state = memberPublicState(state); return { state: this.snapshot.state, duplicate: true }; }
+          request = adminOperationSchema.parse(prepared.request);
+        }
         if (request.op === 'group_control') { const result = await groupCommand(this.root,data,undefined,request.command,true); this.snapshot.state = state; return result; }
-        if (request.op === 'group_member' && request.role !== 'admin') assertCreatorChange(state, request.username, request.role === 'remove' ? state.users[request.username]?.groups?.filter(g=>g!==request.group) : undefined, state.users[request.username]?.contentAdminGroups?.filter(g=>g!==request.group));
+        if (request.op === 'group_member' && request.role !== 'admin') { const target = request.group; assertCreatorChange(state, request.username, request.role === 'remove' ? state.users[request.username]?.groups?.filter(g=>g!==target) : undefined, state.users[request.username]?.contentAdminGroups?.filter(g=>g!==target)); }
         if (request.op === 'user_groups') assertCreatorChange(state, request.username, request.groups, request.contentAdminGroups);
         if (request.op === 'group_member' && (state.groups[request.group]?.deletedAt || state.groups[request.group]?.purgedAt)) throw new Error('项目组已删除，请先在项目组管理中恢复');
         const user = 'username' in request && Object.hasOwn(state.users, request.username) ? state.users[request.username] : undefined;
@@ -85,13 +100,16 @@ export class LocalAdminConnection {
             else throw new Error('项目组已存在'); break;
           }
           case 'workspace_prepare': if (!state.groups[request.group]?.workspace) throw new Error('项目组不存在'); break;
-          case 'user_create':
-            if ([data.administrator, ...Object.keys(state.users)].some(name => name.toLowerCase() === request.username.toLowerCase())) throw new Error('账号已存在（不允许创建仅大小写不同的重名账号）');
+          case 'user_create': {
+            const username = request.username;
+            if ([data.administrator, ...Object.keys(state.users)].some(name => name.toLowerCase() === username.toLowerCase())) throw new Error('账号已存在（不允许创建仅大小写不同的重名账号）');
             state.users[request.username] = { username: request.username, name: request.name, enabled: true, accountId: randomUUID(), groups: request.groups || [], contentAdminGroups: request.contentAdminGroups || [] };
             data.credentials[request.username] = passwordHash(request.password); data.state.users[request.username].mustChangePassword = true; break;
-          case 'user_password': data.credentials[request.username] = passwordHash(request.password); break;
-          case 'user_enabled': user!.enabled = request.enabled; break;
+          }
+          case 'user_password': data.credentials[request.username] = passwordHash(request.password); bumpMemberAccess(state, request.username); break;
+          case 'user_enabled': user!.enabled = request.enabled; bumpMemberAccess(state, request.username); break;
           case 'user_groups': {
+            bumpMemberAccess(state, request.username);
             const archived=(user!.groups||[]).filter(g=>state.groups[g]?.deletedAt&&!state.groups[g]?.purgedAt);
             const admins=(user!.contentAdminGroups||[]).filter(g=>archived.includes(g));
             user!.groups=[...new Set([...request.groups,...archived])];user!.contentAdminGroups=[...new Set([...(request.contentAdminGroups||[]).filter(g=>!archived.includes(g)),...admins])];break;
@@ -103,18 +121,31 @@ export class LocalAdminConnection {
             const groups = new Set(user!.groups || []), admins = new Set(user!.contentAdminGroups || []);
             if (request.role === 'remove') groups.delete(request.group); else groups.add(request.group);
             if (request.role === 'admin') admins.add(request.group); else admins.delete(request.group);
-            user!.groups = [...groups]; user!.contentAdminGroups = [...admins]; break;
+            user!.groups = [...groups]; user!.contentAdminGroups = [...admins]; bumpMemberAccess(state, request.username); break;
           }
           case 'recover': throw new Error('本地权限桩没有 Linux 命令恢复任务');
         }
         if (request.op !== 'status') {
           const id = randomUUID(); const { password: _secret, ...sanitized } = request as any;
           state.operations ||= {}; state.operations[id] = { id, op: request.op, request: sanitized, status: 'done', completed: ['本地权限桩已保存'] };
+          if (memberRequestId) state.memberRequests![memberRequestId].status = 'done';
           await writeRegistry(this.root, data);
         }
-        this.teamId = state.teamId; this.snapshot.state = state; this.snapshot.profile!.fingerprint = 'LOCAL:' + state.teamId; return state;
+        this.teamId = state.teamId; this.snapshot.state = memberPublicState(state); this.snapshot.profile!.fingerprint = 'LOCAL:' + state.teamId; return memberRequestId ? { state: this.snapshot.state } : this.snapshot.state;
       });
     } finally { this.snapshot.busy = false; this.changed(); }
+  }
+  async memberSync(teamId?: string, since?: number, requestIds?: string[]): Promise<MemberDelta> {
+    const generation = this.generation;
+    if (!this.snapshot.connected) throw new Error('请先连接本地共享区');
+    return registryLock(this.root, async () => {
+      const data = await readRegistry(this.root);
+      if (generation !== this.generation || data.state.teamId !== this.teamId) throw new Error('[MEMBER_TEAM] 本地共享区已改变，请重新连接');
+      const state: MemberRegistryState = data.state, before = JSON.stringify(state.memberIndex);
+      const result = memberDelta(state, teamId, since, requestIds);
+      if (before !== JSON.stringify(state.memberIndex)) await writeRegistry(this.root, data);
+      return result;
+    });
   }
   async storageUsage(raw: StorageScanRequest, signal?: AbortSignal) {
     const request = storageScanSchema.parse(raw);

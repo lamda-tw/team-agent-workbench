@@ -1,3 +1,4 @@
+import { syncedProject } from './fixtures/synced-project';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -167,7 +168,7 @@ test('authenticated connection handoff logs in once and rejected passwords leave
   const wb = new Workbench(await migrateAccountWorkspace(first.store.root, profile), () => {}, () => {}); wb.detect = async () => []; await wb.init(); t.after(() => wb.close());
   await wb.configureWorkspace(profile, '', '', async () => { throw new Error('no second login'); }, verifier);
   verifier.disconnect(); assert.equal(wb.remote.connected, true, 'closing the verifier must not close the adopted connection');
-  const project = await wb.createProject('账号项目'), session = await wb.createSession('codex', root, project.id);
+  const project = await syncedProject(wb, '账号项目'), session = await wb.createSession('codex', root, project.id);
   const failed = new SharedFiles(() => {});
   await assert.rejects(failed.connect(server.profile('bob'), 'wrong-password', async () => true)); failed.disconnect();
   assert.equal(wb.remote.connected, true); assert.equal(wb.remote.profile?.username, 'alice'); assert.equal(wb.session(session.id).id, session.id);

@@ -6,6 +6,7 @@ import { deflateSync } from 'node:zlib';
 import type { AdminOperation, AdminProfile, AdminSnapshot, StorageScanRequest, StorageUsageReport } from './types';
 import { storageScanSchema } from './types';
 import { systemUsername } from '../core/account-login';
+import type { MemberDelta } from './member-protocol';
 
 // Only a fixed, packaged program is executed. Request data (including passwords)
 // travels over encrypted stdin and never becomes command arguments.
@@ -14,15 +15,15 @@ export class AdminConnection {
   snapshot: AdminSnapshot = { connected: false, verified: false, busy: false };
   constructor(private scriptPath: string, private changed: () => void) {}
   disconnect() { this.client?.end(); this.client = undefined; this.sudoPassword = ''; this.rawReady = false; this.snapshot = { profile: this.snapshot.profile, connected: false, verified: false, busy: false }; this.changed(); }
-  private async loadCode() {
+  private async loadCode(includeWorker = true) {
     // Rebuilds can replace the packaged scripts while SSH stays connected.
     // Read the current files for each request so an update cannot reinstall a cached worker.
     const directory = path.dirname(this.scriptPath);
     const [acl, groupCode, content, admin] = await Promise.all([
       fs.readFile(path.join(directory, 'acl_support.py')), fs.readFile(path.join(directory, 'group_ops.py')),
-      fs.readFile(path.join(directory, 'content.py')), fs.readFile(this.scriptPath),
+      includeWorker ? fs.readFile(path.join(directory, 'content.py')) : Promise.resolve(Buffer.alloc(0)), fs.readFile(this.scriptPath),
     ]);
-    const worker = deflateSync(Buffer.concat([acl, Buffer.from('\n'), groupCode, Buffer.from('\n'), content])).toString('base64');
+    const worker = includeWorker ? deflateSync(Buffer.concat([acl, Buffer.from('\n'), groupCode, Buffer.from('\n'), content])).toString('base64') : '';
     return deflateSync(Buffer.concat([acl, Buffer.from('\n'), groupCode, Buffer.from('\n'), Buffer.from("CONTENT_WORKER_ZLIB_BASE64 = '" + worker + "'\n"), admin])).toString('base64');
   }
   async connect(profile: AdminProfile, password: string, sudoPassword: string, trust: (key: string) => Promise<boolean>, login = profile.username): Promise<AdminProfile> {
@@ -55,6 +56,8 @@ export class AdminConnection {
       this.snapshot = { ...this.snapshot, connected: true, verified: true, role: 'administrator', actor: probe.actor, missingCommands: probe.missingCommands, setupIssues: probe.setupIssues, setupNotes: probe.setupNotes, aclBackend: probe.aclBackend, serviceManager: probe.serviceManager };
       this.useSudo = uid.trim() !== '0';
       this.snapshot.state = await this.execute({ op: 'status' }, this.useSudo);
+      if (profile.teamId && profile.teamId !== this.snapshot.state?.teamId) throw new Error('[MEMBER_TEAM] 团队身份已变化，请核对中央节点');
+      if (this.snapshot.state?.teamId) this.snapshot.profile!.teamId = this.snapshot.state.teamId;
       this.changed(); return this.snapshot.profile!;
     } catch (e: any) {
       this.disconnect();
@@ -81,7 +84,7 @@ export class AdminConnection {
   private async execute(payload: object, useSudo: boolean, signal?: AbortSignal, timeoutMs = 90000): Promise<any> {
     if (!this.rawReady || !this.client) return Promise.reject(new Error('请先连接服务器'));
     if (signal?.aborted) return Promise.reject(new Error('已取消空间统计'));
-    const client = this.client, code = await this.loadCode();
+    const client = this.client, code = await this.loadCode(!('op' in payload) || payload.op !== 'members_sync');
     if (!this.rawReady || this.client !== client) throw new Error('服务器连接已改变，请重新连接');
     if (signal?.aborted) throw new Error('已取消空间统计');
     // Only a small fixed loader goes in the SSH exec request. The packaged
@@ -90,7 +93,7 @@ export class AdminConnection {
     // cannot change its encoding after the loader has consumed the first line.
     const program = `python3 -u -c 'import sys,base64,zlib;print("WORKBENCH_CODE_READY",flush=True);exec(zlib.decompress(base64.b64decode(sys.stdin.buffer.readline())).decode("utf-8"))'`;
     const command = useSudo ? 'sudo -S -p WORKBENCH_SUDO -- ' + program : program;
-    const request = { ...payload, root: this.snapshot.profile!.root };
+    const request = { ...payload, root: this.snapshot.profile!.root, expectedTeamId: this.snapshot.profile!.teamId };
     return new Promise((resolve, reject) => {
       let channel: ClientChannel | undefined, settled = false, buffer = '', diagnostic = '', ready = false, codeSent = false, passwordSent = false;
       const abort = () => { channel?.close(); finish(new Error('已取消空间统计')); };
@@ -114,7 +117,7 @@ export class AdminConnection {
             const line = buffer.slice(0, end).trim(); buffer = buffer.slice(end + 1);
             if (!codeSent && line === 'WORKBENCH_CODE_READY') { codeSent = true; stream.write(code + '\n'); }
             else if (codeSent && !ready && line === 'WORKBENCH_READY') { ready = true; stream.write(JSON.stringify(request) + '\n'); }
-            else if (ready && line) { try { const message = JSON.parse(line); message.ok ? finish(undefined, message.value) : finish(new Error(message.error)); } catch { finish(new Error('远端返回格式异常')); } }
+            else if (ready && line) { try { const message = JSON.parse(line); message.ok ? finish(undefined, message.value) : finish(Object.assign(new Error(message.error), { remoteRejected: true })); } catch { finish(new Error('远端返回格式异常')); } }
           }
         });
         stream.on('error', finish); stream.on('close', () => {
@@ -153,6 +156,10 @@ export class AdminConnection {
       throw error;
     }
     finally { this.snapshot.busy = false; this.changed(); }
+  }
+  async memberSync(teamId?: string, since?: number, requestIds?: string[]): Promise<MemberDelta> {
+    if (!this.snapshot.connected || !this.snapshot.verified) throw new Error('请先连接中央节点');
+    return this.execute({ op: 'members_sync', teamId, since, requestIds }, this.useSudo);
   }
   async storageUsage(raw: StorageScanRequest, signal?: AbortSignal): Promise<StorageUsageReport> {
     const request = storageScanSchema.parse(raw);

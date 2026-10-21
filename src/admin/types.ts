@@ -3,12 +3,14 @@ import { groupCommandSchema } from '../shared/team-groups';
 import { accountNameSchema, accountPasswordSchema } from '../shared/accounts';
 import { groupLabelMessage, groupLabelPattern } from '../shared/groups';
 import type { AdminEgressSnapshot } from '../shared/egress';
+import { memberApplySchema, memberSyncSchema, type MemberSyncView } from './member-protocol';
 
 const egressTargetFields = {
   host: z.string().trim().min(1).max(253).refine(value => !value.includes('%') && (z.ipv6().safeParse(value).success || /^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$/.test(value) && !value.includes('..')), '请输入主机名或 IP，不含协议、路径、通配符和方括号'),
   port: z.number().int().min(1).max(65535),
 };
 export const adminProfileSchema = z.object({
+  teamId: z.string().min(1).max(128).optional(),
   mode: z.enum(['sftp', 'local']).optional(), localRoot: z.string().optional(),
   host: z.string().trim().min(1).max(255), port: z.number().int().min(1).max(65535),
   username: z.string().max(64).default(''), fingerprint: z.string().default(''),
@@ -18,11 +20,11 @@ export const adminConnectSchema = z.object({
   profile: adminProfileSchema, password: z.string().max(4096).default(''), sudoPassword: z.string().max(4096).default(''),
 }).refine(input => input.profile.mode === 'local' || !!input.password, { path: ['password'], message: '请输入服务器登录密码' });
 export type AdminProfile = z.infer<typeof adminProfileSchema>;
-export type ManagedUser = { username: string; systemUsername?: string; name: string; enabled: boolean; mustChangePassword?: boolean; accountId?: string; identity?: string; marker?: string; uid?: number; groups?: string[]; contentAdminGroups?: string[]; missing?: boolean; provisioning?: boolean };
+export type ManagedUser = { username: string; revision?: string; accessVersion?: string; systemUsername?: string; name: string; enabled: boolean; mustChangePassword?: boolean; accountId?: string; identity?: string; marker?: string; uid?: number; groups?: string[]; contentAdminGroups?: string[]; missing?: boolean; provisioning?: boolean };
 export type ManagedGroup = AdminState['groups'][string];
 export type AdminJob = { id: string; op: string; request: Record<string, any>; status: 'running' | 'failed' | 'done'; completed: string[]; error?: string };
 export type AdminState = { initialized: boolean; egressJumpTargets?: { host: string; port: number }[]; bootstrapPending?: boolean; operations?: Record<string, AdminJob>; storageVersion?: number; teamId?: string; loginGroup?: string; sftpConfigured?: boolean; users: Record<string, ManagedUser>; groups: Record<string, { name: string; label: string; adminGroup: string; workspace?: string; provisioning?: boolean; creator?: { username: string; identity: string }; createdBy?: string; createdAt?: string; deletedAt?: string; deletedBy?: string; recyclePath?: string; purgeStartedAt?: string; purgedAt?: string }> };
-export type AdminSnapshot = { profile?: AdminProfile; connectionError?: string; connected: boolean; verified: boolean; busy: boolean; actor?: string; role?: 'administrator'; state?: AdminState; missingCommands?: string[]; setupIssues?: string[]; setupNotes?: string[]; aclBackend?: 'setfacl' | 'libacl' | null; serviceManager?: 'systemd' | 'supervisor' | null; egress?: AdminEgressSnapshot };
+export type AdminSnapshot = { memberSync?: MemberSyncView; profile?: AdminProfile; connectionError?: string; connected: boolean; verified: boolean; busy: boolean; actor?: string; role?: 'administrator'; state?: AdminState; missingCommands?: string[]; setupIssues?: string[]; setupNotes?: string[]; aclBackend?: 'setfacl' | 'libacl' | null; serviceManager?: 'systemd' | 'supervisor' | null; egress?: AdminEgressSnapshot };
 export type StorageMetrics = { bytes: number; files: number; directories: number; directBytes: number; modifiedAt?: string };
 export type StorageCategoryKey = 'submissions' | 'trajectories' | 'curated' | 'project' | 'system' | 'unassigned';
 export type StorageCategoryUsage = StorageMetrics & { key: StorageCategoryKey; label: string };
@@ -49,6 +51,7 @@ export const nameSchema = z.string().regex(/^[a-z][a-z0-9_-]{0,31}$/, '系统组
 export const groupLabelSchema = z.string().max(48).transform(value => value.normalize('NFC')).refine(value => groupLabelPattern.test(value), groupLabelMessage);
 const password = accountPasswordSchema;
 export const adminOperationSchema = z.discriminatedUnion('op', [
+  memberApplySchema, memberSyncSchema,
   z.object({ op: z.literal('egress_jump'), ...egressTargetFields, enabled: z.boolean() }),
   z.object({ op: z.literal('egress_jump_probe'), ...egressTargetFields }),
   z.object({ op: z.literal('environment_prepare'), source: z.enum(['online', 'offline']), packageDirectory: z.string().max(2048).optional() }).refine(value => value.source !== 'offline' || !!value.packageDirectory?.startsWith('/'), '请填写服务器上的离线软件包绝对目录'),

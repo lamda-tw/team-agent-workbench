@@ -28,7 +28,7 @@ async function fixture() {
       await admin.operation({ op: 'user_create', username: 'owner', name: 'Owner', password: '1', groups: [group], contentAdminGroups: [group] });
       await admin.operation({ op: 'user_create', username: 'member', name: 'Member', password: '1', groups: [group] });
       const owner = new Workbench(path.join(base, 'owner'), () => {}, () => {}); await owner.store.init();
-      try { await owner.configureWorkspace(memberProfile(admin.snapshot.profile!, admin.snapshot.state!, 'owner'), '1', '', async () => false); const project = await owner.createProject('团队项目', group);
+      try { await owner.configureWorkspace(memberProfile(admin.snapshot.profile!, admin.snapshot.state!, 'owner'), '1', '', async () => false); const project = await owner.createProject('团队项目', group); await owner.projectSync.sync();
         await team.configureWorkspace(memberProfile(admin.snapshot.profile!, admin.snapshot.state!, 'member'), '1', '', async () => false); return project;
       } finally { await owner.close(); }
     },
@@ -90,13 +90,13 @@ test('whole-group migration checks all members and preserves session/draft/resul
     a.nativeId = randomUUID(); a.codexStorage = 'workbench';
     const rollout = path.join(f.local.store.root, 'codex-home', 'sessions', `rollout-${a.nativeId}.jsonl`);
     await fs.mkdir(path.dirname(rollout), { recursive: true }); await fs.writeFile(rollout, 'original native tool and chat history'); a.nativePath = rollout;
-    await assert.rejects(f.local.movePersonalTo(f.team, 'missing', { groupId: group.id }), /登录中央节点/);
-    const project = await f.connect();
+    await assert.rejects(f.local.movePersonalTo(f.team, 'missing', { groupId: group.id }), /本机没有此项目/);
+    const project = await f.connect(); f.team.remote.disconnect();
     b.status = 'running';
     await assert.rejects(f.local.movePersonalTo(f.team, project.id, { groupId: group.id }), /先结束/);
     assert.equal(f.local.store.sessions.length, 2); assert.equal(f.team.store.sessions.length, 0);
     b.status = 'idle';
-    await assert.rejects(f.local.movePersonalTo(f.team, 'not-authorized', { groupId: group.id }), /项目入口不存在/);
+    await assert.rejects(f.local.movePersonalTo(f.team, 'not-authorized', { groupId: group.id }), /本机没有此项目/);
     const moved = await f.local.movePersonalTo(f.team, project.id, { groupId: group.id });
     assert.equal(moved.count, 2); assert.equal(f.local.store.sessions.length, 0); assert.equal(f.local.store.settings.personalGroups!.length, 0);
     assert.deepEqual(f.team.session(a.id).messages, a.messages); assert.equal(f.team.session(a.id).cwd, f.cwd); assert.equal(f.team.session(a.id).networkRoute, 'direct');

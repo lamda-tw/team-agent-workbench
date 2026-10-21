@@ -50,8 +50,8 @@ test('creation after login retains its name, displays its destination and offers
   const html = renderToStaticMarkup(createElement(ProjectBriefEditor, { groups: [], initialName: '算法实验', connectionLabel: 'node-b:22 · alice', admin: true, close() {}, saved: async () => {} }));
   assert.match(html, /value="算法实验"/);
   assert.match(html, /node-b:22 · alice/);
-  assert.match(html, /value="new" selected/);
-  assert.match(html, /工作组名称/);
+  assert.match(html, /value="local" selected/);
+  assert.match(html, /仅在本机创建/);
   assert.doesNotMatch(html, /登录密码/);
 });
 

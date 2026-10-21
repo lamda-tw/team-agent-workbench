@@ -29,6 +29,6 @@ export function scopeAccountSnapshot(snapshot: Snapshot): Snapshot {
     activeTurns: Object.fromEntries(Object.entries(snapshot.activeTurns || {}).filter(([id]) => ids.has(id))),
     drafts: snapshot.drafts.filter(draft => draft.binding ? owns(draft.binding) : ids.has(draft.sessionId)),
     transfers: snapshot.transfers.filter(transfer => owns(transfer.binding)),
-    ...(snapshot.accountChanging ? { questions: { items: [], read: {}, jobs: [] }, accountSync: { status: 'pending' as const } } : {}),
+    ...(snapshot.accountChanging ? { projectSync: {}, questions: { items: [], read: {}, jobs: [] }, accountSync: { status: 'pending' as const } } : {}),
   };
 }

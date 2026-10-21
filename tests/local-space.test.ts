@@ -1,3 +1,4 @@
+import { syncedProject } from './fixtures/synced-project';
 import { adminOperationSchema } from '../src/admin/types';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -207,7 +208,7 @@ test('local Workbench: multiple independent sessions, frozen handoffs, real queu
   const wb = new Workbench(appRoot, () => {}, () => {});
   try {
     await wb.store.init(); await wb.configureWorkspace(x.config('alice'), 'member-test-password', x.base, async () => false);
-    const p = await wb.createProject('完善本项目'), a = await wb.createSession('codex', x.base, p.id), b = await wb.createSession('codex', x.base, p.id);
+    const p = await syncedProject(wb, '完善本项目'), a = await wb.createSession('codex', x.base, p.id), b = await wb.createSession('codex', x.base, p.id);
     assert.notEqual(a.handoffPath, b.handoffPath); await wb.saveHandoff(a.id, '# 完善本项目\n管理员操作说明补充'); assert(!String(await fs.readFile(b.handoffPath)).includes('说明补充'));
     a.messages.push({ id: 'test-message', role: 'assistant', text: '测试桩完成记录，未调用模型', createdAt: new Date().toISOString() });
     const transfer = await wb.archive(a.id);

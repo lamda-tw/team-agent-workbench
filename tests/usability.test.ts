@@ -1,3 +1,4 @@
+import { syncedProject } from './fixtures/synced-project';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -21,7 +22,7 @@ test('#1 contributions are readable by teammates, cannot be overwritten, uploade
   try {
     for (const w of [alice, bob, carol]) await w.store.init();
     await alice.configureWorkspace(server.profile('alice'), 'test-password', root, async () => true);
-    const project = await alice.createProject('协作验证'), binding = alice.remote.binding(project.id);
+    const project = await syncedProject(alice, '协作验证'), binding = alice.remote.binding(project.id);
     const file = path.join(root, 'result.txt'); await fs.writeFile(file, 'shared-result');
     const upload = await alice.queue.enqueue(file, binding, project.uploadPath, 'upload'); await waitTransfer(upload);
     assert.equal(server.nodes.get(project.uploadPath).mode & 0o7777, 0o2750); assert.equal(server.nodes.get(upload.target).mode & 0o777, 0o640);
@@ -45,7 +46,7 @@ test('#2/#3/#5 session inputs, handoffs and drafts persist independently and off
   try {
     await wb.store.init(); await wb.restoreLocalWorkspace(); assert.equal(wb.workspaceReady, false);
     await wb.configureWorkspace(server.profile('alice'), 'test-password', root, async () => true);
-    const project = await wb.createProject('本地状态'); const a = await wb.createSession('codex', root, project.id), b = await wb.createSession('cursor', root, project.id);
+    const project = await syncedProject(wb, '本地状态'); const a = await wb.createSession('codex', root, project.id), b = await wb.createSession('cursor', root, project.id);
     assert.notEqual(a.handoffPath, b.handoffPath);
     await Promise.all([wb.saveHandoff(a.id, 'A only'), wb.saveHandoff(b.id, 'B only'), wb.saveHandoff(a.id, 'A newest')]);
     const source = path.join(root, 'reference.txt'); await fs.writeFile(source, 'local secret reference');
@@ -77,7 +78,7 @@ test('#2/#3/#5 session inputs, handoffs and drafts persist independently and off
     await wb.createSession('codex', root, project.id);
     await assert.rejects(wb.configureWorkspace(server.profile('alice'), 'wrong-password', root, async () => true));
     assert.equal(wb.workspaceReady, true); await wb.createSession('cursor', root, project.id);
-    await assert.rejects(wb.createProject('offline'), /连接/);
+    const offline = await wb.createProject('offline'); assert.equal(wb.projectSync.states()[offline.id].pending, true);
   } finally { await wb.close(); await server.close(); await fs.rm(root, { recursive: true, force: true }); }
 });
 

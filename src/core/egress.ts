@@ -346,15 +346,22 @@ export class EgressClientProxy extends EventEmitter {
       const timer = setTimeout(() => finish(new EgressRouteError('连接管理端超时')), 15000);
       controller.signal.addEventListener('abort', cancel, { once: true });
       socket.once('close', () => finish(new EgressRouteError('管理端连接已关闭')));
-      socket.once('error', error => finish(new Error(safeDetail(error))));
+      socket.once('error', error => finish(new EgressRouteError(safeDetail(error))));
       socket.once('secureConnect', async () => {
-        const certificate = socket.getPeerCertificate();
-        if (!certificate?.fingerprint256 || cleanFingerprint(certificate.fingerprint256) !== cleanFingerprint(config.certificateFingerprint)) return finish(new EgressRouteError('管理端出口身份不匹配，请重新粘贴接入码'));
-        socket.write(JSON.stringify({ version: 1, accessCode: config.accessCode, username: config.username, ...request }) + '\n');
+        if (settled) return;
+        // EventEmitter does not handle a rejected async listener. Keep certificate
+        // inspection and the first write inside the same boundary as the reply.
         try {
-          const response = await readLine(socket); const result = JSON.parse(response.line); if (!result?.ok) return finish(new EgressRouteError(typeof result?.error === 'string' ? result.error.slice(0, 160) : '管理端拒绝连接'));
+          const certificate = socket.getPeerCertificate();
+          if (!certificate?.fingerprint256 || cleanFingerprint(certificate.fingerprint256) !== cleanFingerprint(config.certificateFingerprint)) throw new EgressRouteError('管理端出口身份不匹配，请重新粘贴接入码');
+          socket.write(JSON.stringify({ version: 1, accessCode: config.accessCode, username: config.username, ...request }) + '\n');
+          const response = await readLine(socket); const result = JSON.parse(response.line);
+          if (result?.ok === false) throw new EgressRouteError(typeof result.error === 'string' ? result.error.slice(0, 160) : '管理端拒绝连接');
+          if (result?.ok !== true) throw new SyntaxError();
           if (response.rest.length) socket.unshift(response.rest); finish(undefined, socket);
-        } catch (error: any) { finish(error); }
+        } catch (error) {
+          finish(error instanceof EgressRouteError ? error : new EgressRouteError(error instanceof SyntaxError ? '管理端握手响应无效，请检查接入地址、端口和管理端版本' : safeDetail(error)));
+        }
       });
       });
     } catch (error) { transport?.destroy(); throw error; }

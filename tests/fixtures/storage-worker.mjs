@@ -10,15 +10,21 @@ export function fixtureStorage(nodes, state, username, request) {
   const member = group => (state.memberships[username] || []).includes(group);
   const admin = group => (group === 'ocr' ? state.admins : state.groupAdmins[group] || []).includes(username);
   const brief = (root, meta, value) => { if (!value?.background || !value.objectives || !value.acceptance) throw new Error('项目背景、目标、验收标准不能为空'); file(root + '/项目说明.md', '# ' + meta.name + '\n\n' + Object.values(value).join('\n\n')); meta.brief = value; meta.briefRevision = (meta.briefRevision || 0) + 1; meta.briefUpdatedAt = new Date().toISOString(); };
-  if (request.op === 'create_project') {
+  if (['create_project', 'create_project_v2'].includes(request.op)) {
+    if (request.op === 'create_project_v2' && state.legacyProjectCreation) throw new Error('不支持的内容操作');
     const group = request.groupName?.replace('wb_test_', '');
     if (!member(group) || !admin(group)) throw new Error('当前账号不是此工作组的项目组管理员');
+    if (request.clientProjectId) {
+      if (!/^project_[a-f0-9]{32}$/.test(request.clientProjectId)) throw new Error('项目标识无效');
+      const prior = rootFor(request.clientProjectId);
+      if (prior) { if (prior.split('/')[2] !== group) throw new Error('项目已属于另一工作组'); return { projectId: request.clientProjectId }; }
+    }
     const root = '/projects/' + group + '/' + request.name;
     if (nodes.has(root)) throw new Error('同名目录不会覆盖');
     if (state.failFolder) throw new Error('项目未创建成功');
     if (state.failWrite === '.workbench-project.json' || request.brief && state.failWrite === '项目说明.md') throw new Error('项目未创建成功');
     dir(root); for (const name of ['trajectories', 'submissions', 'curated']) dir(root + '/' + name);
-    const meta = { version: 1, id: 'project_' + randomUUID().replaceAll('-', ''), name: request.name, createdBy: username, createdAt: new Date().toISOString(), briefRevision: 0 };
+    const meta = { version: 1, id: request.clientProjectId || 'project_' + randomUUID().replaceAll('-', ''), name: request.name, createdBy: username, createdAt: new Date().toISOString(), briefRevision: 0 };
     if (request.brief) brief(root, meta, request.brief);
     file(root + '/.workbench-project.json', meta); return { projectId: meta.id };
   }

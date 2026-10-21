@@ -33,6 +33,7 @@ if "acl_apply" not in globals():
 if "tg_handle" not in globals():
     exec(compile(pathlib.Path(__file__).with_name("group_ops.py").read_text(encoding="utf-8"), "group_ops.py", "exec"))
 OPS = {"group_control", "probe", "environment_prepare", "initialize", "status", "storage_usage", "storage_upgrade", "project_catalog", "project_purge", "user_create", "user_password", "user_enabled", "group_create", "user_groups", "group_member", "workspace_prepare", "recover", "egress_jump", "egress_jump_probe"}
+OPS.update({'members_sync', 'members_apply'})
 REQUIRED_COMMANDS = ["useradd", "usermod", "groupadd", "gpasswd", "chpasswd", "pkill", "sshd", "setfacl"]
 MANAGED_SUPERVISOR = pathlib.Path('/etc/team-agent-workbench')
 SUPERVISOR_CONFIGS = [pathlib.Path('/etc/supervisor/supervisord.conf'), pathlib.Path('/etc/supervisord.conf'), MANAGED_SUPERVISOR / 'supervisord.conf']
@@ -732,6 +733,8 @@ def initialize(root, request):
     return state
 
 def operation_key(request):
+    if request.get('requestId'):
+        return 'member:' + request['requestId']
     if request['op'] == 'egress_jump':
         return 'egress_jump:' + str(request.get('host')) + ':' + str(request.get('port'))
     if request['op'] == 'group_member':
@@ -743,7 +746,7 @@ def start_operation(root, state, request):
     previous = state.setdefault("operations", {}).get(key)
     if previous and previous.get("status") == "done" and request["op"] in ["user_create", "group_create"]:
         raise ValueError("创建已经完成，请刷新查看已有资源")
-    sanitized = {k: request[k] for k in ["op", "username", "name", "groups", "contentAdminGroups", "label", "group", "enabled", "role", "host", "port"] if k in request}
+    sanitized = {k: request[k] for k in ["op", "username", "name", "groups", "contentAdminGroups", "label", "group", "enabled", "role", "host", "port", "requestId", "handoffs"] if k in request}
     state["operations"][key] = {"id": key, "op": request["op"], "request": sanitized, "status": "running", "completed": previous.get("completed", []) if previous and previous.get("status") != "done" else []}
     state["activeOperation"] = key
     save(root, state)
@@ -774,6 +777,7 @@ def assign_groups(root, state, request):
         run(["usermod", "-a", "-G", ",".join(sorted(desired)), login])
     state["users"][username]["groups"] = list(groups)
     state["users"][username]["contentAdminGroups"] = content_admin_groups
+    state['users'][username]['accessVersion'] = uuid.uuid4().hex
     checkpoint(root, state, "成员组与组管理员角色已设置")
     terminate_connections(login)
     checkpoint(root, state, "旧连接已失效")
@@ -1054,6 +1058,147 @@ def actual_state(state):
             user["groups"] = []
     return result
 
+
+def member_hash(value):
+    return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=True, separators=(',', ':')).encode()).hexdigest()
+
+
+def member_public_state(state):
+    import copy
+    result = copy.deepcopy(state)
+    result.pop('memberIndex', None)
+    result.pop('memberRequests', None)
+    for user in result['users'].values():
+        user.pop('revision', None)
+        user['groups'] = sorted(user.get('groups', []))
+        user['contentAdminGroups'] = sorted(user.get('contentAdminGroups', []))
+        user['revision'] = member_hash(user)
+    return result
+
+
+def member_delta(state, current, team_id=None, since=None):
+    if team_id and team_id != state.get('teamId'):
+        raise ValueError('[MEMBER_TEAM] 团队身份已变化，已停止成员同步与开通')
+    if since is not None and (type(since) is not int or since < 0):
+        raise ValueError('无效同步序号')
+    value = member_public_state(current)
+    index = state.setdefault('memberIndex', dict(sequence=0, users={}, groups={}))
+    at, changed = index['sequence'] + 1, False
+    for kind in ('users', 'groups'):
+        for key in set(index[kind]) | set(value[kind]):
+            revision = member_hash(value[kind][key]) if key in value[kind] else ''
+            if index[kind].get(key, {}).get('revision') != revision:
+                index[kind][key] = dict(revision=revision, at=at)
+                changed = True
+    metadata = {k: v for k, v in value.items() if k not in ('users', 'groups')}
+    metadata['operations'] = {k: v for k, v in metadata.get('operations', {}).items() if v.get('status') != 'done'}
+    revision = member_hash(metadata)
+    if index.get('metadata', {}).get('revision') != revision:
+        index['metadata'] = dict(revision=revision, at=at)
+        changed = True
+    if changed: index['sequence'] = at
+    full = since is None or since > index['sequence']
+    result = dict(protocol=1, teamId=state['teamId'], sequence=index['sequence'], full=full, users={}, groups={}, deletedUsers=[], deletedGroups=[])
+    for kind, deleted in [('users', 'deletedUsers'), ('groups', 'deletedGroups')]:
+        for key, entry in index[kind].items():
+            if not full and entry['at'] <= since: continue
+            if not entry['revision']: result[deleted].append(key)
+            else: result[kind][key] = value[kind][key]
+    if full or index['metadata']['at'] > since: result['metadata'] = metadata
+    return result
+
+
+def prepare_member_operation(state, current, request):
+    if not request.get('teamId') or request['teamId'] != state.get('teamId'):
+        raise ValueError('[MEMBER_TEAM] 团队身份已变化，已停止成员操作')
+    request_id, command = request.get('requestId'), request.get('command')
+    if not isinstance(request_id, str) or not re.fullmatch(r'[a-f0-9-]{36}', request_id) or not isinstance(command, dict):
+        raise ValueError('无效成员请求')
+    op = command.get('op')
+    if op not in ('user_create', 'user_password', 'user_enabled', 'member_groups', 'recover'):
+        raise ValueError('无效成员操作')
+    username = account_name(command.get('username'))
+    signature = member_hash({k: v for k, v in command.items() if k != 'password'})
+    receipts = state.setdefault('memberRequests', {})
+    previous = receipts.get(request_id)
+    if previous:
+        if previous['signature'] != signature: raise ValueError('[MEMBER_REQUEST] 请求编号已用于其他操作')
+        password = command.get('password')
+        if (password is None) != ('passwordHash' not in previous) or (password is not None and hashlib.scrypt(password.encode(), salt=previous['passwordSalt'].encode(), n=16384, r=8, p=1).hex() != previous['passwordHash']):
+            raise ValueError('[MEMBER_REQUEST] 请求编号已用于其他密码操作')
+        if previous['status'] == 'done': return None
+        raise ValueError('[MEMBER_RECOVERY] 此操作可能已部分完成，请通过待恢复操作核对后继续')
+    if op == 'user_create':
+        if any(name.lower() == username.lower() for name in state['users']):
+            raise ValueError('[MEMBER_EXISTS] 账号已存在，请查看已有成员或更换账号')
+    else:
+        public = member_public_state(current)
+        user = public['users'].get(username)
+        if (not user and not (op == 'recover' and command.get('expectedRevision') == 'absent')) or (user and user['revision'] != command.get('expectedRevision')):
+            raise ValueError('[MEMBER_CONFLICT] 成员已被其他管理端修改，请查看最新状态后重新确认；本次输入已保留')
+        for successor in (command.get('handoffs') or {}).values():
+            if successor and public['users'].get(successor, {}).get('revision') != (command.get('handoffRevisions') or {}).get(successor):
+                raise ValueError('[MEMBER_CONFLICT] 接任成员已变化，请重新确认')
+    # Construct a fixed legacy operation; wrapper fields can never override root/op.
+    legacy = {k: command[k] for k in ('username', 'name', 'groups', 'contentAdminGroups', 'password', 'enabled', 'handoffs', 'operationId') if k in command}
+    legacy.update(op=op, root=request['root'], requestId=request_id)
+    if op == 'user_create': legacy['password'] = '123456'
+    if op == 'member_groups':
+        changes = command.get('changes')
+        if not isinstance(changes, list) or len(changes) > 100: raise ValueError('无效成员组变更')
+        user = current['users'][username]
+        groups, admins = set(user.get('groups', [])) & set(state['groups']), set(user.get('contentAdminGroups', []))
+        for change in changes:
+            group, role = change.get('group'), change.get('role')
+            record = state['groups'].get(group)
+            if not record or not record.get('workspace') or record.get('deletedAt') or record.get('purgedAt') or record.get('provisioning'):
+                raise ValueError('[MEMBER_GROUP] 项目组已变化，请重新选择')
+            if role not in ('member', 'admin', 'remove'): raise ValueError('无效成员身份')
+            if role == 'remove': groups.discard(group)
+            else: groups.add(group)
+            if role == 'admin': admins.add(group)
+            else: admins.discard(group)
+        legacy.update(op='user_groups', groups=sorted(groups), contentAdminGroups=sorted(admins))
+    if op == 'recover':
+        job = state.get('operations', {}).get(command.get('operationId'))
+        if not job or job.get('request', {}).get('username') != username or job.get('op') not in ('user_create', 'user_groups', 'user_enabled', 'user_password', 'group_member'):
+            raise ValueError('无效成员恢复任务')
+    receipts[request_id] = dict(signature=signature, status='running')
+    if command.get('password') is not None:
+        salt = uuid.uuid4().hex
+        receipts[request_id].update(passwordSalt=salt, passwordHash=hashlib.scrypt(command['password'].encode(), salt=salt.encode(), n=16384, r=8, p=1).hex())
+    return legacy
+
+
+def member_protocol(root, request):
+    state = load(root)
+    current = actual_state(state)
+    if request['op'] == 'members_sync':
+        previous = json.dumps(state.get('memberIndex'), sort_keys=True)
+        result = member_delta(state, current, request.get('teamId'), request.get('since'))
+        request_ids = request.get('requestIds', [])
+        if not isinstance(request_ids, list) or len(request_ids) > 1000 or any(not isinstance(value, str) for value in request_ids): raise ValueError('无效请求编号列表')
+        result['receipts'] = {key: state['memberRequests'][key]['status'] for key in request_ids if key in state.get('memberRequests', {})}
+        if previous != json.dumps(state.get('memberIndex'), sort_keys=True):
+            # A read updates only the sync cursor, never OS permissions or sessions.
+            atomic_json(child(root, '.workbench/admin/state.json'), state)
+        return result
+    legacy = prepare_member_operation(state, current, request)
+    if legacy is None: return {'state': member_public_state(current), 'duplicate': True}
+    atomic_json(child(root, '.workbench/admin/state.json'), state)
+    try:
+        result = execute(legacy)
+        final = load(root)
+        final['memberRequests'][request['requestId']]['status'] = 'done'
+        atomic_json(child(root, '.workbench/admin/state.json'), final)
+        return {'state': member_public_state(actual_state(final)), 'value': result.get('value')}
+    except Exception:
+        final = load(root)
+        if final['memberRequests'][request['requestId']]['status'] != 'done':
+            final['memberRequests'][request['requestId']]['status'] = 'failed'
+            atomic_json(child(root, '.workbench/admin/state.json'), final)
+        raise
+
 @contextlib.contextmanager
 def state_lock(request):
     import fcntl
@@ -1105,6 +1250,11 @@ def _execute(request):
     if sys.platform != "linux" or os.geteuid() != 0:
         raise PermissionError("需要已有的 Linux root 或 sudo 管理权限；安装管理员版不赋予服务器权限")
     root = root_directory(request)
+    if request.get('expectedTeamId') and request['op'] != 'probe':
+        if not (root / '.workbench/admin/state.json').is_file() or load(root).get('teamId') != request['expectedTeamId']:
+            raise ValueError('[MEMBER_TEAM] 团队身份已变化，已停止管理操作')
+    if request['op'] in ('members_sync', 'members_apply'):
+        return member_protocol(root, request)
     actor = os.environ.get("SUDO_USER") or "root"
     if request['op'] == 'environment_prepare':
         return prepare_environment(request)
@@ -1148,7 +1298,7 @@ def _execute(request):
         current["sftpConfigured"] = member_access_ready(root, state)
         if not missing:
             write_roles(root, current)
-        return current
+        return member_public_state(current)
     if op == "user_create":
         import pwd, grp
         username = account_name(request.get("username"))
@@ -1196,6 +1346,7 @@ def _execute(request):
         login = user_login(state, username)
         password = check_password(request.get("password", ""))
         run(["chpasswd"], login + ":" + password + "\n")
+        state['users'][username]['accessVersion'] = uuid.uuid4().hex
         terminate_connections(login)
     elif op == "user_enabled":
         username = request.get("username")
@@ -1204,6 +1355,7 @@ def _execute(request):
         enabled = request.get("enabled") is True
         run(["usermod", "--expiredate", "" if enabled else "1", login])
         state["users"][username]["enabled"] = enabled
+        state['users'][username]['accessVersion'] = uuid.uuid4().hex
         checkpoint(root, state, "账号登录状态已设置")
         if not enabled:
             terminate_connections(login)
@@ -1283,27 +1435,33 @@ def _execute(request):
         if job:
             job["status"] = "done"
             job.pop("error", None)
+        for receipt_id in (request.get('requestId'), request.get('completionRequestId')):
+            receipt = state.get('memberRequests', {}).get(receipt_id)
+            if receipt: receipt['status'] = 'done'
         save(root, state)
         with child(root, ".workbench/admin/audit.jsonl").open("a", encoding="utf-8") as audit:
             json.dump({"at": datetime.datetime.now(datetime.timezone.utc).isoformat(), "actor": actor, "operation": op, "username": request.get("username"), "groups": request.get("groups"), "label": request.get("label"), "group": request.get("group"), "role": request.get("role"), **({"host": request['host'], "port": request['port'], "enabled": request['enabled']} if op == 'egress_jump' else {})}, audit, ensure_ascii=False)
             audit.write("\n")
-    return {"state": actual_state(state), "value": result}
+    return {"state": member_public_state(actual_state(state)), "value": result}
 
 def execute(request):
     validate_request(request)
     if sys.platform != "linux" or os.geteuid() != 0:
         raise PermissionError("需要已有 Linux root 或 sudo 管理权限")
     root = root_directory(request)
+    if request.get('expectedTeamId') and request['op'] != 'probe':
+        if not (root / '.workbench/admin/state.json').is_file() or load(root).get('teamId') != request['expectedTeamId']:
+            raise ValueError('[MEMBER_TEAM] 团队身份已变化，已停止管理操作')
     if request["op"] == "recover":
         state = load(root)
         job = state.get("operations", {}).get(request.get("operationId"))
         if not job or job.get("status") == "done":
             raise ValueError("没有可恢复的未完成操作")
-        request = {**job["request"], "root": request["root"], "password": request.get("password", "")}
+        request = {**job["request"], "root": request["root"], "password": request.get("password", ""), "completionRequestId": request.get('requestId')}
     try:
         return _execute(request)
     except Exception as error:
-        if request["op"] not in ["status", "probe", "storage_usage", "project_catalog", "project_purge", "environment_prepare", "egress_jump_probe"]:
+        if request["op"] not in ["members_sync", "members_apply", "status", "probe", "storage_usage", "project_catalog", "project_purge", "environment_prepare", "egress_jump_probe"]:
             try:
                 state = load(root)
                 key = operation_key(request)

@@ -214,11 +214,14 @@ export class SftpConnection {
     }
     return result;
   }
-  async createProject(name: string, groupName?: string, brief?: ProjectBrief): Promise<Project> {
+  async createProject(name: string, groupName?: string, brief?: ProjectBrief, id?: string): Promise<Project> {
     await this.loadManifest();
     const workspace = groupName ? this.workspaces.find(w => w.groupName === groupName) : this.workspaces.length === 1 ? this.workspaces[0] : undefined;
     if (!workspace?.canCreateProject || workspace.accessError) throw new Error('请选择可管理的工作组；只有本组组管理员可以创建项目');
-    const result = await this.request({ op: 'create_project', name: projectName(name), groupName: workspace.groupName, brief });
+    const result = await this.request({ op: id ? 'create_project_v2' : 'create_project', name: projectName(name), groupName: workspace.groupName, brief, ...(id ? { clientProjectId: id } : {}) }).catch(error => {
+      if (id && /不支持|unsupported|unknown op/i.test(error.message)) throw new Error('中央节点需更新项目同步服务，本机项目已保留');
+      throw error;
+    });
     await this.loadManifest(); const project = this.profile!.projects.find(p => p.id === result.projectId); if (!project) throw new Error('项目已创建，请刷新工作组查看'); return project;
   }
   async ensurePersonalFolder(binding: RemoteBinding, _target: string) { this.channel(binding); this.requireStorage(); }

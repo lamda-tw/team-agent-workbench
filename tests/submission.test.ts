@@ -1,3 +1,4 @@
+import { syncedProject } from './fixtures/synced-project';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -33,7 +34,7 @@ async function fixture() {
     await wb.configureWorkspace(memberProfile(admin.snapshot.profile!, admin.snapshot.state!, name), '123', root, async () => false); return wb;
   };
   const alice = await connect('alice'), bob = await connect('bob');
-  const first = await alice.createProject('优化项目', groups[0], brief), second = await alice.createProject('优化项目', groups[1], brief); await bob.refreshGroups();
+  const first = await syncedProject(alice, '优化项目', groups[0], brief), second = await syncedProject(alice, '优化项目', groups[1], brief); await bob.refreshGroups();
   return { root, admin, alice, bob, first, second, close: async () => { await alice.close(); await bob.close(); admin.disconnect(); assert(root.startsWith(path.join(os.tmpdir(), 'wb-submission-'))); await fs.rm(root, { recursive: true, force: true, maxRetries: 5 }); } };
 }
 async function completed(task: Transfer) {

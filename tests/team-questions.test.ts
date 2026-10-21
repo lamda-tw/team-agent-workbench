@@ -1,3 +1,4 @@
+import { syncedProject } from './fixtures/synced-project';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -122,7 +123,7 @@ async function fixture(run: (value: { alice: Workbench; bob: Workbench; carol: W
     for (const name of ['alice', 'bob', 'carol', 'dave']) await admin.operation({ op: 'user_create', username: name, name, password: '1', groups: ['local_research'], contentAdminGroups: name === 'alice' ? ['local_research'] : [] });
     const connect = async (name: string) => { const wb = new Workbench(path.join(root, name), () => {}, () => {}); clients.push(wb); await wb.store.init(); await wb.configureWorkspace(memberProfile(admin.snapshot.profile!, admin.snapshot.state!, name), '1', root, async () => false); for (const provider of ['codex', 'cursor', 'claude'] as const) wb.store.settings.providerPaths[provider] = path.join(root, 'missing-cli.exe'); return wb; };
     const alice = await connect('alice');
-    const project = await alice.createProject('问答验证', 'local_research', { background: '项目背景', objectives: '目标', acceptance: '验收', scope: '', deliverables: '', resources: '', constraints: '', collaboration: '' });
+    const project = await syncedProject(alice, '问答验证', 'local_research', { background: '项目背景', objectives: '目标', acceptance: '验收', scope: '', deliverables: '', resources: '', constraints: '', collaboration: '' });
     const bob = await connect('bob'), carol = await connect('carol'), dave = await connect('dave');
     await run({ alice, bob, carol, dave, project: project.id, root, admin });
   } finally { for (const wb of clients) await wb.close(); admin.disconnect(); assert(root.startsWith(path.join(os.tmpdir(), 'wb-member-questions-'))); await fs.rm(root, { recursive: true, force: true, maxRetries: 8 }); }

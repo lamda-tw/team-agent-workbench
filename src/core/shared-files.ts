@@ -44,7 +44,7 @@ export class SharedFiles {
   verifyWorkspace(target: string) { return this.backend.verifyWorkspace(target); }
   loadManifest() { return this.backend.loadManifest(); }
   groupCommand(command: GroupCommand) { return this.backend.groupCommand(command); }
-  createProject(name: string, groupName?: string, brief?: ProjectBrief) { return this.backend.createProject(name, groupName, brief); }
+  createProject(name: string, groupName?: string, brief?: ProjectBrief, id?: string) { return this.backend.createProject(name, groupName, brief, id); }
   contentList(binding: RemoteBinding) { return this.backend.contentList(binding); }
   contentHistory(binding: RemoteBinding, id?: string, revision?: number, summary = false) { return this.backend.contentHistory(binding, id, revision, summary); }
   contentMerge(binding: RemoteBinding, change: ContentMerge) { return this.backend.contentMerge(binding, change); }

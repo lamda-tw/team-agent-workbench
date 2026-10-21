@@ -5,6 +5,8 @@ import type { GroupCommand } from '../shared/team-groups';
 import { ProjectBriefSettings } from './project-brief-editor';
 import { TeamGroupDialog } from './team-groups';
 import { RsiProjectSettings } from './rsi-project-settings';
+import { SyncConflictCard } from './account-sync';
+import type { Snapshot } from '../shared/types';
 
 export function ProjectDirectoryForm({ projectId, projectName, contextKey, directory = '', initial = false, embedded = false, saved }: { projectId: string; projectName: string; contextKey: string; directory?: string; initial?: boolean; embedded?: boolean; saved: () => Promise<void> }) {
   const [value, setValue] = useState(directory), [operation, setOperation] = useState<'saving' | 'choosing' | ''>(''), [error, setError] = useState('');
@@ -41,8 +43,9 @@ export function ProjectDirectoryDialog(props: React.ComponentProps<typeof Projec
 
 type ProjectMembers = { groupId: string; groupLabel: string; connected: boolean; call: (command: GroupCommand) => Promise<any>; changed: () => Promise<void> };
 
-export function ProjectSettingsDialog({ project, admin, contextKey, directory, members, central, close, directorySaved, briefSaved }: { project: Project; admin: boolean; contextKey: string; directory?: string; members?: ProjectMembers; central?: React.ReactNode; close: () => void; directorySaved: () => Promise<void>; briefSaved: (revision: number) => Promise<void> }) {
+export function ProjectSettingsDialog({ project, admin, contextKey, directory, members, central, syncState, close, directorySaved, briefSaved }: { project: Project; admin: boolean; contextKey: string; directory?: string; members?: ProjectMembers; central?: React.ReactNode; syncState?: NonNullable<Snapshot['projectSync']>[string]; close: () => void; directorySaved: () => Promise<void>; briefSaved: (revision: number) => Promise<void> }) {
   const [tab, setTab] = useState<'project' | 'members' | 'recommendations' | 'central'>('project'), [membersOpened, setMembersOpened] = useState(false), [recommendationsOpened, setRecommendationsOpened] = useState(false);
+  const [syncBusy, setSyncBusy] = useState(false), [syncError, setSyncError] = useState('');
   return <div className="modal-backdrop"><section className="modal wide" role="dialog" aria-label={'项目设置 · ' + project.name}>
     <header><h2>项目设置 · {project.name}</h2><button className="icon" aria-label="关闭窗口" onClick={close}>×</button></header>
     <div className="project-settings-tabs" role="tablist" aria-label="项目设置分类">
@@ -52,6 +55,8 @@ export function ProjectSettingsDialog({ project, admin, contextKey, directory, m
       {members && <button role="tab" id="project-settings-members-tab" aria-selected={tab === 'members'} aria-controls="project-settings-members-panel" onClick={() => { setMembersOpened(true); setTab('members'); }}>成员与权限</button>}
     </div>
     <div className="project-settings-pane" id="project-settings-project-panel" role="tabpanel" aria-labelledby={members ? 'project-settings-project-tab' : undefined} hidden={tab !== 'project'}>
+      {syncState && <div className="modal-body"><p role="status">{syncState.localOnly ? '本机已保存' : syncState.conflict ? '项目资料有分歧待处理' : syncState.error ? '本机已保存，等待自动同步：' + syncState.error : syncState.pending ? '本机已保存，资料待同步' : '项目资料已同步'}</p>{syncError && <p className="inline-error">{syncError}</p>}{syncState.conflict && <SyncConflictCard key={syncState.conflict.token} conflict={syncState.conflict} busy={syncBusy} resolve={async (choice, fields) => { setSyncBusy(true); setSyncError(''); try { await window.workbench.call('project.sync.resolve', { projectId: project.id, token: syncState.conflict!.token, choice, fields }); await directorySaved(); } catch (error: any) { setSyncError(error.message); } finally { setSyncBusy(false); } }}/>}</div>}
+      {!!syncState?.history?.length && <details className="modal-body"><summary>合并记录与恢复</summary>{syncState.history.map(item => <div className="row" key={item.id}><span>{new Date(item.at).toLocaleString()}</span><button className="text-button" disabled={syncBusy} onClick={async () => { setSyncBusy(true); setSyncError(''); try { await window.workbench.call('project.sync.undo', { projectId: project.id, id: item.id }); await directorySaved(); } catch (error: any) { setSyncError(error.message); } finally { setSyncBusy(false); } }}>恢复处理前版本</button></div>)}</details>}
       <ProjectBriefSettings project={project} admin={admin} cancel={close} saveLabel="保存项目设置" saved={briefSaved} localSettings={<ProjectDirectoryForm projectId={project.id} projectName={project.name} contextKey={contextKey} directory={directory} saved={directorySaved} embedded/>}/>
     </div>
     {central && <div className="project-settings-pane" id="project-settings-central-panel" role="tabpanel" aria-labelledby="project-settings-central-tab" hidden={tab !== 'central'}>{central}</div>}

@@ -25,7 +25,8 @@ async function setup() {
     const profile = memberProfile(admin.snapshot.profile!, admin.snapshot.state!, username); profile.id = 'connection-' + slot;
     await wb.configureWorkspace(profile, '1', '', async () => false); return wb;
   };
-  const first = await client('one'), project = await first.createProject('调研项目', 'local_research');
+  const first = await client('one'), created = await first.createProject('调研项目', 'local_research');
+  await first.projectSync.sync(); const project = first.projectBinding(created.id).project;
   return { root, shared, admin, first, project, client, close: async () => { await Promise.all(clients.map(wb => wb.close())); await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } };
 }
 async function settled(wb: Workbench) { const deadline = Date.now() + 15000; while (wb.store.transfers.some(item => ['running', 'queued'].includes(item.status))) { if (Date.now() > deadline) throw Error('queue timed out'); await new Promise(resolve => setTimeout(resolve, 20)); } }
@@ -156,7 +157,7 @@ test('research folders persist; account restores personal materials and selected
     await a.saveConclusion(material.id, material.title, '电脑一编辑'); await a.accountSync.sync();
     await b.saveConclusion(material.id, material.title, '电脑二编辑'); await b.accountSync.sync();
     assert.equal(b.accountSync.state.status, 'conflict'); assert.equal(b.conclusions(project.id)[0].content, '电脑二编辑');
-    await b.accountSync.resolve('material:' + material.id, 'local'); assert.equal(b.accountSync.state.status, 'synced');
+    await b.accountSync.resolve('material:' + material.id, 'local', b.accountSync.state.conflicts![0].token); assert.equal(b.accountSync.state.status, 'synced');
     await a.accountSync.sync(); assert.equal(a.conclusions(project.id)[0].content, '电脑二编辑');
     assert(a.conclusions(project.id)[0].versions?.some(version => version.content === '必须保留独立复核。'), 'older personal versions survive account synchronization');
     assert.equal(a.store.sessions.length, 2); assert.equal(a.session(session.id).cwd, session.cwd);

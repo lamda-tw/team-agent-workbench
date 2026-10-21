@@ -20,6 +20,8 @@ import { attachAdminBackground } from './background-mode';
 import type { AdminEgressConfig } from '../shared/egress';
 import type { AdminProfile } from './types';
 import { AdminWindowStore, adminNodeKey, adminNodeLabel, isAdminWindowSource } from './window-store';
+import { AdminMemberSync } from './member-sync';
+import { memberCommandSchema, memberCreateSchema } from './member-protocol';
 app.setName('Team Agent Admin');
 app.setPath('userData', process.env.WORKBENCH_ADMIN_DATA_DIR || path.join(app.getPath('appData'), 'TeamAgentAdmin'));
 const entry = path.join(__dirname, runtimeAssets, 'index.html');
@@ -51,6 +53,7 @@ async function initializeWindow(slot: number): Promise<AdminContext> {
   let window!: BrowserWindow; let remote!: AdminConnection | LocalAdminConnection; let egress!: EgressHost;
   let egressConfig: AdminEgressConfig; let egressSecret: { accessCode: string; upstreamPassword?: string };
   let storageAbort: AbortController | undefined;
+  let members: AdminMemberSync | undefined;
   let background: ReturnType<typeof attachAdminBackground> | undefined, tray: Tray | undefined;
   let boundProfile = await store.profile(slot), changing = false, stopTask: Promise<void> | undefined;
   const directory = store.directory(slot);
@@ -89,6 +92,8 @@ async function initializeWindow(slot: number): Promise<AdminContext> {
       catch (error) { remote.snapshot.connectionError = errorMessage(error); }
     }
   } catch {}
+  members = new AdminMemberSync(directory, () => remote, changed, () => !changing && !reverse.busy);
+  await members.init();
   if (quitting) throw new Error('管理端正在退出');
   window = new BrowserWindow({ width: 1320, height: 900, minWidth: 1040, minHeight: 720, show: process.env.WORKBENCH_TEST !== '1', title: clientWindowTitle('管理员版'), backgroundColor: '#f6f7f9', webPreferences: { preload: path.join(__dirname, runtimeAssets, 'preload.cjs'), contextIsolation: true, sandbox: true, nodeIntegration: false } });
   background = attachAdminBackground(window, {
@@ -119,7 +124,7 @@ async function initializeWindow(slot: number): Promise<AdminContext> {
     if (exclusive) changing = true;
     try {
       let value;
-      if (action === 'snapshot') value = { ...remote.snapshot, busy: changing || remote.snapshot.busy || reverse.busy, egress: { background: background?.available || false, config: egressConfig, ...egress.snapshot(), inviteCode: encodeEgressInvite({ version: 1, host: egressConfig.publicHost, port: egressConfig.listenPort, fingerprint: certificate.fingerprint, accessCode: egressSecret.accessCode }), hasUpstreamPassword: !!egressSecret.upstreamPassword, reverse: reverse.snapshot(remote.snapshot.state ? remote.snapshot.state.egressJumpTargets || [] : undefined) } };
+      if (action === 'snapshot') value = { ...members!.snapshot(), busy: changing || remote.snapshot.busy || reverse.busy, egress: { background: background?.available || false, config: egressConfig, ...egress.snapshot(), inviteCode: encodeEgressInvite({ version: 1, host: egressConfig.publicHost, port: egressConfig.listenPort, fingerprint: certificate.fingerprint, accessCode: egressSecret.accessCode }), hasUpstreamPassword: !!egressSecret.upstreamPassword, reverse: reverse.snapshot(remote.snapshot.state ? remote.snapshot.state.egressJumpTargets || [] : undefined) } };
       else if (action === 'egress.save') {
         if (reverse.busy) throw new Error('请等待反向隧道设置完成');
         const input = payload as any; const next = adminEgressConfigSchema.parse(input?.config);
@@ -137,7 +142,7 @@ async function initializeWindow(slot: number): Promise<AdminContext> {
       else if (action === 'egress.reverse.enable') {
         if (!(remote instanceof AdminConnection) || !remote.snapshot.connected || !remote.snapshot.verified || remote.snapshot.role !== 'administrator' || !remote.snapshot.state?.initialized) throw new Error('请先以 root / sudo 管理账号连接并初始化共享服务器');
         if (remote.snapshot.busy) throw new Error('请等待当前管理操作完成');
-        await reverse.enable(port => remote.operation({ op: 'egress_jump', enabled: true, host: '127.0.0.1', port })); value = true;
+        await reverse.enable(port => members!.operation({ op: 'egress_jump', enabled: true, host: '127.0.0.1', port })); value = true;
       } else if (action === 'egress.reverse.disable') { await reverse.disable(); value = true; }
       else if (action === 'egress.reverse.copy' || action === 'egress.reverse.test') {
         const sharedServer = reverse.route(remote.snapshot.state ? remote.snapshot.state.egressJumpTargets || [] : undefined);
@@ -148,12 +153,18 @@ async function initializeWindow(slot: number): Promise<AdminContext> {
           try { value = await probe.probe(); } finally { await probe.stop(); }
         }
       }
-      else if (action === 'group.control') { const result = await remote.operation({op:'group_control', command: payload as any}); value = remote instanceof AdminConnection ? result.value : result; }
+      else if (action === 'members.sync') { await members!.sync(); value = true; }
+      else if (action === 'members.create') { const input = z.object({ command: memberCreateSchema, requestId: z.string().uuid() }).parse(payload); value = await members!.create(input.command, input.requestId); }
+      else if (action === 'members.apply') { const input = z.object({ command: memberCommandSchema, requestId: z.string().uuid() }).parse(payload); value = await members!.apply(input.command, input.requestId); }
+      else if (action === 'members.removePending') { value = await members!.removePending(z.string().uuid().parse(payload)); }
+      else if (action === 'group.control') { const result = await members!.operation({op:'group_control', command: payload as any}); value = remote instanceof AdminConnection ? result.value : result; }
       else if (action === 'connect') {
         if (remote.snapshot.busy || reverse.busy) throw new Error('请等待当前管理操作完成后更换连接');
         storageAbort?.abort(); storageAbort = undefined;
         const input = adminConnectSchema.parse(payload);
         if (boundProfile && adminNodeKey(boundProfile) !== adminNodeKey(input.profile)) throw new Error('不同中央节点必须使用独立窗口');
+        await members!.settle();
+        input.profile.teamId = members!.view().teamId || boundProfile?.teamId || input.profile.teamId;
         reverse.select(input.profile);
         remote.disconnect();
         remote = input.profile.mode === 'local' ? new LocalAdminConnection(changed) : new AdminConnection(path.join(__dirname, 'admin.py'), changed);
@@ -165,8 +176,8 @@ async function initializeWindow(slot: number): Promise<AdminContext> {
         if (remote.snapshot.verified) { await store.saveProfile(slot, value); boundProfile = value; }
         if (remote.snapshot.role === 'administrator' && remote.snapshot.profile?.mode !== 'local') await reverse.login(remote.snapshot.profile!, input.password);
       } else if (action === 'choose.directory') value = (await dialog.showOpenDialog(window, { properties: ['openDirectory', 'createDirectory'] })).filePaths[0] || '';
-      else if (action === 'disconnect') { if (remote.snapshot.busy || reverse.busy) throw new Error('请等待操作完成'); storageAbort?.abort(); storageAbort = undefined; reverse.disconnect(); remote.disconnect(); value = true; }
-      else if (action === 'operation') { if (reverse.busy) throw new Error('请等待反向隧道设置完成'); value = await remote.operation(adminOperationSchema.parse(payload)); }
+      else if (action === 'disconnect') { if (remote.snapshot.busy || reverse.busy) throw new Error('请等待操作完成'); await members!.settle(); storageAbort?.abort(); storageAbort = undefined; reverse.disconnect(); remote.disconnect(); value = true; }
+      else if (action === 'operation') { if (reverse.busy) throw new Error('请等待反向隧道设置完成'); value = await members!.operation(adminOperationSchema.parse(payload)); }
       else if (action === 'storage.scan') {
         if (storageAbort) throw new Error('共享空间统计正在进行，请等待完成或取消');
         const controller = new AbortController(); storageAbort = controller;
@@ -177,13 +188,13 @@ async function initializeWindow(slot: number): Promise<AdminContext> {
       else if (action === 'project.purge') { const request = z.object({ projectId: z.string().regex(/^project_[a-f0-9]{32}$/), mode: z.enum(['all', 'keep_trajectories']) }).parse(payload); value = await remote.projectPurge(request.projectId, request.mode); }
       else throw new Error('管理员版不支持此操作');
       return value;
-    } finally { if (exclusive) { changing = false; changed(); } }
+    } finally { if (exclusive) { changing = false; changed(); if (action === 'connect') void members!.sync(); } }
   };
   const context: AdminContext = {
     slot, window, profile: () => boundProfile, connected: () => remote.snapshot.connected, dispatch,
     stop() {
       if (!stopTask) {
-        background?.beginQuit(); storageAbort?.abort(); reverse.disconnect(); remote.disconnect();
+        members?.stop(); background?.beginQuit(); storageAbort?.abort(); reverse.disconnect(); remote.disconnect();
         stopTask = Promise.resolve(egress.stop()).finally(() => background?.dispose());
       }
       return stopTask;
@@ -196,14 +207,15 @@ async function initializeWindow(slot: number): Promise<AdminContext> {
     event.preventDefault(); void closeWindow(context);
   });
   window.on('closed', () => { if (!context.closing && !quitting) void closeWindow(context); });
+  window.on('focus', () => { void members?.sync(); });
   await window.loadFile(entry);
   if (quitting) throw new Error('管理端正在退出');
-  changed(); return context;
+  members.start(); void members.sync(); changed(); return context;
   } catch (error) {
     const registered = window && contexts.get(window);
     if (registered) await closeWindow(registered);
     else {
-      reverse.disconnect(); remote?.disconnect(); await egress?.stop().catch(() => {}); background?.dispose();
+      members?.stop(); reverse.disconnect(); remote?.disconnect(); await egress?.stop().catch(() => {}); background?.dispose();
       if (window && !window.isDestroyed()) window.destroy();
     }
     throw error;

@@ -1,3 +1,4 @@
+import { syncedProject } from './fixtures/synced-project';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -30,7 +31,7 @@ test('members create groups, scoped roles govern content and membership; creator
     await bob.refreshGroups(); assert.equal(bob.remote.workspaces[0].role,'manager');
     await assert.rejects(act(bob,{action:'member',group:group.id,revision:joined.revision,username:'carol',role:'member'}),/创建者/);
     await assert.rejects(act(bob,{action:'delete',group:group.id,revision:joined.revision}),/创建者/);
-    const project=await bob.createProject('实体抽取',group.id,{background:'背景',objectives:'目标',acceptance:'验收',scope:'',deliverables:'',resources:'',constraints:'',collaboration:''});
+    const project=await syncedProject(bob, '实体抽取',group.id,{background:'背景',objectives:'目标',acceptance:'验收',scope:'',deliverables:'',resources:'',constraints:'',collaboration:''});
     const source=path.join(root,'result.md'); await fs.writeFile(source,'研究结果');
     await alice.refreshGroups(); const binding=alice.remote.binding(project.id);
     const item=await alice.remote.upload(binding,source,binding.project.uploadPath+'/result.md',()=>{},{kind:'contribution',title:'结果',description:'验证结果'});
@@ -62,7 +63,7 @@ test('members create groups, scoped roles govern content and membership; creator
     assert.equal((await readRegistry(share)).state.users.bob.groups?.includes(group.id),false);
     const replacement=await act(alice,{action:'create',label:'算法组'});
     assert.notEqual(replacement.id,group.id);
-    const newProject=await alice.createProject('新项目',replacement.id,{background:'背景',objectives:'目标',acceptance:'验收',scope:'',deliverables:'',resources:'',constraints:'',collaboration:''});
+    const newProject=await syncedProject(alice, '新项目',replacement.id,{background:'背景',objectives:'目标',acceptance:'验收',scope:'',deliverables:'',resources:'',constraints:'',collaboration:''});
     const newBinding=alice.remote.binding(newProject.id);
     await alice.remote.upload(newBinding,source,newBinding.project.uploadPath+'/new.md',()=>{},{kind:'contribution',title:'新结果',description:'新验证'});
     assert.equal((await alice.remote.contentList(newBinding)).length,1,'purged tombstones cannot intercept a reused visible folder name');

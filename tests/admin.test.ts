@@ -85,6 +85,14 @@ async function fixture(role: 'root' | 'sudo' | 'project', writableManifest = fal
               channel.write('WORKBENCH_READY\n'); continue;
             }
             const input = JSON.parse(line); requests.push(input);
+            if (input.expectedTeamId && input.op !== 'probe' && input.expectedTeamId !== state.teamId) {
+              channel.write(JSON.stringify({ ok: false, error: '[MEMBER_TEAM] 团队身份已变化' }) + '\n'); channel.exit(1); channel.end(); continue;
+            }
+            if (input.op === 'members_sync') {
+              const { users, groups, ...metadata } = state;
+              const full = input.since === undefined;
+              channel.write(JSON.stringify({ ok: true, value: { protocol: 1, teamId: state.teamId, sequence: 1, full, users: full ? users : {}, groups: full ? groups : {}, deletedUsers: [], deletedGroups: [], ...(full ? { metadata } : {}) } }) + '\n'); channel.exit(0); channel.end(); continue;
+            }
             if (input.op === 'storage_usage' && control.holdStorage) continue;
             if (control.failNext && !['probe', 'status'].includes(input.op)) {
               control.failNext = false;
@@ -129,6 +137,24 @@ test('server update uploads current worker files after a rebuild without reconne
     assert.equal(await fs.realpath(path.dirname(directory)), await fs.realpath(os.tmpdir()));
     await fs.rm(directory, { recursive: true, force: true });
   }
+});
+
+test('member polling pins the team, requests a delta and omits installation payload', async () => {
+  const f = await fixture('root'), remote = new AdminConnection(path.resolve('server/admin.py'), () => {});
+  f.state.teamId = 'team-a';
+  try {
+    await remote.connect({ host: '127.0.0.1', port: f.port, username: 'root', root: '/srv/teamspace', fingerprint: '' }, 'login-secret', '', async () => true);
+    assert.equal(remote.snapshot.profile!.teamId, 'team-a');
+    const before = structuredClone(remote.snapshot.state);
+    const first = await remote.memberSync('team-a'); assert.equal(first.full, true);
+    const next = await remote.memberSync('team-a', first.sequence); assert.equal(next.full, false); assert.deepEqual(next.users, {});
+    assert.equal(f.requests.at(-1).expectedTeamId, 'team-a'); assert.equal(f.requests.at(-1).since, 1);
+    assert.match(f.programs.at(-1)!, /CONTENT_WORKER_ZLIB_BASE64 = ''/);
+    assert.deepEqual(remote.snapshot.state, before); assert.equal(remote.snapshot.busy, false);
+    f.state.teamId = 'team-b';
+    await assert.rejects(remote.memberSync('team-a', 1), /MEMBER_TEAM/);
+    await assert.rejects(remote.operation({ op: 'user_enabled', username: 'alice', enabled: false }), /MEMBER_TEAM/);
+  } finally { remote.disconnect(); await f.close(); }
 });
 test('admin rejects a changed server identity before sending login credentials', async () => {
   const f = await fixture('root'), remote = new AdminConnection(path.resolve('server/admin.py'), () => {});

@@ -45,7 +45,8 @@ test('local onboarding: empty detection, required brief, identity binding, reada
     await assert.rejects(member.initializeProject('越权', 'local_one', brief, key(member, 'local_one')), /组管理员/);
     await assert.rejects(owner.initializeProject('缺少说明', 'local_one', { ...brief, acceptance: ' ' }, key(owner, 'local_one')));
     assert.deepEqual(await fs.readdir(path.join(share, 'projects/one')), []);
-    const project = await owner.initializeProject('客户信息整理', 'local_one', brief, key(owner, 'local_one'));
+    const created = await owner.initializeProject('客户信息整理', 'local_one', brief, key(owner, 'local_one'));
+    await owner.projectSync.sync(); const project = owner.projectBinding(created.id).project;
     const text = await fs.readFile(path.join(share, 'projects/one/客户信息整理', PROJECT_BRIEF_FILE), 'utf8');
     for (const field of briefFields) { assert(text.includes('## ' + field.label)); assert(text.includes(brief[field.key])); }
     for (const dir of ['trajectories', 'submissions']) assert((await fs.stat(path.join(share, 'projects/one/客户信息整理', dir))).isDirectory());
@@ -54,7 +55,9 @@ test('local onboarding: empty detection, required brief, identity binding, reada
     await assert.rejects(owner.initializeProject('客户信息整理', 'local_one', brief, key(owner, 'local_one')), /EEXIST|已存在/);
     assert.equal(await fs.readFile(path.join(share, 'projects/one/客户信息整理', PROJECT_BRIEF_FILE), 'utf8'), text);
     await admin.operation({ op: 'group_member', username: 'alice', group: 'local_two', role: 'member', handoffs: { 'local_two': null } });
-    await assert.rejects(owner.initializeProject('撤权后创建', 'local_two', brief, key(owner, 'local_two')), /组管理员/);
+    const revoked = await owner.initializeProject('撤权后创建', 'local_two', brief, key(owner, 'local_two'));
+    await owner.projectSync.sync(); assert.match(owner.projectSync.states()[revoked.id].error!, /管理员|管理者/);
+    assert.equal((await owner.projectSync.read(revoked.id)).brief?.background, brief.background);
     assert.deepEqual(await fs.readdir(path.join(share, 'projects/two')), []);
   } finally { admin.disconnect(); await owner.close(); await member.close(); await fs.rm(root, { recursive: true, force: true, maxRetries: 5 }); }
 });
@@ -69,16 +72,31 @@ test('SFTP onboarding publishes complete UTF-8 brief, respects permissions, remo
     const key = projectSetupIdentity(owner.remote.profile!, 'wb_test_ocr'); assert(owner.remote.workspace!.isEmpty);
     await assert.rejects(member.initializeProject('越权', 'wb_test_ocr', brief, projectSetupIdentity(member.remote.profile!, 'wb_test_ocr')), /组管理员/);
     server.state.failWrite = PROJECT_BRIEF_FILE;
-    await assert.rejects(owner.initializeProject('失败项目', 'wb_test_ocr', brief, key), /未创建成功/);
+    await assert.rejects(owner.remote.createProject('失败项目', 'wb_test_ocr', brief), /未创建成功/);
     assert(![...server.nodes.keys()].some((p: string) => p.startsWith('/projects/ocr/失败项目')));
     server.state.failWrite = '.workbench-project.json';
-    await assert.rejects(owner.initializeProject('失败项目', 'wb_test_ocr', brief, key), /未创建成功/);
+    await assert.rejects(owner.remote.createProject('失败项目', 'wb_test_ocr', brief), /未创建成功/);
     assert(![...server.nodes.keys()].some((p: string) => p.startsWith('/projects/ocr/失败项目')));
     server.state.failWrite = '';
-    const project = await owner.initializeProject('客户资料项目', 'wb_test_ocr', brief, key);
+    const created = await owner.initializeProject('客户资料项目', 'wb_test_ocr', brief, key);
+    await owner.projectSync.sync(); const project = owner.projectBinding(created.id).project;
     const file = project.remoteRoot + '/' + PROJECT_BRIEF_FILE;
     assert.equal(server.nodes.get(file).mode & 0o777, 0o640); assert.equal(owner.remote.workspace!.isEmpty, false);
     await member.remote.loadManifest(); const preview = await member.remote.preview(member.remote.binding(project.id), file); assert(preview.content.includes(brief.background));
-    const another = await owner.initializeProject('新项目', 'wb_test_ocr', brief, key); assert.notEqual(another.id, project.id); assert.equal(owner.remote.profile!.projects.length, 2);
+    const another = await owner.initializeProject('新项目', 'wb_test_ocr', brief, key); assert.notEqual(another.id, project.id); await owner.projectSync.sync(); assert.equal(owner.remote.profile!.projects.length, 2);
   } finally { await owner.close(); await member.close(); await server.close(); await fs.rm(root, { recursive: true, force: true, maxRetries: 5 }); }
+});
+
+test('old central nodes reject stable-ID creation before creating any directory; an upgrade resumes it once', async () => {
+  const server = await teamServer(), root = await fs.mkdtemp(path.join(os.tmpdir(), 'project-old-server-'));
+  const workbench = new Workbench(root, () => {}, () => {});
+  try {
+    await workbench.store.init(); await workbench.configureWorkspace(server.profile('alice'), 'test-password', root, async () => true);
+    server.state.legacyProjectCreation = true;
+    const project = await workbench.createProject('升级后同步', 'wb_test_ocr', brief); await workbench.projectSync.sync();
+    assert.match(workbench.projectSync.states()[project.id].error!, /更新项目同步服务/);
+    assert(!server.nodes.has('/projects/ocr/升级后同步'));
+    server.state.legacyProjectCreation = false; await workbench.projectSync.sync(); await workbench.projectSync.sync();
+    assert.equal(workbench.remote.profile!.projects.filter(item => item.id === project.id).length, 1);
+  } finally { await workbench.close(); await server.close(); await fs.rm(root, { recursive: true, force: true }); }
 });

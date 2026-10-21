@@ -1,3 +1,4 @@
+import { syncedProject } from './fixtures/synced-project';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -22,7 +23,7 @@ test('assignments enforce live roles, preserve snapshots, and start a reusable p
     for (const name of ['alice', 'bob', 'carol', 'outside']) await admin.operation({ op: 'user_create', username: name, name, password: '1', groups: [name === 'outside' ? 'local_other' : 'local_research'], contentAdminGroups: name === 'alice' ? ['local_research'] : [] });
     const connect = async (name: string) => { const wb = new Workbench(path.join(root, name), () => {}, () => {}); clients.push(wb); await wb.store.init(); await wb.configureWorkspace(memberProfile(admin.snapshot.profile!, admin.snapshot.state!, name), '1', root, async () => false); return wb; };
     const alice = await connect('alice');
-    const project = await alice.createProject('任务验证', 'local_research', { background: '项目背景', objectives: '改善 OCR', acceptance: '覆盖失败样本', scope: '', deliverables: '', resources: '', constraints: '', collaboration: '' });
+    const project = await syncedProject(alice, '任务验证', 'local_research', { background: '项目背景', objectives: '改善 OCR', acceptance: '覆盖失败样本', scope: '', deliverables: '', resources: '', constraints: '', collaboration: '' });
     const bob = await connect('bob'), carol = await connect('carol'), binding = alice.remote.binding(project.id), bobBinding = bob.remote.binding(project.id);
     const file = path.join(root, 'source.md'); await fs.writeFile(file, '依据');
     await alice.remote.upload(binding, file, binding.project.uploadPath + '/findings/source.md', () => {}, { kind: 'contribution', category: 'finding', title: '【项目结论】 OCR 基线结论', description: '低清晰度样本未覆盖，需要建立回归。' });

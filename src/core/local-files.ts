@@ -47,7 +47,7 @@ export class LocalFileConnection {
       const data = await readRegistry(this.root), username = this.profile!.username;
       const user = authorizeUser(data, username, this.proof);
       if (!passwordMatches(oldPassword, data.credentials[username])) throw new Error('原密码错误');
-      data.credentials[username] = passwordHash(newPassword); user.mustChangePassword = false;
+      data.credentials[username] = passwordHash(newPassword); user.mustChangePassword = false; user.accessVersion = randomUUID();
       await writeRegistry(this.root, data); this.proof = data.credentials[username]; return true;
     });
   }
@@ -196,15 +196,19 @@ export class LocalFileConnection {
     this.changed(); return result;
   }
 
-  async createProject(name: string, groupName?: string, rawBrief?: ProjectBrief) {
+  async createProject(name: string, groupName?: string, rawBrief?: ProjectBrief, identifier?: string) {
     const brief = rawBrief === undefined ? undefined : projectBriefSchema.parse(rawBrief);
     await this.loadManifest();
     const workspace = groupName ? this.workspaces.find(w => w.groupName === groupName) : this.workspaces.length === 1 ? this.workspaces[0] : undefined;
     if (!workspace) throw new Error(this.workspaces.length ? '请选择要创建项目的工作组' : '还没有加入工作组，请联系管理员');
     if (workspace.accessError) throw new Error(workspace.accessError);
     const base = workspace.canonicalPath, { group } = await this.access(base, true);
+    if (identifier && !/^project_[a-f0-9]{32}$/.test(identifier)) throw new Error('项目标识无效');
+    const prior = identifier && this.profile!.projects.find(item => item.id === identifier);
+    if (prior) { if (prior.groupName !== group.name) throw new Error('项目已关联到其他工作组'); return prior; }
     if (base !== group.workspace) throw new Error('只能在项目组工作路径中创建项目');
     const project = newProjectLayout(base, name), root = await diskPath(this.root, project.remoteRoot, true);
+    if (identifier) project.id = identifier;
     const directories: string[] = [], files: string[] = [], createdAt = new Date().toISOString();
     const write = async (file: string, text: string) => { const handle = await fs.open(file, 'wx'); files.push(file); try { await handle.writeFile(text, 'utf8'); } finally { await handle.close(); } };
     try {

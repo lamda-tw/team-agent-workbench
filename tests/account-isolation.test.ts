@@ -1,3 +1,4 @@
+import { syncedProject } from './fixtures/synced-project';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -123,7 +124,7 @@ test('real login transitions preserve both accounts, reject late reads and preve
   const { wb, root } = await fixture(t), server = await teamServer();
   t.after(() => server.close());
   await wb.configureWorkspace(server.profile('alice'), 'test-password', '', async () => true);
-  const project = await wb.createProject('共同项目');
+  const project = await syncedProject(wb, '共同项目');
   const alice = await wb.createSession('codex', root, project.id);
   await wb.saveInput(alice.id, { text: 'alice saved input', sourceIds: [], answers: {} });
   const epoch = wb.accountEpoch;

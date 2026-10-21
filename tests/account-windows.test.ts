@@ -21,7 +21,7 @@ test('production window routing reuses project connections, separates nodes and 
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'workbench-window-routing-'))), base = path.join(root, 'data'), server = await teamServer();
   const seed = new Workbench(base, () => {}, () => {}); await seed.store.init();
   await seed.configureWorkspace(server.profile('alice'), 'test-password', '', async () => true);
-  const project = await seed.createProject('算法大赛'), session = await seed.createSession('codex', root, project.id);
+  const project = await seed.createProject('算法大赛'); await seed.projectSync.sync(); const session = await seed.createSession('codex', root, project.id);
   const profile = structuredClone(seed.remote.profile!); await seed.close();
   // Reproduce the report: Alice's sessions live in slot 2, now last used by Bob.
   const slot2 = path.join(base, 'instances', '2'); await fs.mkdir(path.dirname(slot2), { recursive: true });

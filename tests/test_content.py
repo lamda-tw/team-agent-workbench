@@ -21,6 +21,20 @@ spec.loader.exec_module(content)
 BRIEF = dict(background='项目背景', objectives='提升质量', acceptance='指标验收')
 
 class ContentRules(unittest.TestCase):
+    def test_offline_project_identity_is_idempotent_and_does_not_cross_groups(self):
+        identifier = 'project_' + uuid.uuid4().hex
+        args = dict(op='create_project_v2', name='离线项目', groupName='relation', brief=BRIEF, clientProjectId=identifier)
+        first = self.call('alice', **args)
+        self.assertEqual(first['projectId'], identifier)
+        self.assertEqual(self.call('alice', **args), first)
+        self.assertEqual(self.call('alice', **dict(args, name='改名后的重试')), first)
+        with self.assertRaises(PermissionError):
+            self.call('carol', **args)
+        with self.assertRaisesRegex(ValueError, '另一工作组'):
+            self.call('bob', **dict(args, groupName='ocr'))
+        with self.assertRaises(FileExistsError):
+            self.call('alice', **dict(args, clientProjectId='project_' + uuid.uuid4().hex))
+
     def test_first_login_restricts_operations_and_validates_password(self):
         self.state['users']['alice']['mustChangePassword'] = True
         self.assertEqual(self.call('alice', op='password_status'), {'required': True})

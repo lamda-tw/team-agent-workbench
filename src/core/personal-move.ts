@@ -25,13 +25,15 @@ export function applyPersonalMove(store: Store, move: PersonalMove, target: bool
 }
 export async function persistPersonalMove(source: Store, target: Store, move: PersonalMove) {
   await atomicJson(journal(source.root), move);
-  applyPersonalMove(target, move, true); applyPersonalMove(source, move, false);
+  applyPersonalMove(target, move, true);
+  if (source !== target) applyPersonalMove(source, move, false);
+  else if (move.groupId) source.settings.personalGroups = source.settings.personalGroups?.filter(group => group.id !== move.groupId);
   const save = async () => {
     await target.save(); await source.save();
     for (const record of move.journals || []) {
       if (!move.sessions.some(session => session.id === record.sessionId)) throw new Error('迁移日志与会话不一致');
       await atomicJson(path.join(target.root, 'project-journals', record.sessionId + '.json'), record);
-      await fs.rm(path.join(source.root, 'project-journals', record.sessionId + '.json'), { force: true });
+      if (source !== target) await fs.rm(path.join(source.root, 'project-journals', record.sessionId + '.json'), { force: true });
     }
     await fs.rm(journal(source.root), { force: true });
   };
@@ -46,8 +48,8 @@ export async function recoverPersonalMove(sourceRoot: string) {
   try { move = JSON.parse(await fs.readFile(journal(sourceRoot), 'utf8')); }
   catch (error: any) { if (error.code === 'ENOENT') return; throw error; }
   const base = path.dirname(sourceRoot), relative = path.relative(base, move.targetRoot);
-  if (move.version !== 1 || !relative || path.isAbsolute(relative) || relative === '..' || relative.startsWith('..' + path.sep) || path.resolve(move.targetRoot) === path.resolve(sourceRoot)) throw new Error('待恢复迁移的目标目录无效');
-  const source = new Store(sourceRoot), target = new Store(move.targetRoot);
-  await source.init(); await target.init();
+  if (move.version !== 1 || !relative || path.isAbsolute(relative) || relative === '..' || relative.startsWith('..' + path.sep)) throw new Error('待恢复迁移的目标目录无效');
+  const source = new Store(sourceRoot), target = path.resolve(move.targetRoot) === path.resolve(sourceRoot) ? source : new Store(move.targetRoot);
+  await source.init(); if (source !== target) await target.init();
   await persistPersonalMove(source, target, move);
 }

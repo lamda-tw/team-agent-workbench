@@ -77,8 +77,10 @@ let personalRelay: DataContext | undefined;
 function actionContext(action: string, raw: any, owner: BrowserWindow, preferPersonal = false): DataContext {
   const team = contexts.get(owner)!;
   preferPersonal ||= personalWindows.has(owner);
+  if (personalContext && action !== 'project.link' && action !== 'local.move' && (raw?.localOnly || raw?.projectId && personalContext.workbench.projectSync.projects().some(project => project.id === raw.projectId))) return personalContext;
   if (!personalContext || action === 'snapshot' || action === 'workspace.select' || action === 'layout.sidebar' || action.startsWith('account.') || action === 'local.move' || /^(remote\.|group\.|project\.|assignment\.|question\.|rsi\.|content\.)/.test(action)) return team;
   if (action.startsWith('local.')) return personalContext;
+  if (raw?.projectId && personalContext.workbench.projectSync.projects().some(project => project.id === raw.projectId)) return personalContext;
   if (Array.isArray(raw?.ids)) { const localIds = new Set([...personalContext.workbench.store.sessions, ...personalContext.workbench.store.drafts].map(item => item.id)); if (raw.ids.some((id: string) => localIds.has(id)) && !raw.ids.every((id: string) => localIds.has(id))) throw new Error('请分别处理未分项目和团队项目中的记录'); if (raw.ids.every((id: string) => localIds.has(id))) return personalContext; }
   const sessionId = raw?.id || raw?.parentId || raw?.sessionId;
   if (sessionId && !preferPersonal && team.workbench.store.conclusions.some(item => item.id === sessionId)) return team;
@@ -124,7 +126,7 @@ async function dispatch(action: string, raw: unknown, owner: BrowserWindow, pref
   switch (action) {
     case 'workspace.select': {
       const p = z.object({ personal: z.boolean(), projectId: z.string().optional() }).parse(raw);
-      const profile = active!.workbench.remote.profile || active!.workbench.store.settings.workspaceSnapshot?.profile;
+      const profile = active!.workbench.snapshot().connection?.profile || active!.workbench.snapshot().settings.workspaceSnapshot?.profile;
       if (!p.personal && p.projectId && profile) active!.selectedProjectId = connectionProject(profile, p.projectId);
       if (p.personal) { personalWindows.add(owner); active!.selectedProjectId = undefined; } else personalWindows.delete(owner);
       await atomicJson(windowStateFile(active!.slot), { profile, selectedProjectId: active!.selectedProjectId, sidebarProjectHeight: active!.sidebarProjectHeight, sidebarPanes: active!.sidebarPanes });
@@ -133,11 +135,11 @@ async function dispatch(action: string, raw: unknown, owner: BrowserWindow, pref
     case 'local.group.save': { const p = z.object({ id: id.optional(), name: z.string().max(120) }).parse(raw); return workbench.savePersonalGroup(p.name, p.id); }
     case 'local.group.delete': return workbench.dissolvePersonalGroup(z.object({ id }).parse(raw).id);
     case 'local.session.group': { const p = z.object({ id, groupId: id.optional() }).parse(raw); return workbench.assignPersonalGroup(p.id, p.groupId); }
-    case 'local.move': { const p = z.object({ projectId: z.string().min(1), sessionId: id.optional(), groupId: id.optional() }).parse(raw); return personalContext!.workbench.movePersonalTo(workbench, p.projectId, p); }
+    case 'local.move': { const p = z.object({ projectId: z.string().min(1), sessionId: id.optional(), groupId: id.optional() }).parse(raw); return personalContext!.workbench.projectSync.projects().some(project => project.id === p.projectId) ? personalContext!.workbench.moveWithinLocal(p.projectId, p) : personalContext!.workbench.movePersonalTo(workbench, p.projectId, p); }
     case 'snapshot': {
       const snapshot = switchingWindows.has(owner) ? scopeAccountSnapshot({ ...workbench.snapshot(), accountChanging: true }) : workbench.snapshot();
       const local = personalContext?.workbench.snapshot();
-      return { ...snapshot, workspaceReady: true, selectedProjectId: active!.selectedProjectId, projectCreation: active!.projectCreation,
+      return { ...snapshot, projectSync: { ...snapshot.projectSync, ...local?.projectSync }, workspaceReady: true, selectedProjectId: active!.selectedProjectId, projectCreation: active!.projectCreation,
         reusableConnections: reusableProjectConnections(liveConnectionContexts().map(value => value.workbench.remote.profile!)),
         sessions: [...(local?.sessions || []), ...snapshot.sessions], drafts: [...(local?.drafts || []), ...snapshot.drafts],
         inputs: { ...snapshot.inputs, ...local?.inputs }, activeTurns: { ...snapshot.activeTurns, ...local?.activeTurns },
@@ -175,7 +177,8 @@ async function dispatch(action: string, raw: unknown, owner: BrowserWindow, pref
     case 'beta.set': { const p = z.object({ feature: z.enum(['sessionHandoff', 'subsessions', 'codexDesktopSync', 'cursorDesktopSync']), enabled: z.boolean() }).parse(raw); return workbench.setBetaFeature(p.feature, p.enabled); }
     case 'providers.detect': return workbench.detect();
     case 'account.sync': await workbench.accountSync.sync(); return workbench.accountSync.state;
-    case 'account.sync.resolve': { const p = z.object({ key: z.string(), choice: z.enum(['local', 'remote']) }).parse(raw); await workbench.accountSync.resolve(p.key, p.choice); return workbench.accountSync.state; }
+    case 'account.sync.resolve': { const p = z.object({ key: z.string(), token: z.string(), choice: z.enum(['local', 'remote', 'merged', 'both']), fields: z.array(z.object({ path: z.array(z.string()).max(20), text: text })).max(100).optional() }).parse(raw); await workbench.accountSync.resolve(p.key, p.choice, p.token, p.fields); return workbench.accountSync.state; }
+    case 'account.sync.undo': { await workbench.accountSync.undo(z.object({ id: z.string().uuid() }).parse(raw).id); return workbench.accountSync.state; }
     case 'directions.list': return workbench.listDirections();
     case 'directions.save': return workbench.saveDirections(z.object({ directions: z.unknown() }).parse(raw).directions);
     case 'workspace.research': return workbench.researchWorkspace();
@@ -231,7 +234,7 @@ async function dispatch(action: string, raw: unknown, owner: BrowserWindow, pref
       const p = z.object({ host: z.string().min(1), port: z.number().int().min(1).max(65535) }).parse(raw), key = serverIdentityKey(p.host, p.port);
       await serverIdentities.forget(key); await syncServerIdentities(key); return true;
     }
-    case 'project.create': { const p = z.object({ name: z.string().min(1).max(180), groupName: z.string().optional(), brief: projectBriefSchema.optional() }).parse(raw); return workbench.createProject(p.name, p.groupName, p.brief); }
+    case 'project.create': { const p = z.object({ name: z.string().min(1).max(180), groupName: z.string().optional(), brief: projectBriefSchema.optional(), localOnly: z.boolean().optional() }).parse(raw); return workbench.createProject(p.name, p.groupName, p.brief); }
     case 'project.initialize': { const p = z.object({ name: z.string().min(1).max(180), groupName: z.string().min(1).max(80), contextKey: z.string().max(4096), brief: projectBriefSchema }).parse(raw); return workbench.initializeProject(p.name, p.groupName, p.brief, p.contextKey); }
     case 'remote.password': { const p = z.object({ oldPassword: z.string().min(1).max(4096), newPassword: newAccountPasswordSchema }).parse(raw); return workbench.remote.changePassword(p.oldPassword, p.newPassword); }
     case 'remote.disconnect': if (personalRelay === active && personalContext?.workbench.store.sessions.some(session => session.networkRoute === 'management' && (['starting', 'running', 'approval'].includes(session.status) || (personalContext?.workbench.activity.busy || personalContext?.workbench.rsi.busy)))) throw new Error('请先结束使用中央中转的本机会话，再断开连接'); workbench.remote.disconnect(); broadcastConnections(); return true;
@@ -274,8 +277,11 @@ async function dispatch(action: string, raw: unknown, owner: BrowserWindow, pref
     case 'subsession.report.attach': { const p = z.object({ parentId: id, childId: id, reportId: id }).parse(raw); return workbench.attachSubsessionReport(p.parentId, p.childId, p.reportId); }
     case 'session.completion.read': { const p = z.object({ id, completionId: z.string().uuid() }).parse(raw); return workbench.readSessionCompletion(p.id, p.completionId); }
     case 'session.rename': { const p = z.object({ id, title: z.string().trim().min(1).max(120) }).parse(raw); return workbench.renameSession(p.id, p.title); }
-    case 'project.brief': return workbench.remote.projectBrief(workbench.remote.binding(z.object({ projectId: z.string() }).parse(raw).projectId));
-    case 'project.brief.save': { const p = z.object({ projectId: z.string(), brief: projectBriefSchema, revision: z.number().int().nonnegative() }).parse(raw); const value = await workbench.remote.saveProjectBrief(workbench.remote.binding(p.projectId), p.brief, p.revision); await workbench.refreshGroups(); return value; }
+    case 'project.link': { const p = z.object({ projectId: z.string(), groupName: z.string().min(1) }).parse(raw); return personalContext!.workbench.linkLocalProject(active!.workbench, p.projectId, p.groupName); }
+    case 'project.brief': return workbench.projectSync.read(z.object({ projectId: z.string() }).parse(raw).projectId);
+    case 'project.brief.save': { const p = z.object({ projectId: z.string(), brief: projectBriefSchema, revision: z.number().int().nonnegative() }).parse(raw); workbench.assertCanWork(workbench.projectBinding(p.projectId)); return workbench.projectSync.save(p.projectId, p.brief, p.revision); }
+    case 'project.sync.undo': { const p = z.object({ projectId: z.string(), id: z.string().uuid() }).parse(raw); return workbench.projectSync.undo(p.projectId, p.id); }
+    case 'project.sync.resolve': { const p = z.object({ projectId: z.string(), token: z.string(), choice: z.enum(['local', 'remote', 'merged']), fields: z.array(z.object({ path: z.array(z.string()), text })).optional() }).parse(raw); return workbench.projectSync.resolve(p.projectId, p.token, p.choice, p.fields); }
     case 'content.list': return workbench.remote.contentList(workbench.remote.binding(z.object({ projectId: z.string() }).parse(raw).projectId));
     case 'content.history': { const p = z.object({ projectId: z.string(), id: z.string().uuid().optional(), revision: z.number().int().positive().optional() }).parse(raw); return workbench.remote.contentHistory(workbench.remote.binding(p.projectId), p.id, p.revision); }
     case 'conclusion.publish': { const p = z.object({ id: z.string().uuid(), version: z.number().int().positive().optional(), disclose: z.array(resultReferenceSchema).max(30).default([]) }).parse(raw); return workbench.publishConclusion(p.id, p.disclose, p.version); }

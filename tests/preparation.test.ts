@@ -1,3 +1,4 @@
+import { syncedProject } from './fixtures/synced-project';
 import { grantTestWorkspace, offlineProjectId } from './fixtures/offline-workspace';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -148,7 +149,7 @@ test('legacy category drafts on local storage retain upload, immutable packages,
     const profile = (username: string) => memberProfile(admin.snapshot.profile!, admin.snapshot.state!, username, 'local_prepare');
     await wb.store.init(); wb.store.settings.providerPaths.codex = fixture.launcher;
     await wb.configureWorkspace(profile('alice'), 'member-password', root, async () => false);
-    const p = await wb.createProject('整理成果测试'), dir = p.remoteRoot + '/方案说明';
+    const p = await syncedProject(wb, '整理成果测试'), dir = p.remoteRoot + '/方案说明';
     const diskDir = await diskPath(share, dir, true); await fs.mkdir(diskDir); await fs.writeFile(path.join(diskDir, 'README.md'), '此目录接收设计与方案修改说明。');
     const candidates = await discoverDestinations(wb.remote, wb.remote.binding(p.id), () => true);
     const selected = candidates.destinations.find(x => x.path === dir)!; assert(selected); assert.match(selected.description, /设计与方案/);
@@ -271,7 +272,7 @@ test('SFTP candidate discovery skips other-member submissions and trajectories; 
   const wb = new Workbench(root, () => {}, () => {});
   try {
     await wb.store.init(); await wb.configureWorkspace(server.profile('alice'), 'test-password', root, async () => true);
-    const p = await wb.createProject('分类识别'), b = wb.remote.binding(p.id);
+    const p = await syncedProject(wb, '分类识别'), b = wb.remote.binding(p.id);
     server.nodes.set(p.remoteRoot + '/资料', { mode: 0o40550, uid: 0, gid: 100, data: Buffer.alloc(0) });
     server.nodes.set(p.remoteRoot + '/submissions/bob', { mode: 0o40750, uid: 1002, gid: 100, data: Buffer.alloc(0) });
     const found = await discoverDestinations(wb.remote, b, () => true);

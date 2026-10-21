@@ -822,6 +822,7 @@ def handle(root, state, username, request, incoming=None):
         subprocess.run(['chpasswd'], input=login + ':' + new + '\n', text=True, capture_output=True, check=True)
         saved = read_json(safe(root, '.workbench/admin/state.json'))
         saved['users'][username]['mustChangePassword'] = False
+        saved['users'][username]['accessVersion'] = uuid.uuid4().hex
         atom(safe(root, '.workbench/admin/state.json'), saved)
         return True
     if user.get('mustChangePassword'):
@@ -877,7 +878,7 @@ def handle(root, state, username, request, incoming=None):
         if op == 'directions_list':
             return list_directions(root, state)
         return save_directions(root, username, request.get('directions'))
-    if op == 'create_project':
+    if op in ('create_project', 'create_project_v2'):
         group_name = request.get('groupName')
         group = state['groups'].get(group_name)
         if group_name not in user.get('groups', []) or group_name not in user.get('contentAdminGroups', []) or not group or not group.get('workspace') or group.get('deletedAt') or group.get('purgedAt'):
@@ -886,9 +887,26 @@ def handle(root, state, username, request, incoming=None):
         if not name or name.startswith('.') or name.endswith('.') or '/' in name or '\\' in name or len(name.encode()) > 180:
             raise ValueError('项目名不合法')
         brief = brief_value(request['brief']) if request.get('brief') is not None else None
+        identifier = request.get('clientProjectId')
+        if op == 'create_project_v2' and identifier is None:
+            raise ValueError('项目标识不能为空')
+        if identifier is not None:
+            if not isinstance(identifier, str) or not re.fullmatch(r'project_[a-f0-9]{32}', identifier):
+                raise ValueError('项目标识无效')
+            for other_name, other_group in state['groups'].items():
+                if not other_group.get('workspace'):
+                    continue
+                for marker in safe(root, other_group['workspace']).glob('*/.workbench-project.json'):
+                    if marker.is_symlink() or marker.parent.is_symlink():
+                        continue
+                    existing = read_json(marker, {})
+                    if existing.get('id') == identifier:
+                        if other_name != group_name:
+                            raise ValueError('项目已属于另一工作组')
+                        return {'projectId': identifier}
         directory = safe(root, group['workspace'] + '/' + name)
         directory.mkdir(mode=0o700)  # Never adopt/overwrite a pre-existing project.
-        project = {'version': 1, 'id': 'project_' + uuid.uuid4().hex, 'name': name, 'createdBy': username, 'createdAt': now(), 'briefRevision': 1 if brief else 0, 'brief': brief}
+        project = {'version': 1, 'id': identifier or 'project_' + uuid.uuid4().hex, 'name': name, 'createdBy': username, 'createdAt': now(), 'briefRevision': 1 if brief else 0, 'brief': brief}
         try:
             for folder in ('submissions', 'trajectories', 'curated'):
                 public_dir(directory / folder, group['gid'])
