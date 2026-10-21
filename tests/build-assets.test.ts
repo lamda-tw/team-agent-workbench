@@ -9,9 +9,9 @@ import { publishRuntimeAssets } from '../scripts/build-assets.mjs';
 test('rebuilding keeps the old main process paired with its original page, renderer and preload', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'workbench-assets-'));
   try {
-    const original = { 'index.html': '<script src="renderer.js"></script>', 'renderer.js': 'old API', 'renderer.css': 'old styles', 'preload.cjs': 'old bridge', 'egress-worker.cjs': 'old relay worker' };
+    const original = { 'index.html': '<script src="renderer.js"></script>', 'renderer.js': 'old API', 'chunk-mermaid.js': 'old lazy diagram renderer', 'renderer.css': 'old styles', 'preload.cjs': 'old bridge', 'egress-worker.cjs': 'old relay worker' };
     const loadedMainDirectory = await publishRuntimeAssets(root, original);
-    const updated = { ...original, 'renderer.js': 'new API', 'preload.cjs': 'new bridge', 'egress-worker.cjs': 'new relay worker' };
+    const updated = { ...original, 'renderer.js': 'new API', 'chunk-mermaid.js': 'new lazy diagram renderer', 'preload.cjs': 'new bridge', 'egress-worker.cjs': 'new relay worker' };
     const nextMainDirectory = await publishRuntimeAssets(root, updated);
     assert.notEqual(loadedMainDirectory, nextMainDirectory);
     for (const [file, content] of Object.entries(original)) assert.equal(await fs.readFile(path.join(root, loadedMainDirectory, file), 'utf8'), content);

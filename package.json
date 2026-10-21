@@ -1,6 +1,6 @@
 {
   "name": "team-agent-workbench",
-  "version": "2.2.8",
+  "version": "2.2.9",
   "private": true,
   "description": "Windows team workspace for local Codex, Cursor and Claude Code agents with Linux SFTP sharing",
   "main": "dist/user/main.cjs",
@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit",
     "test": "node scripts/test-background.mjs",
     "test:background": "node scripts/test-background.mjs",
+    "test:markdown-diagrams": "node scripts/markdown-diagrams-smoke.mjs",
     "test:provider-paths": "tsx scripts/check-windows-provider-paths.ts",
     "test:handbook-labels": "python scripts/verify-handbook-labels.py",
     "test:handbook-ui": "node scripts/verify-handbook-ui-scenarios.mjs",
@@ -61,6 +62,7 @@
   "dependencies": {
     "archiver": "^8.0.0",
     "lucide-react": "^1.46.0",
+    "mermaid": "12.2.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "react-markdown": "^10.1.0",

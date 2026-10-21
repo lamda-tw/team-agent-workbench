@@ -203,7 +203,11 @@ function Invoke-NpmStep([string]$Step, [string[]]$Arguments) {
   $code = Invoke-StartupProcess -File $npm -Arguments $Arguments -Directory $repoRoot -Output $stdoutLog -Errors $script:stderrLog -TimeoutSeconds $limit -TimeoutMessage ($stage + '超时，请检查详细日志后重试。') -Pulse { Update-StartupProgress }
   if ($code -ne 0) {
     if ($Step -eq 'install') {
-      throw '依赖安装失败。请检查本机网络或 npm 代理配置，然后重新双击启动入口。'
+      $details = Get-Content -LiteralPath $script:stderrLog -Raw -Encoding UTF8 -ErrorAction SilentlyContinue
+      if ($details -match '\b(EPERM|EBUSY|EACCES)\b') {
+        throw '依赖安装失败：文件被其他进程占用或没有写入权限。请保留正在运行的任务，并根据详细日志处理。'
+      }
+      throw '依赖安装失败。请根据详细日志检查下载、磁盘空间或文件权限，然后重新双击启动入口。'
     }
     throw '当前代码构建失败，未启动旧版本。请将启动日志交给项目维护者处理。'
   }
@@ -369,7 +373,10 @@ try {
     }
     # Leave a retry marker if npm fails or startup is cancelled partway through.
     Set-Content -LiteralPath $dependencyStamp -Encoding ASCII -Value '{"pending":true}'
-    Invoke-NpmStep 'install' @('ci', '--include=dev', '--include=optional', '--no-audit', '--no-fund')
+    # npm install honors the existing lockfile while preserving matching packages.
+    # npm ci clears node_modules first and can unlink DLLs used by another window
+    # or a detached Codex backend, damaging an otherwise usable installation.
+    Invoke-NpmStep 'install' @('install', '--include=dev', '--include=optional', '--no-audit', '--no-fund')
   }
   Set-Content -LiteralPath $dependencyStamp -Encoding ASCII -Value $dependencyCheck.stamp
 

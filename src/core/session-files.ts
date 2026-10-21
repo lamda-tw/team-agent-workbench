@@ -46,7 +46,7 @@ export async function checkedSessionFile(session: AgentSession, input: string) {
 
 export async function previewSessionFile(session: AgentSession, input: string): Promise<FilePreview> {
   const { target, stat } = await checkedSessionFile(session, input), name = path.basename(target), extension = path.extname(target).toLowerCase();
-  const mime: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp' };
+  const mime: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml' };
   if (mime[extension] && stat.size <= 5 * 1024 * 1024) return { name, path: target, type: 'image', size: stat.size, truncated: false, content: `data:${mime[extension]};base64,` + (await fs.readFile(target)).toString('base64') };
   const textFile = /\.(md|txt|log|csv|tsv|json|jsonl|xml|yaml|yml|toml|ini|cfg|conf|py|js|mjs|cjs|ts|tsx|jsx|html|css|scss|sql|sh|ps1|bat|cmd|c|h|cpp|hpp|rs|go|java|r|vue|svelte|svg)$/i.test(extension);
   if (!textFile) return { name, path: target, type: 'binary', size: stat.size, truncated: false, content: '' };

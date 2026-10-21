@@ -11,6 +11,16 @@ const root = path.resolve(import.meta.dirname, '..');
 const exec = promisify(execFile);
 const windows = { skip: process.platform !== 'win32' };
 
+async function unlinkRuntime(file: string) {
+  for (let attempt = 0; ; attempt++) {
+    try { await fs.unlink(file); return; }
+    catch (error: any) {
+      if (!['EBUSY', 'EPERM'].includes(error.code) || attempt === 20) throw error;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+  }
+}
+
 test('only user and admin launchers are exposed and both use the unified hidden startup flow', async () => {
   const entries = (await fs.readdir(root, { withFileTypes: true })).filter(entry => entry.isFile() && /\.(cmd|bat|ps1)$/i.test(entry.name)).map(entry => entry.name).sort();
   assert.deepEqual(entries, ['start-admin-dev.cmd', 'start-user-dev.cmd']);
@@ -67,9 +77,11 @@ const root = process.cwd(), step = process.argv[2];
 if (step === '--version') { console.log('11.0.0'); process.exit(0); }
 const event = value => fs.appendFileSync(path.join(root, 'events.jsonl'), JSON.stringify(value) + '\\n');
 event({ step, args: process.argv.slice(2), cwd: root });
-if (process.env.LAUNCHER_FAIL_STEP === step) process.exit(17);
-if (step === 'ci') {
-  fs.rmSync(path.join(root, 'node_modules'), { recursive: true, force: true });
+if (process.env.LAUNCHER_FAIL_STEP === step) {
+  if (process.env.LAUNCHER_INSTALL_ERROR) console.error(process.env.LAUNCHER_INSTALL_ERROR);
+  process.exit(17);
+}
+if (step === 'install') {
   for (const name of ['electron/dist', 'esbuild', 'ssh2']) fs.mkdirSync(path.join(root, 'node_modules', name), { recursive: true });
   const lock = JSON.parse(fs.readFileSync(path.join(root, 'package-lock.json')));
   for (const name of ['esbuild', 'ssh2']) fs.writeFileSync(path.join(root, 'node_modules', name, 'package.json'), JSON.stringify({ version: lock.packages['node_modules/' + name].version }));
@@ -119,7 +131,7 @@ test('first launch installs locked dependencies; both editions start from paths 
   await f.run('user'); await f.launched(1);
   await f.run('admin'); await f.launched(2);
   const events = await f.events();
-  assert.equal(events.filter(e => e.step === 'ci').length, 1);
+  assert.equal(events.filter(e => e.step === 'install').length, 1);
   assert.equal(events.filter(e => e.step === 'electron-install').length, 1);
   assert.equal(events.filter(e => e.step === 'run').length, 2);
   assert.deepEqual(events.filter(e => e.step === 'launch').map(e => e.edition), ['user', 'admin']);
@@ -130,7 +142,7 @@ test('first launch installs locked dependencies; both editions start from paths 
   manifest.description = 'metadata update must reuse installed dependencies';
   await fs.writeFile(path.join(f.dir, 'package.json'), JSON.stringify(manifest));
   await f.run('user'); await f.launched(3);
-  assert.equal((await f.events()).filter(e => e.step === 'ci').length, 1);
+  assert.equal((await f.events()).filter(e => e.step === 'install').length, 1);
   const lock = JSON.parse(await fs.readFile(path.join(f.dir, 'package-lock.json'), 'utf8'));
   manifest.dependencies.ssh2 = '1.17.1';
   lock.packages[''].dependencies.ssh2 = '1.17.1';
@@ -138,19 +150,25 @@ test('first launch installs locked dependencies; both editions start from paths 
   await fs.writeFile(path.join(f.dir, 'package.json'), JSON.stringify(manifest));
   await fs.writeFile(path.join(f.dir, 'package-lock.json'), JSON.stringify(lock));
   await f.run('user'); await f.launched(4);
-  assert.equal((await f.events()).filter(e => e.step === 'ci').length, 2, 'lockfile update must prepare dependencies again');
-  assert.equal((await f.events()).filter(e => e.step === 'electron-install').length, 1, 'the previous Electron runtime survives npm ci in a separate cache');
+  assert.equal((await f.events()).filter(e => e.step === 'install').length, 2, 'lockfile update must prepare dependencies again');
+  assert.equal((await f.events()).filter(e => e.step === 'electron-install').length, 1, 'the matching Electron runtime is preserved during incremental installation');
 });
 
 test('failed install is retried and failed build never launches an older app', windows, async t => {
   const f = await launcherFixture(t);
-  await assert.rejects(f.run('user', { LAUNCHER_FAIL_STEP: 'ci' }), /依赖安装失败/);
+  await assert.rejects(f.run('user', { LAUNCHER_FAIL_STEP: 'install' }), /依赖安装失败/);
   assert.equal((await f.events()).filter(e => e.step === 'launch').length, 0);
   await f.run('user'); await f.launched(1);
   await assert.rejects(f.run('user', { LAUNCHER_FAIL_STEP: 'run' }), /当前代码构建失败/);
   assert.equal((await f.events()).filter(e => e.step === 'launch').length, 1);
   await f.run('admin'); await f.launched(2);
-  assert.equal((await f.events()).filter(e => e.step === 'ci').length, 2);
+  assert.equal((await f.events()).filter(e => e.step === 'install').length, 2);
+});
+
+test('an occupied dependency reports the file access failure instead of suggesting network changes', windows, async t => {
+  const f = await launcherFixture(t);
+  await assert.rejects(f.run('user', { LAUNCHER_FAIL_STEP: 'install', LAUNCHER_INSTALL_ERROR: 'npm error code EPERM; unlink electron/dist/dxcompiler.dll' }), /文件被其他进程占用或没有写入权限/);
+  assert.equal((await f.events()).filter(e => e.step === 'launch').length, 0);
 });
 
 test('concurrent user and admin startup shares one dependency install', windows, async t => {
@@ -159,7 +177,7 @@ test('concurrent user and admin startup shares one dependency install', windows,
   for (const result of results) if (result.status === 'rejected') throw result.reason;
   await f.launched(2);
   const events = await f.events();
-  assert.equal(events.filter(e => e.step === 'ci').length, 1);
+  assert.equal(events.filter(e => e.step === 'install').length, 1);
   assert.equal(events.filter(e => e.step === 'electron-install').length, 1);
   assert.equal(events.filter(e => e.step === 'run').length, 2);
   assert.deepEqual(events.filter(e => e.step === 'launch').map(e => e.edition).sort(), ['admin', 'user']);
@@ -168,10 +186,10 @@ test('concurrent user and admin startup shares one dependency install', windows,
 test('Electron download failure retries only the binary and never launches an incomplete app', windows, async t => {
   const f = await launcherFixture(t);
   await assert.rejects(f.run('user', { LAUNCHER_FAIL_STEP: 'electron' }), /Electron 运行文件准备失败/);
-  assert.deepEqual((await f.events()).map(event => event.step), ['ci', 'electron-install']);
+  assert.deepEqual((await f.events()).map(event => event.step), ['install', 'electron-install']);
   await f.run('admin'); await f.launched(1);
   const events = await f.events();
-  assert.equal(events.filter(event => event.step === 'ci').length, 1);
+  assert.equal(events.filter(event => event.step === 'install').length, 1);
   assert.equal(events.filter(event => event.step === 'electron-install').length, 2);
   assert.equal(events.filter(event => event.step === 'run').length, 1);
 });
@@ -180,20 +198,14 @@ test('missing Electron executable, metadata and stale version restore from cache
   const f = await launcherFixture(t);
   await f.run('user'); await f.launched(1);
   // Windows scanners can retain the executable briefly even after the child has exited.
-  for (let attempt = 0; ; attempt++) {
-    try { await fs.unlink(path.join(f.dir, 'node_modules/electron/dist/electron.exe')); break; }
-    catch (error: any) {
-      if (!['EBUSY', 'EPERM'].includes(error.code) || attempt === 20) throw error;
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
-  }
+  await unlinkRuntime(path.join(f.dir, 'node_modules/electron/dist/electron.exe'));
   await f.run('admin'); await f.launched(2);
   await fs.unlink(path.join(f.dir, 'node_modules/electron/path.txt'));
   await f.run('user'); await f.launched(3);
   await fs.writeFile(path.join(f.dir, 'node_modules/electron/dist/version'), '43.0.0');
   await f.run('admin'); await f.launched(4);
   const events = await f.events();
-  assert.equal(events.filter(event => event.step === 'ci').length, 1);
+  assert.equal(events.filter(event => event.step === 'install').length, 1);
   assert.equal(events.filter(event => event.step === 'electron-install').length, 1);
 });
 
@@ -201,19 +213,19 @@ test('an incomplete Electron cache falls back to the pinned installer', windows,
   const f = await launcherFixture(t);
   await f.run('user'); await f.launched(1);
   await fs.unlink(path.join(f.dir, '.electron-cache', `v44.3.0-${process.platform}-${process.arch}`, 'dist/electron.exe'));
-  await fs.unlink(path.join(f.dir, 'node_modules/electron/dist/electron.exe'));
+  await unlinkRuntime(path.join(f.dir, 'node_modules/electron/dist/electron.exe'));
   await f.run('admin'); await f.launched(2);
   const events = await f.events();
-  assert.equal(events.filter(event => event.step === 'ci').length, 1);
+  assert.equal(events.filter(event => event.step === 'install').length, 1);
   assert.equal(events.filter(event => event.step === 'electron-install').length, 2);
 });
 
 test('a successful Electron installer exit without runtime files still blocks build and launch', windows, async t => {
   const f = await launcherFixture(t);
   await assert.rejects(f.run('user', { LAUNCHER_EMPTY_BINARY: '1' }), /Electron 运行文件准备失败/);
-  assert.deepEqual((await f.events()).map(event => event.step), ['ci', 'electron-install']);
+  assert.deepEqual((await f.events()).map(event => event.step), ['install', 'electron-install']);
   await f.run('user'); await f.launched(1);
-  assert.equal((await f.events()).filter(event => event.step === 'ci').length, 1);
+  assert.equal((await f.events()).filter(event => event.step === 'install').length, 1);
 });
 
 test('missing Node.js gives an actionable error before installation or build', windows, async t => {
@@ -255,7 +267,7 @@ test('broken portable Node and broken npm fall through to a usable portable runt
   const log = await fs.readFile(path.join(f.dir, '.test-data/launcher', files.find(name => /user-.*-\d+\.log$/.test(name))!), 'utf8');
   assert.match(log, /Skipped: .*24\.9\.0/); assert.match(log, /Skipped: .*24\.8\.0/);
   assert.match(log, /Node: .*24\.7\.0/);
-  assert.equal((await f.events()).filter(event => event.step === 'ci').length, 1);
+  assert.equal((await f.events()).filter(event => event.step === 'install').length, 1);
 });
 
 test('explicit offline Node directory works without system or project runtimes', windows, async t => {

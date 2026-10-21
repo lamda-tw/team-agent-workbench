@@ -96,6 +96,32 @@ test('legacy/manual installs with outdated resolved versions or unsynchronized m
   assert.equal(f.check().install, true);
 });
 
+test('removing unused dependencies reuses the verified remaining tree without clearing a live runtime', async t => {
+  const f = await fixture(t);
+  await f.record();
+  delete f.manifest.dependencies.app;
+  delete f.lock.packages[''].dependencies.app;
+  delete f.lock.packages['node_modules/app'];
+  delete f.lock.packages['node_modules/nested'];
+  await f.source();
+  assert.equal(f.check().install, false, 'unused installed packages do not require deleting the whole tree');
+  assert.match(f.check().reason, /已核对/);
+  await f.record();
+  assert.equal(f.check().install, false);
+});
+
+test('a completed manual update is adopted even when a previous launcher stamp describes the old lock', async t => {
+  const f = await fixture(t);
+  await f.record();
+  f.lock.packages['node_modules/nested'].version = '2.1.0';
+  await f.source();
+  assert.equal(f.check().install, true);
+  f.installed['node_modules/nested'] = structuredClone(f.lock.packages['node_modules/nested']);
+  await f.write('node_modules/nested/package.json', { version: '2.1.0' });
+  await f.write('node_modules/.package-lock.json', { packages: f.installed });
+  assert.equal(f.check().install, false);
+});
+
 test('missing packages are repaired even with a matching stamp, including the optional esbuild binary package', async t => {
   for (const location of ['app', 'nested', '@esbuild/win32-x64']) {
     const f = await fixture(t);

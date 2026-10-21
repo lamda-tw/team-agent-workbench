@@ -17,7 +17,7 @@ async function copyDependency(name, dest, sourceRequire = require, seen = new Se
 for (const edition of ['user', 'admin']) {
   const out = path.join(outputRoot, edition); await mkdir(out, { recursive: true });
   const preload = await build({ entryPoints: [edition === 'user' ? 'src/main/preload.ts' : 'src/admin/preload.ts'], outfile: out + '/preload.cjs', write: false, bundle: true, platform: 'node', format: 'cjs', external: ['electron'], target: 'node22' });
-  const renderer = await build({ entryPoints: [edition === 'user' ? 'src/renderer/main.tsx' : 'src/admin/renderer.tsx'], outfile: out + '/renderer.js', write: false, bundle: true, minify: true, platform: 'browser', format: 'esm', target: 'chrome130', loader: { '.css': 'css' } });
+  const renderer = await build({ entryPoints: [edition === 'user' ? 'src/renderer/main.tsx' : 'src/admin/renderer.tsx'], outdir: out, entryNames: 'renderer', chunkNames: 'chunk-[hash]', splitting: true, write: false, bundle: true, minify: true, platform: 'browser', format: 'esm', target: 'chrome130', loader: { '.css': 'css' } });
   const files = Object.fromEntries([...preload.outputFiles, ...renderer.outputFiles].map(file => [path.basename(file.path), file.contents]));
   files['index.html'] = await readFile('src/renderer/index.html');
   if (edition === 'user') files['project-journal-worker.cjs'] = await readFile('src/core/project-journal-worker.cjs');

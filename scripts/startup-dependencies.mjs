@@ -33,7 +33,8 @@ export function checkDependencies(root, runtime = { major: Number(process.versio
     // do not change the installed dependency tree. Package entries still do.
     packages,
   };
-  const expected = { version: 2, fingerprint: createHash('sha256').update(canonical(plan)).digest('hex'), ...runtime };
+  const installFingerprint = createHash('sha256').update(canonical({ scripts: plan.scripts, ...pick(manifest, ['overrides', 'workspaces']) })).digest('hex');
+  const expected = { version: 2, fingerprint: createHash('sha256').update(canonical(plan)).digest('hex'), installFingerprint, ...runtime };
   const result = (install, reason) => ({ install, reason, stamp: JSON.stringify(expected) });
   const stampFile = path.join(root, '.test-data/launcher/dependencies.txt');
   let stampText = '';
@@ -45,7 +46,8 @@ export function checkDependencies(root, runtime = { major: Number(process.versio
   const previousMajor = previous?.major ?? (legacy ? Number(legacy[1]) : undefined);
   if (previousMajor !== undefined && previousMajor !== runtime.major) return result(true, `Node.js 主版本从 ${previousMajor} 变为 ${runtime.major}，需要重新准备依赖。`);
   if (previous?.platform && (previous.platform !== runtime.platform || previous.arch !== runtime.arch)) return result(true, '操作系统或处理器架构已变化。');
-  if (previous?.version === 2 && previous.fingerprint !== expected.fingerprint) return result(true, '项目依赖清单、锁定的依赖或安装脚本已变化。');
+  if (previous?.version === 2 && previous.installFingerprint && previous.installFingerprint !== installFingerprint) return result(true, '项目安装脚本或依赖覆盖配置已变化。');
+  if (previous?.version === 2 && previous.fingerprint !== expected.fingerprint && !previous.installFingerprint && (Object.keys(plan.scripts).length || manifest.overrides || manifest.workspaces)) return result(true, '需要确认项目安装脚本或依赖覆盖配置已执行。');
   for (const field of ['dependencies', 'devDependencies', 'optionalDependencies']) {
     if (canonical(manifest[field] || {}) !== canonical(lock.packages[''][field] || {})) return result(true, '依赖清单与锁文件不一致，请获取同一版本的完整源码。');
   }
@@ -70,7 +72,10 @@ export function checkDependencies(root, runtime = { major: Number(process.versio
   // Root lifecycle/override changes cannot be reconstructed from npm's hidden
   // lockfile when adopting a legacy/manual install. Be conservative if present.
   if (previous?.version !== 2 && (Object.keys(plan.scripts).length || manifest.overrides || manifest.workspaces)) return result(true, '需要确认项目安装脚本或依赖覆盖配置已执行。');
-  return result(false, previous?.version === 2 ? '已安装的依赖与当前版本一致，直接复用。' : '已核对现有 npm 依赖，复用并更新启动记录。');
+  // A dependency removal or an already-completed manual install may change the
+  // old stamp without requiring another install. The entire required tree above
+  // must match the current lockfile before it can be adopted.
+  return result(false, previous?.fingerprint === expected.fingerprint ? '已安装的依赖与当前版本一致，直接复用。' : '已核对现有 npm 依赖，复用并更新启动记录。');
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
