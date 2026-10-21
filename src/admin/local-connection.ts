@@ -37,6 +37,7 @@ export class LocalAdminConnection {
     this.changed(); return saved;
   }
   async operation(raw: AdminOperation) {
+    if (raw.op === 'user_import_probe' || raw.op === 'user_import' || (raw.op === 'members_apply' && raw.command.op === 'user_import')) throw new Error('接入已有 Linux 账号仅适用于远端中央节点');
     if (raw.op === 'egress_jump' || raw.op === 'egress_jump_probe') throw new Error('本地共享目录不支持中转，请连接 Linux 共享服务器');
     if (raw.op === "environment_prepare") throw new Error("本地模拟共享区无需安装服务器组件");
     let request = adminOperationSchema.parse(raw);

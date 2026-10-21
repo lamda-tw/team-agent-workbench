@@ -26,9 +26,10 @@ export function ProviderAuthPanel({ provider, auth, cwd, autoCheck = true, stale
     return () => clearTimeout(timer);
   }, [provider, cwd, networkRoute, autoCheck, stale]);
   return <section className={'provider-auth auth-' + current.status} aria-label={name + ' 登录状态'}>
-    <div className="row"><strong>{name} 账号</strong><span className={'badge ' + (canUseProvider(current) ? 'done' : current.status === 'error' || current.status === 'unauthenticated' ? 'error' : 'running')}>{authLabels[current.status]}</span></div>
-    {!['authenticated', 'unknown', 'checking'].includes(current.status) && <p>{current.detail}</p>}
-    {canUseProvider(current) && <p className="account-identity"><strong>{current.identity || 'CLI 未提供账号名称'}</strong>{current.plan && <span className="badge">{current.plan}</span>}</p>}
+    <div className="row"><strong>{name} 账号</strong><span className={'badge ' + (canUseProvider(current) ? 'done' : current.status === 'error' || current.status === 'unauthenticated' ? 'error' : 'running')}>{current.verifiedLocally && current.status === 'authenticated' ? '已保存登录' : authLabels[current.status]}</span></div>
+    {(current.verifiedLocally || !['authenticated', 'unknown', 'checking'].includes(current.status)) && <p>{current.detail}</p>}
+    {current.connectionIssue && <p className="inline-error" role="status">服务连接暂不可用：{current.connectionIssue}</p>}
+    {canUseProvider(current) && (current.identity || !current.verifiedLocally) && <p className="account-identity"><strong>{current.identity || 'CLI 未提供账号名称'}</strong>{current.plan && <span className="badge">{current.plan}</span>}</p>}
     {error && <div className="inline-error" role="alert">{error}</div>}
     <div className="row auth-actions">
       {current.status !== 'logging-in' && <button className="secondary compact" disabled={busy || !!canUseProvider(current)} title={canUseProvider(current) ? '已沿用当前账号，无需重复登录' : undefined} onClick={() => void action('provider.login')}><ExternalLink size={14}/>登录个人账号</button>}

@@ -4,6 +4,8 @@ import importlib.util
 import json
 import pathlib
 import tempfile
+import types
+import sys
 import unittest
 import uuid
 from unittest.mock import patch
@@ -131,6 +133,116 @@ class MemberProtocolTests(unittest.TestCase):
         prepared = admin.prepare_member_operation(state, copy.deepcopy(state), self.request(command))
         self.assertEqual(prepared['groups'], ['one', 'two'])
         self.assertEqual(prepared['op'], 'user_groups')
+
+    def test_import_existing_team_account_preserves_password_and_os_roles(self):
+        state = admin.load(self.root)
+        state['teamId'] = '322ec820'
+        state['loginGroup'] = 'wb_322ec820_members'
+        group = 'wb_322ec820_project'
+        state['groups'] = {group: dict(name=group, label='项目甲', workspace='/projects/项目甲', adminGroup=group + '_admin')}
+        old_id = str(uuid.uuid4())
+        state['operations'] = {'user_create:taowen': dict(id='user_create:taowen', op='user_create', request={'username': 'taowen'}, status='failed', completed=[], error='Linux 账号已存在，工具不会接管已有系统账号'), 'member:' + old_id: dict(id='member:' + old_id, op='user_create', request={'username': 'taowen', 'requestId': old_id}, status='failed', completed=[], error='Linux 账号已存在，工具不会接管已有系统账号')}
+        state['memberRequests'] = {old_id: dict(signature='old', status='failed')}
+        self.write(state)
+        account = types.SimpleNamespace(pw_uid=1000, pw_gid=1000, pw_gecos='workbench-322ec820-taowen', pw_dir='/', pw_shell='/usr/sbin/nologin')
+        groups = [types.SimpleNamespace(gr_name='wb_322ec820_members', gr_gid=1000, gr_mem=[]), types.SimpleNamespace(gr_name=group, gr_gid=1001, gr_mem=['taowen']), types.SimpleNamespace(gr_name=group + '_admin', gr_gid=1002, gr_mem=['taowen'])]
+        with patch.dict(sys.modules, {'pwd': types.SimpleNamespace(getpwnam=lambda name: account), 'grp': types.SimpleNamespace(getgrnam=lambda name: groups[0], getgrall=lambda: groups)}), patch.object(admin, 'verify_existing_password') as verify:
+            inspected = admin.existing_member(self.root, state, 'taowen')
+            self.assertEqual(inspected['groups'], [group])
+            self.assertEqual(inspected['contentAdminGroups'], [group])
+            command = dict(op='user_import', username='taowen', name='陶文', password='original-secret', expectedIdentity=inspected['identity'])
+            request = dict(op='members_apply', root='/srv/teamspace', teamId='322ec820', requestId=str(uuid.uuid4()), command=command)
+            admin.member_protocol(self.root, request)
+            verify.assert_called_with('taowen', 'original-secret')
+            final = admin.load(self.root)
+            self.assertEqual(final['users']['taowen']['uid'], 1000)
+            self.assertEqual(final['users']['taowen']['marker'], account.pw_gecos)
+            self.assertEqual(final['users']['taowen']['contentAdminGroups'], [group])
+            self.assertEqual(final['operations']['user_create:taowen']['status'], 'done')
+            self.assertEqual(final['operations']['member:' + old_id]['status'], 'done')
+            self.assertEqual(final['memberRequests'][old_id]['status'], 'done')
+            self.assertNotIn('original-secret', json.dumps(final))
+            self.assertNotIn('original-secret', (self.root / '.workbench/admin/audit.jsonl').read_text())
+            synced = admin.member_protocol(self.root, dict(op='members_sync', requestIds=[old_id]))
+            self.assertEqual(synced['users']['taowen']['groups'], [group])
+            self.assertEqual(synced['users']['taowen']['contentAdminGroups'], [group])
+            self.assertEqual(synced['receipts'][old_id], 'done')
+            self.run.assert_not_called()
+
+    def test_import_rejects_wrong_team_identity_and_wrong_password_without_registration(self):
+        state = admin.load(self.root)
+        state['loginGroup'] = 'wb_team-a_members'
+        self.write(state)
+        account = types.SimpleNamespace(pw_uid=1000, pw_gid=1000, pw_gecos='workbench-other-taowen', pw_dir='/', pw_shell='/usr/sbin/nologin')
+        login_group = types.SimpleNamespace(gr_name='wb_team-a_members', gr_gid=1000, gr_mem=[])
+        with patch.dict(sys.modules, {'pwd': types.SimpleNamespace(getpwnam=lambda name: account), 'grp': types.SimpleNamespace(getgrnam=lambda name: login_group, getgrall=lambda: [login_group])}):
+            with self.assertRaisesRegex(ValueError, '不属于当前团队'):
+                admin.existing_member(self.root, state, 'taowen')
+            account.pw_gecos = 'workbench-team-a-taowen'
+            inspected = admin.existing_member(self.root, state, 'taowen')
+            command = dict(op='user_import', username='taowen', name='陶文', password='wrong', expectedIdentity=inspected['identity'])
+            request = self.request(command)
+            with patch.object(admin, 'verify_existing_password', side_effect=ValueError('原密码不正确')):
+                with self.assertRaisesRegex(ValueError, '原密码不正确'):
+                    admin.member_protocol(self.root, request)
+            self.assertNotIn('taowen', admin.load(self.root)['users'])
+            self.assertNotIn('memberRequests', admin.load(self.root))
+            self.assertNotIn('operations', admin.load(self.root))
+            self.run.assert_not_called()
+
+    def test_import_refuses_unregistered_linux_groups(self):
+        state = admin.load(self.root)
+        state['loginGroup'] = 'wb_team-a_members'
+        self.write(state)
+        account = types.SimpleNamespace(pw_uid=1000, pw_gid=1000, pw_gecos='workbench-team-a-taowen', pw_dir='/', pw_shell='/usr/sbin/nologin')
+        login_group = types.SimpleNamespace(gr_name='wb_team-a_members', gr_gid=1000, gr_mem=[])
+        extra_group = types.SimpleNamespace(gr_name='sudo', gr_gid=27, gr_mem=['taowen'])
+        with patch.dict(sys.modules, {'pwd': types.SimpleNamespace(getpwnam=lambda name: account), 'grp': types.SimpleNamespace(getgrnam=lambda name: login_group, getgrall=lambda: [login_group, extra_group])}), patch.object(admin, 'verify_existing_password') as verify:
+            inspected = admin.existing_member(self.root, state, 'taowen')
+            self.assertEqual(inspected['unknownGroups'], ['sudo'])
+            command = dict(op='user_import', username='taowen', name='陶文', password='original-secret', expectedIdentity=inspected['identity'])
+            with self.assertRaisesRegex(ValueError, '未登记或已停用'):
+                admin.member_protocol(self.root, self.request(command))
+            verify.assert_not_called()
+            self.assertNotIn('taowen', admin.load(self.root)['users'])
+
+    def test_import_verifies_original_shadow_password_without_reset(self):
+        class FakeCrypt:
+            argtypes = None
+            restype = None
+
+            def __call__(self, password, salt):
+                return salt if password == b'correct' else b'wrong-hash'
+
+        with patch.object(pathlib.Path, 'read_text', return_value='taowen:$6$sample-hash:20000:0:99999:7:::\n'), patch('ctypes.util.find_library', return_value='libcrypt.so.1'), patch('ctypes.CDLL', return_value=types.SimpleNamespace(crypt=FakeCrypt())):
+            admin.verify_existing_password('taowen', 'correct')
+            with self.assertRaisesRegex(ValueError, '原密码不正确'):
+                admin.verify_existing_password('taowen', 'incorrect')
+
+    def test_import_recovers_after_registry_write_without_recreating_linux_user(self):
+        state = admin.load(self.root)
+        state['loginGroup'] = 'wb_team-a_members'
+        self.write(state)
+        account = types.SimpleNamespace(pw_uid=1000, pw_gid=1000, pw_gecos='workbench-team-a-taowen', pw_dir='/', pw_shell='/usr/sbin/nologin')
+        login_group = types.SimpleNamespace(gr_name='wb_team-a_members', gr_gid=1000, gr_mem=[])
+        with patch.dict(sys.modules, {'pwd': types.SimpleNamespace(getpwnam=lambda name: account), 'grp': types.SimpleNamespace(getgrnam=lambda name: login_group, getgrall=lambda: [login_group])}), patch.object(admin, 'verify_existing_password'):
+            inspected = admin.existing_member(self.root, state, 'taowen')
+            command = dict(op='user_import', username='taowen', name='陶文', password='original-secret', expectedIdentity=inspected['identity'])
+            request = self.request(command)
+            with patch.object(admin, 'write_roles', side_effect=[None, RuntimeError('publish failed'), None]):
+                with self.assertRaisesRegex(RuntimeError, 'publish failed'):
+                    admin.member_protocol(self.root, request)
+            partial = admin.load(self.root)
+            job_id = 'member:' + request['requestId']
+            self.assertNotIn('taowen', partial['users'])
+            self.assertEqual(partial['operations'][job_id]['status'], 'failed')
+            recovery = self.request(dict(op='recover', username='taowen', operationId=job_id, expectedRevision='absent', password='original-secret'))
+            admin.member_protocol(self.root, recovery)
+            final = admin.load(self.root)
+            self.assertEqual(final['operations'][job_id]['status'], 'done')
+            self.assertEqual(final['memberRequests'][request['requestId']]['status'], 'done')
+            self.assertEqual(final['users']['taowen']['uid'], 1000)
+            self.run.assert_not_called()
 
 
 if __name__ == '__main__':

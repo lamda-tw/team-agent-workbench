@@ -188,7 +188,7 @@
         "show_caption": false
       },
       {
-        "button": "保存新版本",
+        "button": "保存项目设置",
         "text": "保存后生成新的项目资料版本，成员刷新后可查看。",
         "show_caption": false
       }
@@ -401,19 +401,9 @@
     "purpose": "核对参考内容后继续提问",
     "callouts": [
       {
-        "selector": ".session-materials-content",
-        "text": "这里列出本轮可用的 AI 参考内容，核对刚加入的成果。",
-        "show_caption": false
-      },
-      {
-        "field": "任务输入",
-        "text": "输入需要结合这份成果完成的工作。",
-        "show_caption": false
-      },
-      {
-        "button": "发送任务",
-        "text": "发送后模型使用本轮选中的参考内容。",
-        "show_caption": false
+        "selector": ".modal .modal-body",
+        "text": "在更多会话操作中打开 AI 参考内容，核对已带入的资料；关闭窗口后继续输入并发送。",
+        "show_caption": true
       }
     ]
   },
@@ -663,7 +653,7 @@
     "purpose": "Alice 创建项目并说明交付要求",
     "callouts": [
       {
-        "field": "引导项目名称",
+        "field": "项目名称",
         "text": "本例填写“票据 OCR 优化”。",
         "show_caption": false
       },
@@ -673,9 +663,10 @@
         "show_caption": false
       },
       {
-        "button": "保存并创建项目",
+        "button": "创建项目",
         "text": "保存后，组内成员刷新即可看到项目和共同资料。",
-        "show_caption": false
+        "show_caption": false,
+        "scope": ".modal"
       }
     ]
   },
@@ -1286,7 +1277,7 @@
     "purpose": "由自己的会话自动回答",
     "callouts": [
       {
-        "selector": ".session-toolbar h2",
+        "selector": ".session-title-row",
         "text": "当前会话用于回答 Bob 的问题。",
         "show_caption": true
       },
@@ -1385,6 +1376,100 @@
       {
         "selector": ".result-card.is-expanded",
         "text": "本例同时选择了存库，因此个人库中也有一份副本。",
+        "show_caption": true
+      }
+    ]
+  },
+  "case-project-sync-create.png": {
+    "kind": "instruction",
+    "purpose": "项目先保存在本机，可直接开始工作。",
+    "callouts": [
+      {
+        "text": "项目先保存在本机，可直接开始工作。",
+        "show_caption": true,
+        "field": "项目名称"
+      },
+      {
+        "button": "创建项目",
+        "text": "确认项目名称和说明后创建。",
+        "show_caption": false,
+        "scope": ".modal"
+      }
+    ]
+  },
+  "case-project-sync-link.png": {
+    "kind": "instruction",
+    "purpose": "先登录自己的团队账号，再选工作组并确认关联。",
+    "callouts": [
+      {
+        "selector": "#project-settings-central-panel",
+        "text": "先登录自己的团队账号，再选工作组并确认关联。",
+        "show_caption": true
+      }
+    ]
+  },
+  "case-project-sync-conflict.png": {
+    "kind": "instruction",
+    "purpose": "核对两侧正文、AI 建议和待判断分歧，再选择采用内容。",
+    "callouts": [
+      {
+        "selector": ".sync-conflict",
+        "text": "核对两侧正文、AI 建议和待判断分歧，再选择采用内容。",
+        "show_caption": true
+      }
+    ]
+  },
+  "case-project-sync-history.png": {
+    "kind": "instruction",
+    "purpose": "查看处理记录；恢复前核对当前资料是否又有修改。",
+    "callouts": [
+      {
+        "selector": "[aria-label=\"账号资料同步\"] details",
+        "text": "查看处理记录；恢复前核对当前资料是否又有修改。",
+        "show_caption": true
+      }
+    ]
+  },
+  "case-member-sync-pending.png": {
+    "kind": "instruction",
+    "purpose": "待开通账号尚不能登录，恢复连接后自动提交。",
+    "callouts": [
+      {
+        "selector": "[aria-label=\"成员同步状态\"]",
+        "text": "待开通账号尚不能登录，恢复连接后自动提交。",
+        "show_caption": true
+      }
+    ]
+  },
+  "case-member-sync-concurrent.png": {
+    "kind": "instruction",
+    "purpose": "核对另一端的更新，保留当前输入后继续确认。",
+    "callouts": [
+      {
+        "selector": ".modal [role=\"alert\"]",
+        "text": "核对另一端的更新，保留当前输入后继续确认。",
+        "show_caption": true
+      }
+    ]
+  },
+  "case-project-recommendations-review.png": {
+    "kind": "instruction",
+    "purpose": "展开依据后，核对条件与证据，再决定是否采用。",
+    "callouts": [
+      {
+        "selector": ".rsi-detail",
+        "text": "展开依据后，核对条件与证据，再决定是否采用。",
+        "show_caption": true
+      }
+    ]
+  },
+  "case-project-recommendations-accepted.png": {
+    "kind": "instruction",
+    "purpose": "关联会话和反馈均可留空，保存补充不会发送消息。",
+    "callouts": [
+      {
+        "selector": ".rsi-detail",
+        "text": "关联会话和反馈均可留空，保存补充不会发送消息。",
         "show_caption": true
       }
     ]

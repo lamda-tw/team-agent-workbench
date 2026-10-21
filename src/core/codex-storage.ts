@@ -103,7 +103,7 @@ export async function refreshCodexConfiguration({ home, sourceHome }: Pick<Codex
 
 export async function prepareCodexStorage(root: string, session: AgentSession, sourceHome = path.resolve(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'))): Promise<CodexStorage> {
   if (session.nativeLive && session.purpose === 'work' && process.env.WORKBENCH_CODEX_DESKTOP_BRIDGE) {
-    if (session.networkRoute === 'management') throw new Error('同步 Beta 使用桌面版的网络连接；通过管理端访问的会话请用普通入口');
+    if (session.networkRoute === 'management') throw new Error('桌面同步使用本机网络；通过管理端访问的会话请关闭桌面同步');
     const bridge = (await readCodexDesktopBridge(sourceHome))!;
     const resumePath = session.nativeId && await findCodexRollout(sourceHome, session.nativeId);
     if (!resumePath) throw new Error('找不到原 Codex 会话记录，无法关联共享后台');

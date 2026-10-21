@@ -8,9 +8,10 @@ import { execFileSync } from 'node:child_process';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemberConflict, MemberSyncStatus } from '../src/admin/member-sync-view';
+import { ExistingMemberDialog } from '../src/admin/existing-member-dialog';
 import { LocalAdminConnection } from '../src/admin/local-connection';
 import { AdminMemberSync } from '../src/admin/member-sync';
-import { applyMemberDelta, membershipChanges, rebaseMembership, type MemberCommand } from '../src/admin/member-protocol';
+import { applyMemberDelta, memberCommandSchema, membershipChanges, rebaseMembership, type MemberCommand } from '../src/admin/member-protocol';
 import { readRegistry, writeRegistry } from '../src/core/local-space';
 import { LocalFileConnection } from '../src/core/local-files';
 import { memberProfile } from './fixtures/member-profile';
@@ -196,4 +197,14 @@ test('offline and conflict views show actionable status and retain a separate co
   assert.match(html, /已启用/); assert.match(html, /已停用/); assert.match(html, /已查看变化，保留输入继续/);
   const offline = renderToStaticMarkup(React.createElement(MemberSyncStatus, { snapshot: { connected: false, verified: false, busy: false, memberSync: { teamId: 'team-a', pending: [{ id: randomUUID(), createdAt: new Date().toISOString(), command: { op: 'user_create', username: 'alice', name: 'Alice', groups: [], contentAdminGroups: [] }, status: 'pending' }] } }, refresh: async () => {} }));
   assert.match(offline, /联网后开通/); assert.match(offline, /待开通成员/); assert.match(offline, /移除待办/);
+});
+
+test('existing Linux account import is online-only and asks for the original password', async () => {
+  const command = memberCommandSchema.parse({ op: 'user_import', username: 'taowen', name: '陶文', password: 'original', expectedIdentity: 'identity' });
+  assert.equal(command.op, 'user_import');
+  const html = renderToStaticMarkup(React.createElement(ExistingMemberDialog, { snapshot: { connected: true, verified: true, busy: false, profile: { host: 'server', port: 22, username: 'root', root: '/srv/teamspace', fingerprint: '' } }, close() {}, done: async () => {} }));
+  assert.match(html, /检测已有账号及权限/); assert.match(html, /原密码验证/); assert.match(html, /不会重设密码/);
+  const f = await fixture();
+  try { await assert.rejects(f.apply(f.a, command), /仅适用于远端中央节点/); }
+  finally { await f.clean(); }
 });

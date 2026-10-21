@@ -9,7 +9,6 @@ import { CodexDesktopService, validateManagedBridge } from '../src/core/codex-de
 import { Workbench } from '../src/core/workbench';
 import { Store } from '../src/core/store';
 import type { AgentSession } from '../src/shared/types';
-import { accountIdentity } from '../src/shared/account-data';
 import { grantTestWorkspace, offlineProjectId } from './fixtures/offline-workspace';
 import { hasNoLoadedThreads, hasNoActiveThreads } from '../src/core/codex-desktop-worker';
 
@@ -33,22 +32,19 @@ async function fixture() {
   },launchDesktop:async(_target:any,args:string[],env:NodeJS.ProcessEnv)=>{desktopOpens++;desktopArgs=args;desktopEnv=env;}};
   return {root,sourceHome,parent,endpoint,options,counts:()=>({starts,discovered,desktopOpens,inputText,desktopArgs,desktopEnv}),fail:()=>{healthy=false;},revive:()=>{healthy=true;},async close(){server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));await fs.rm(root,{recursive:true,force:true});}};
 }
-test('ordinary startup and session creation are lazy; Beta is independent, persisted, and account scoped',async()=>{
+test('desktop sync is available without Beta and preserves the per-session choice across restarts',async()=>{
   const f=await fixture(),service=new CodexDesktopService(f.options),wb=new Workbench(path.join(f.root,'data'),()=>{},()=>{},undefined,undefined,undefined,service);
   try{
     await wb.store.init();grantTestWorkspace(wb,f.root);
-    assert.equal(wb.betaFeatureEnabled('codexDesktopSync'),false);
-    await assert.rejects(wb.createSession('codex',f.root,offlineProjectId,'work',undefined,undefined,'inherit',false,'direct',true),/Beta/);
-    await wb.setBetaFeature('codexDesktopSync',true);assert.equal(wb.betaFeatureEnabled('sessionHandoff'),false);assert.equal(wb.betaFeatureEnabled('subsessions'),false);
     const a=await wb.createSession('codex',f.root,offlineProjectId,'work',undefined,undefined,'inherit',false,'direct',true);
-    const b=await wb.createSession('codex',f.root,offlineProjectId,'work',undefined,undefined,'inherit',false,'direct',true);
-    assert(a.codexDesktop&&b.codexDesktop);assert.equal(a.nativeId,undefined);assert.equal(f.counts().starts,0);assert.equal(f.counts().desktopOpens,0);
-    await wb.setBetaFeature('sessionHandoff',true);await wb.setBetaFeature('subsessions',true);assert.equal(wb.betaFeatureEnabled('codexDesktopSync'),true);
-    const profile=wb.store.settings.workspaceSnapshot!.profile;const owner=accountIdentity(profile);wb.store.settings.workspaceSnapshot!.profile={...profile,username:'bob'};
-    assert.equal(wb.betaFeatureEnabled('codexDesktopSync'),false);wb.store.settings.workspaceSnapshot!.profile=profile;
-    await wb.setBetaFeature('codexDesktopSync',false);assert.equal(a.codexDesktop,true);assert.equal(wb.betaFeatureEnabled('sessionHandoff'),true);assert.equal(wb.betaFeatureEnabled('subsessions'),true);
-    await wb.store.save();const copy=new Store(wb.store.root);await copy.init();assert.equal(copy.sessions.find(s=>s.id===a.id)!.codexDesktop,true);assert.equal(copy.settings.betaFeatures![owner].codexDesktopSync,false);
+    const ordinary=await wb.createSession('codex',f.root,offlineProjectId,'work',undefined,undefined,'inherit',false,'direct',false);
+    assert.equal(a.codexDesktop,true);assert.equal(ordinary.codexDesktop,undefined);
+    assert.equal(a.nativeId,undefined);assert.equal(f.counts().starts,0);assert.equal(f.counts().desktopOpens,0);
+    await wb.setBetaFeature('sessionHandoff',true);await wb.setBetaFeature('sessionHandoff',false);
+    assert.equal(a.codexDesktop,true);
+    await wb.store.save();const copy=new Store(wb.store.root);await copy.init();assert.equal(copy.sessions.find(s=>s.id===a.id)!.codexDesktop,true);
     await assert.rejects(wb.changeNetworkRoute(a.id,'management'),/本机网络/);
+    await assert.rejects(wb.createSession('codex',f.root,offlineProjectId,'work',undefined,undefined,'inherit',false,'management',true),/本机网络/);
   }finally{await wb.close();assert.equal(f.counts().starts,0);await f.close();}
 });
 test('concurrent windows and sessions share exactly one lazy backend; reconnect reuses it without opening a desktop',async()=>{
@@ -89,6 +85,20 @@ test('a desktop started through another route after backend warmup is not silent
     await service.ensure();running=true;
     await assert.rejects(service.open({provider:'codex',codexDesktop:true,networkRoute:'direct',nativeId:randomUUID()} as AgentSession,'ignored',{}, {ifClosed:true}),/普通方式运行/);
     assert.equal(f.counts().starts,1);assert.equal(f.counts().desktopOpens,0);
+  }finally{await f.close();}
+});
+
+test('readiness never launches a process; even a warm backend cannot import while an unrelated ordinary desktop is open',async()=>{
+  const f=await fixture();let running=true;
+  const service=new CodexDesktopService({...f.options,running:async()=>running,launchDesktop:async(...args)=>{await f.options.launchDesktop(...args);return process.pid;}});
+  try{
+    assert.equal(await service.readyToPrepare(),false);assert.equal(f.counts().starts,0);assert.equal(f.counts().desktopOpens,0);
+    running=false;assert.equal(await service.readyToPrepare(),true);assert.equal(f.counts().starts,0);await service.ensure();
+    running=true;assert.equal(await service.readyToPrepare(),false);
+    await assert.rejects(service.prepare({provider:'codex',purpose:'work',messages:[]} as unknown as AgentSession,f.root,{}),/普通方式运行/);
+    assert.equal(f.counts().starts,1);assert.equal(f.counts().desktopOpens,0);
+    running=false;await service.open({provider:'codex',purpose:'work',codexDesktop:true,nativeId:randomUUID()} as AgentSession,'ignored',{});running=true;
+    assert.equal(await service.readyToPrepare(),true);assert.equal(f.counts().starts,1);assert.equal(f.counts().desktopOpens,1);
   }finally{await f.close();}
 });
 

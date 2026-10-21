@@ -2,6 +2,7 @@
 import html
 from handbook_release_updates import release_updates
 from handbook_roles import normalize_roles
+from handbook_latest_guidance import latest_guidance
 
 
 def render_notes(items, render=html.escape):
@@ -64,4 +65,4 @@ def editorial_notes(source):
         '下文的系统配置文件以服务器文件系统根目录为基准',
     )
     source = source.replace('更改组合只影响后续整理，不会给旧成果重新分类。', '\n\n注：更改组合只影响后续整理，不会给旧成果重新分类。')
-    return normalize_roles('\n'.join('注：' + line if line.startswith(prefixes) else line for line in source.split('\n')))
+    return latest_guidance(normalize_roles('\n'.join('注：' + line if line.startswith(prefixes) else line for line in source.split('\n'))))

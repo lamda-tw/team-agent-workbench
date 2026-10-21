@@ -14,11 +14,17 @@ import { findCodexRollout, type CodexStorage } from './codex-storage';
 import type { CodexDesktopBridge } from './codex-desktop-bridge';
 import type { AgentSession } from '../shared/types';
 import { runtimeAssets } from '../shared/runtime-assets';
+import { prepareDesktopRollout } from './native-publish';
 
 const run = promisify(execFile), pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 export interface CodexDesktopTarget { app: string; executable: string; archive?: string }
 export interface CodexDesktopOpenOptions { ifClosed?: boolean }
+export class CodexDesktopRestartRequired extends Error {
+  constructor() { super('Codex 当前以普通方式运行。首次联动请保存工作并退出 Codex，再重试；联动成功后会自动打开 Codex，不会自动关闭你的聊天'); }
+}
 export interface CodexDesktopIntegration {
+  readyToPrepare(): Promise<boolean>;
+  prepare(session: AgentSession, privateHome: string, env: NodeJS.ProcessEnv): Promise<{ nativeId?: string; nativePath?: string }>;
   storage(session: AgentSession, executable: string, env: NodeJS.ProcessEnv): Promise<CodexStorage>;
   open(session: AgentSession, executable: string, env: NodeJS.ProcessEnv, options?: CodexDesktopOpenOptions): Promise<void>;
 }
@@ -98,6 +104,15 @@ export class CodexDesktopService implements CodexDesktopIntegration {
     const job=this.establish(env);jobs.set(key,job);
     try{return await job;}finally{if(jobs.get(key)===job)jobs.delete(key);}
   }
+  /** Readiness only: never launches, closes, or writes a native conversation. */
+  async readyToPrepare() {
+    const existing = await this.active();
+    if (!await (this.options.running || codexDesktopRunning)()) return true;
+    if (!existing) return false;
+    const record = JSON.parse(await fs.readFile(path.join(this.parent, 'active.json'), 'utf8'));
+    const attachment = await fs.readFile(path.join(path.dirname(record.file), 'desktop.json'), 'utf8').then(JSON.parse).catch(() => undefined);
+    return attachment?.endpointHash === createHash('sha256').update(existing.endpoint).digest('hex') && processAlive(attachment.pid) === true;
+  }
   private async establish(env:NodeJS.ProcessEnv) {
     const existing=await this.active();if(existing)return existing;
     await fs.mkdir(this.parent,{recursive:true});
@@ -135,7 +150,7 @@ export class CodexDesktopService implements CodexDesktopIntegration {
       const recovery=this.recovery;
       if(await (this.options.running||codexDesktopRunning)()) {
         const attachment=recovery&&await fs.readFile(path.join(recovery.directory,'desktop.json'),'utf8').then(JSON.parse).catch(()=>undefined);
-        if(!attachment || attachment.endpointHash!==createHash('sha256').update(recovery!.bridge.endpoint).digest('hex') || processAlive(attachment.pid)!==true) throw new Error('Codex 当前以普通方式运行。首次联动请保存工作并退出 Codex，再重试；联动成功后会自动打开 Codex，不会自动关闭你的聊天');
+        if(!attachment || attachment.endpointHash!==createHash('sha256').update(recovery!.bridge.endpoint).digest('hex') || processAlive(attachment.pid)!==true) throw new CodexDesktopRestartRequired();
       }
       const target=await (this.options.discover||codexDesktopTarget)();
       const directory=recovery?.directory||await(this.options.privateDirectory||privateBridgeDirectory)(this.parent),inputFile=path.join(directory,'input.json');
@@ -165,6 +180,12 @@ export class CodexDesktopService implements CodexDesktopIntegration {
       throw new Error('Codex 共享后台启动超时，请稍后重试；输入已保留');
     }finally{await lock.close();const saved=await fs.readFile(lockFile,'utf8').then(JSON.parse).catch(()=>undefined);if(saved?.nonce===nonce)await fs.rm(lockFile,{force:true});}
   }
+  async prepare(session: AgentSession, privateHome: string, env: NodeJS.ProcessEnv) {
+    // A desktop attached to our existing shared backend may remain open.
+    if (!await this.readyToPrepare()) throw new CodexDesktopRestartRequired();
+    await this.ensure(env);
+    return prepareDesktopRollout(session, privateHome, this.sourceHome);
+  }
   async storage(session:AgentSession,_executable:string,env:NodeJS.ProcessEnv) {
     if(session.provider!=='codex'||session.purpose!=='work'||!session.codexDesktop||session.networkRoute==='management')throw new Error('此会话不能使用 Codex 桌面联动；当前联动仅支持本机网络');
     const bridge=await this.ensure(env);
@@ -184,7 +205,7 @@ export class CodexDesktopService implements CodexDesktopIntegration {
     const attachment=record.managed&&await fs.readFile(path.join(path.dirname(record.file),'desktop.json'),'utf8').then(JSON.parse).catch(()=>undefined);
     const attachedPid=attachment?.endpointHash===createHash('sha256').update(bridge.endpoint).digest('hex')&&processAlive(attachment.pid)===true ? attachment.pid as number : undefined;
     const running=await(this.options.running||codexDesktopRunning)();
-    if(record.managed&&running&&!attachedPid)throw new Error('Codex 当前以普通方式运行。请保存并退出后，再重试；联动成功后会自动打开 Codex，不会自动关闭你的聊天');
+    if(record.managed&&running&&!attachedPid)throw new CodexDesktopRestartRequired();
     // Keep a just-launched window even before OS discovery sees it; background sends never refocus it.
     if(options.ifClosed&&attachedPid)return;
     const target=await(this.options.discover||codexDesktopTarget)();

@@ -54,7 +54,7 @@ export function prepareMemberOperation(state: MemberRegistryState, input: Member
     throw new Error('[MEMBER_RECOVERY] 此操作可能已部分完成，请通过待恢复操作核对后继续');
   }
   const command = input.command;
-  if (command.op === 'user_create') {
+  if (command.op === 'user_create' || command.op === 'user_import') {
     if (Object.keys(state.users).some(name => name.toLowerCase() === command.username.toLowerCase())) throw new Error('[MEMBER_EXISTS] 账号已存在，请查看已有成员或更换账号');
   } else {
     const current = memberPublicState(state).users[command.username];

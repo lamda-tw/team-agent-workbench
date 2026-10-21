@@ -17,7 +17,14 @@ let threadId = 'fake-thread';
 let cursorMode = 'agent';
 let cursorSessionId = 'fake-session-' + process.pid;
 if (command === '--version') console.log('fixture-cli-1.0');
-else if (command === 'login') {
+else if (command === 'login' && process.argv[3] === 'status') {
+  log('login/status');
+  if (mode.savedLogin === 'hang') setInterval(() => {}, 1000);
+  else if (mode.savedLogin === true || mode.status === 'ready') console.error('Logged in using ChatGPT');
+  else if (mode.savedLogin === 'apiKey') console.error('Logged in using an API key - DO_NOT_FORWARD_THIS_SECRET');
+  else if (mode.savedLogin === false || mode.status === 'none') { console.error('Not logged in'); process.exitCode = 1; }
+  else { console.error('fetch failed DO_NOT_FORWARD_THIS_SECRET'); process.exitCode = 2; }
+} else if (command === 'login') {
   log('login');
   // The workbench may retain the approved URL, but must discard all other output.
   console.log('https://cursor.com/loginDeepControl?fixture=1');
@@ -74,7 +81,17 @@ else if (command === 'login') {
     if (m.method === 'initialize' || m.method === 'authenticate' || m.method === 'session/set_model') respond({ id: m.id, result: {} });
     else if (m.method === 'session/set_mode') { cursorMode = m.params.modeId; respond({ id: m.id, result: {} }); }
     else if (m.method === 'collaborationMode/list') send(current.noPlan ? { id: m.id, error: { code: -32601, message: 'Method not found' } } : { id: m.id, result: { data: [{ name: 'Agent', mode: 'default', model: 'gpt-fixture', reasoning_effort: 'medium' }, { name: 'Plan', mode: 'plan', model: 'gpt-fixture', reasoning_effort: 'medium' }] } });
-    else if (m.method === 'getAuthStatus') send({ id: m.id, result: { requiresOpenaiAuth: current.status !== 'custom', authMethod: 'chatgpt', authToken: current.status === 'ready' ? 'fixture.' + Buffer.from(JSON.stringify({ 'https://api.openai.com/auth': { chatgpt_account_id: current.accountId || 'fixture-account', chatgpt_plan_type: 'pro' } })).toString('base64url') + '.PRIVATE_FIXTURE_TOKEN' : null } });
+    else if (m.method === 'getAuthStatus') {
+      log('getAuthStatus');
+      if (current.status === 'hang') return;
+      if (current.authStatusUnsupported) return send({ id: m.id, error: { code: -32601, message: 'Method not found' } });
+      if (current.authStatusError || current.status === 'network') return send({ id: m.id, error: { code: -32000, message: current.authStatusError || 'fetch failed DO_NOT_FORWARD_THIS_SECRET' } });
+      if (current.status === 'expired') return send({ id: m.id, error: { code: -32000, message: 'refresh_token_expired' } });
+      if (current.authStatusMalformed) return send({ id: m.id, result: { unexpected: true } });
+      const exp = m.params.refreshToken ? current.refreshedTokenExpiresAt ?? current.tokenExpiresAt : current.tokenExpiresAt;
+      const token = 'fixture.' + Buffer.from(JSON.stringify({ exp, 'https://api.openai.com/auth': { chatgpt_account_id: current.accountId || 'fixture-account', chatgpt_plan_type: 'pro' } })).toString('base64url') + '.PRIVATE_FIXTURE_TOKEN';
+      respond({ id: m.id, result: { requiresOpenaiAuth: current.status !== 'custom', authMethod: current.status === 'ready' ? 'chatgpt' : null, authToken: current.status === 'ready' && m.params.includeToken ? token : null } });
+    }
     else if (m.method === 'account/login/start') send({ id: m.id, result: { type: m.params.type } });
     else if (m.method === 'config/read') send({ id: m.id, result: { config: { ...(current.defaultModel ? { model: current.defaultModel } : {}), sandbox_mode: current.permissionConfig?.sandbox || 'workspace-write', approval_policy: current.permissionConfig?.approval || 'on-request', approvals_reviewer: current.permissionConfig?.reviewer || 'user', api_key: 'DO_NOT_FORWARD_THIS_SECRET', mcp_servers: current.mcpConfigs || {} }, layers: [{ name: { type: 'user' }, version: 'fixture', config: { mcp_servers: current.mcpConfigs || {} } }] } });
     else if (m.method === 'mcpServerStatus/list') send({ id: m.id, result: { data: Object.entries(current.mcpConfigs || {}).map(([name, config]) => ({ name, authStatus: 'unsupported', runtimeStatus: config.enabled === false ? 'disabled' : 'connected', tools: { search: { name: 'search', description: 'fixture tool' } }, resources: [], resourceTemplates: [] })), nextCursor: null } });

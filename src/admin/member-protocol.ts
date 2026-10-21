@@ -9,6 +9,7 @@ const handoffRevisions = z.record(z.string(), version).optional();
 export const memberCreateSchema = z.object({ op: z.literal('user_create'), username: accountNameSchema, name: z.string().max(120), groups: z.array(group).max(100).default([]), contentAdminGroups: z.array(group).max(100).default([]) });
 export const memberCommandSchema = z.discriminatedUnion('op', [
   memberCreateSchema,
+  z.object({ op: z.literal('user_import'), username: accountNameSchema, name: z.string().max(120), password: accountPasswordSchema, expectedIdentity: version }),
   z.object({ op: z.literal('user_password'), username: accountNameSchema, password: accountPasswordSchema, expectedRevision: version }),
   z.object({ op: z.literal('user_enabled'), username: accountNameSchema, enabled: z.boolean(), expectedRevision: version, handoffs, handoffRevisions }),
   z.object({ op: z.literal('member_groups'), username: accountNameSchema, expectedRevision: version, changes: z.array(z.object({ group, role: z.enum(['member', 'admin', 'remove']) })).max(100), handoffs, handoffRevisions }),

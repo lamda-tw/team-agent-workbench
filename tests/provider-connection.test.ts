@@ -6,6 +6,15 @@ import type { ProviderAuth, ProviderCatalog } from '../src/shared/types';
 const auth: ProviderAuth = { status: 'authenticated', detail: '已登录', cwd: 'D:/work', checkedAt: '2026-09-23' };
 const catalog: ProviderCatalog = { models: [{ id: 'default', name: '默认模型', isDefault: true }], quota: { windows: [], detail: '未返回额度', url: '' }, checkedAt: '2026-09-23' };
 
+test('saved login with a known connection failure does not trigger another slow model probe', async () => {
+  const calls: string[] = [], saved: ProviderAuth = { ...auth, verifiedLocally: true, connectionIssue: 'Codex 工作区路由发现超时' };
+  const result = await checkProviderConnection(async <T,>(action: string): Promise<T> => {
+    calls.push(action); return (action === 'provider.auth' ? saved : { enabled: false }) as T;
+  }, 'codex', 'D:/work');
+  assert.equal(result.auth, saved); assert.equal(result.catalog, undefined);
+  assert(!calls.includes('provider.catalog'));
+});
+
 test('applying a connection rechecks the selected provider and directory only after the switch succeeds', async () => {
   const calls: { action: string; payload: any }[] = [];
   const call = async <T,>(action: string, payload?: unknown): Promise<T> => {

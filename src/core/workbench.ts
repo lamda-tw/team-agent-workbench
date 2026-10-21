@@ -41,12 +41,10 @@ import { TransferQueue } from './transfers';
 import { AgentRuntime, clearStoppedNativeFork } from './agents';
 import { ClaudeRuntime } from './claude-runtime';
 import { findCodexRollout, prepareCodexStorage } from './codex-storage';
-import { userDesktopAppOpen } from './desktop-app-open';
 import type { McpMutation } from '../shared/mcp';
 import { CursorMcp } from './cursor-mcp';
 import type { SessionMode } from '../shared/session-mode';
 import { codexHome, listNativeSessions as listProviderSessions, nativeRecordAllowed, resolveNativeSession } from './native-sessions';
-import { publishToNativeList } from './native-publish';
 import { applyNativeTranscript, nativeTranscriptChanged, readCodexTranscript, readCursorTranscript, sameNativePath } from './native-transcript';
 import { migrateSessionContext, sessionContext } from './session-context';
 import { isProtectedSessionSource, isRemovableSessionReference, sessionWithAvailableReferences } from '../shared/session-result-references';
@@ -78,7 +76,7 @@ import { rankConclusions } from './conclusion-matcher';
 import { ActivityAssistant, textHash } from './activity-assistant';
 import { backgroundTextTask } from './background-text';
 import { writeHandoffAtomic } from './handoff-writer';
-import { CodexDesktopService, type CodexDesktopIntegration } from './codex-desktop-service';
+import { CodexDesktopService, CodexDesktopRestartRequired, type CodexDesktopIntegration } from './codex-desktop-service';
 import { CursorDesktopService, type CursorDesktopIntegration } from './cursor-desktop-service';
 import { CursorFileService } from './cursor-file-service';
 import { isCursorFileSession } from '../shared/cursor-session-consistency';
@@ -98,6 +96,9 @@ export class Workbench {
   private runtimes = new Map<string, AgentRuntime | ClaudeRuntime>(); private sending = new Set<string>();
   private steering = new Set<string>();
   private changingSettings = new Set<string>();
+  private attachingCodex = new Set<string>();
+  private codexSyncTimer?: NodeJS.Timeout;
+  private codexSyncJob?: Promise<void>;
   private deferredSettings = new Set<string>();
   private canceledSends = new Set<string>();
   private stoppingSessions = new Set<string>();
@@ -150,8 +151,6 @@ export class Workbench {
   }
   private configuringCursorPermissions = false;
   private closing = false;
-  /** Tests replace this so a desktop app open on the machine does not block isolated fixtures. */
-  desktopAppOpen: (provider: 'codex' | 'cursor') => Promise<boolean> = userDesktopAppOpen;
   accounts: ProviderAccounts;
   accountSync: AccountSync;
   readonly projectSync: ProjectSync;
@@ -875,7 +874,8 @@ export class Workbench {
       return structuredClone(value);
     } finally { if (this.catalogJobs.get(key) === job) this.catalogJobs.delete(key); }
   }
-  private async runtime(s: AgentSession) {
+  private async runtime(s: AgentSession, attaching = false) {
+    if (this.attachingCodex.has(s.id) && !attaching) throw new Error('正在同步到 Codex，请稍后重试');
     this.providerEnvironment(s.networkRoute, s);
     const pending = this.runtimeJobs.get(s.id); if (pending) return pending;
     const existing = this.runtimes.get(s.id);
@@ -1274,7 +1274,8 @@ export class Workbench {
     if (personalGroupId && (!this.personal || !this.store.settings.personalGroups?.some(group => group.id === personalGroupId))) throw new Error('个人分组已改变，请重新选择');
     if (desktopSync && provider === 'cursor') assertCursorSharedSessionAvailable();
     const route = purpose === 'prepare' && parentId ? this.session(parentId).networkRoute : networkRoute;
-    if(desktopSync && (purpose!=='work'||!['codex','cursor'].includes(provider)||!this.betaFeatureEnabled(provider==='cursor'?'cursorDesktopSync':'codexDesktopSync')))throw new Error('请先在 Beta 功能中开启对应的桌面联动');
+    if(desktopSync && (purpose!=='work'||!['codex','cursor'].includes(provider)))throw new Error('只有工作会话可以启用桌面联动');
+    if(desktopSync && provider==='cursor'&&!this.betaFeatureEnabled('cursorDesktopSync'))throw new Error('请先在 Beta 功能中开启 Cursor 桌面联动');
     if(desktopSync && (route || (this.store.settings.egress?.enabled?'management':'direct'))==='management')throw new Error('桌面联动当前仅支持本机网络；请选择本机网络或关闭桌面联动');
     if (route === 'management' && !this.store.settings.egress?.enabled) throw new Error('请先应用并检测管理端网络出口');
     cwd = cwd.trim() || await this.researchWorkspace();
@@ -1622,6 +1623,7 @@ export class Workbench {
   }
   async send(id: string, userText: string, sourceIds: string[] = [], capabilitySelections: AgentCapabilitySelection[] = [], submitted?: () => void, questionRunId?: string, agentNotice?: string, draft = false) {
     this.assertWorkspace();
+    if (this.attachingCodex.has(id)) throw new Error('正在同步到 Codex，请完成后再发送');
     if (this.changingSettings.has(id)) throw new Error('正在切换会话设置，请稍后发送');
     if (!userText.trim()) throw new Error('请输入任务内容');
     const s = this.session(id); this.assertCanWork(s.binding);
@@ -1651,6 +1653,7 @@ export class Workbench {
     await this.applyDeferredSettings(s);
     if (this.changingSettings.has(id)) throw new Error('正在切换会话设置，请稍后发送');
     await this.adoptLatestProjectBrief(s);
+    if (this.attachingCodex.has(id)) throw new Error('正在同步到 Codex，请稍后发送；输入已保留');
     this.sending.add(id); s.stoppedAt = undefined; s.error = undefined; s.status = 'starting';
     const preview = questionRunId && !draft ? this.questionPreview(s, questionRunId, userText) : undefined;
     this.changed();
@@ -1786,6 +1789,7 @@ export class Workbench {
     this.broadcast(); return true;
   }
   async stop(id: string) {
+    if (this.attachingCodex.has(id)) throw new Error('正在同步到 Codex，请同步完成后重试');
     const s = this.session(id);
     if (s.purpose !== 'work') throw new Error('请在整理结果页停止整理');
     if (this.stoppingSessions.has(id)) return;
@@ -1808,6 +1812,7 @@ export class Workbench {
     finally { this.stoppingSessions.delete(id); }
   }
   async closeSession(id: string) {
+    if (this.attachingCodex.has(id)) throw new Error('正在同步到 Codex，请同步完成后关闭');
     const s = this.session(id); if (s.purpose !== 'work') throw new Error('请在整理结果页停止整理');
     s.closedAt = new Date().toISOString();
     const runtime = this.runtimes.get(id); this.runtimes.delete(id);
@@ -1896,6 +1901,7 @@ export class Workbench {
   }
   private ensureNativeTranscriptSync() {
     if (this.closing) return;
+    this.ensureDeferredCodexSync();
     const files = new Map<string, string>();
     for (const session of this.store.sessions) {
       const file = this.nativeTranscriptFile(session);
@@ -1977,19 +1983,6 @@ export class Workbench {
       if (this.nativeSyncPending.size && !this.nativeSyncQueued) this.queueNativeTranscript([...this.nativeSyncPending][0]);
     }
   }
-  private openDesktopMessage(provider: 'codex' | 'cursor') {
-    const app = provider === 'codex' ? '桌面 Codex' : 'Cursor';
-    return `${app} 正在运行。请先保存并退出，再登记到桌面端；不会改写已打开的会话数据。`;
-  }
-  private async blockOpenDesktop(provider: 'codex' | 'cursor') {
-    let open = true;
-    try { open = await this.desktopAppOpen(provider); }
-    catch {
-      const message = provider === 'codex' ? '无法确认桌面 Codex 是否正在运行，已停止写入它的会话数据。' : '无法确认 Cursor 是否正在运行，已停止写入它的会话数据。';
-      throw new Error(message);
-    }
-    return open;
-  }
   private async readNativeTranscriptInto(session: AgentSession, persist = true) {
     if (!session.nativeLive || !session.nativePath || this.nativeTranscriptBlocked(session)) return false;
     if (session.provider !== 'codex' && session.provider !== 'cursor') return false;
@@ -2033,7 +2026,7 @@ export class Workbench {
       for (const nativeId of ids) sources.push(await this.nativeImportSource(provider, nativeId));
       const sessions = [];
       for (const source of sources) {
-        const desktopSync=provider==='codex'&&this.betaFeatureEnabled('codexDesktopSync')&&!this.store.settings.egress?.enabled;
+        const desktopSync=provider==='codex'&&!this.store.settings.egress?.enabled;
         const session = await this.createSession(provider, source.cwd, projectId, 'work', undefined, source.model, 'inherit', false, undefined, desktopSync);
         session.title = source.name; session.nativeId = source.nativeId; session.nativeLive = true; session.nativePath = source.nativePath;
         try { await this.readNativeTranscriptInto(session); }
@@ -2044,29 +2037,103 @@ export class Workbench {
       return sessions;
     }, false);
   }
-  async publishToDesktop(id: string) {
-    const session = this.session(id);
-    if (session.provider === 'cursor') assertCursorSharedSessionAvailable();
-    if(session.codexDesktop)throw new Error('此会话已启用 Codex 桌面联动，请点击“在 Codex 中打开”');
-    if (session.cursorNative) throw new Error('这条会话已关联 Cursor 原生窗口');
-    if (session.purpose !== 'work') throw new Error('请在工作会话中登记到桌面端');
-    if (session.provider !== 'codex') throw new Error('只有 Codex 会话可以登记到桌面端');
-    if (['starting', 'running', 'approval'].includes(session.status)) throw new Error('请等这条会话结束再登记到桌面端');
-    if (session.nativeLive && session.nativePath && nativeRecordAllowed(session.provider, session.nativePath)) throw new Error(session.provider === 'codex' ? '这条会话已经在桌面 Codex 的列表里' : '这条会话已经在 Cursor 的会话列表里');
-    if (this.sending.has(id) || this.steering.has(id) || this.stoppingSessions.has(id)) throw new Error('请等当前会话操作完成后再登记到桌面端');
-    if (await this.blockOpenDesktop(session.provider)) throw new Error(this.openDesktopMessage(session.provider));
-    // Flush and release the private runtime before copying its record. The next
-    // message must resume the published record and use the desktop history DB.
-    const runtime = this.runtimes.get(id);
-    if (runtime) { this.runtimes.delete(id); await runtime.close(); }
-    const published = await publishToNativeList(session, path.join(this.store.root, 'codex-home'));
-    session.nativeId = published.nativeId; session.nativePath = published.nativePath; session.nativeLive = true;
-    if(session.provider==='codex'&&session.networkRoute!=='management'&&this.betaFeatureEnabled('codexDesktopSync'))session.codexDesktop=true;
-    delete session.codexStorage; delete session.codexNeedsRegistration;
-    this.ensureNativeTranscriptSync();
-    if (published.replaceTranscript) try { await this.readNativeTranscriptInto(session); }
-    catch (error: any) { session.error = error.message; }
-    await this.store.save(); this.broadcast(); return session;
+  async syncCodexDesktop(id: string) {
+    const session = this.session(id); this.assertCanWork(session.binding);
+    if (session.provider !== 'codex' || session.purpose !== 'work') throw new Error('只有 Codex 工作会话可以同步到桌面版');
+    if (session.closedAt) throw new Error('此会话已关闭，请先重新打开');
+    if (session.networkRoute === 'management') throw new Error('当前使用管理端访问，暂不支持桌面同步');
+    if (this.attachingCodex.has(id) || this.sending.has(id) || this.steering.has(id) || this.stoppingSessions.has(id) || this.changingSettings.has(id) || this.runtimeJobs.has(id) || ['starting', 'running', 'approval'].includes(session.status)) throw new Error('请等当前会话操作结束后再同步');
+    if (session.codexDesktop) return session.desktopSyncState === 'connected' ? session : this.reconnectCodexDesktop(id);
+    const previous = structuredClone(session);
+    let committed = false, privateReleased = false;
+    this.attachingCodex.add(id); this.sending.add(id); this.changingSettings.add(id);
+    session.status = 'starting'; session.desktopSyncState = 'connecting'; session.desktopSyncError = undefined; session.error = undefined; this.broadcast();
+    try {
+      if (!await this.codexDesktop.readyToPrepare()) throw new CodexDesktopRestartRequired();
+      // No new writer can start while the private runtime flushes its last turn.
+      const runtime = this.runtimes.get(id);
+      if (runtime) { this.runtimes.delete(id); await runtime.close(); }
+      privateReleased = true;
+      const prepared = await this.codexDesktop.prepare(session, path.join(this.store.root, 'codex-home'), this.providerEnvironment(session.networkRoute, session));
+      if (this.closing || session.closedAt) throw new Error('工作台正在关闭，未继续同步；原有记录已保留');
+      Object.assign(session, prepared, { codexDesktop: true, nativeLive: !!prepared.nativeId });
+      delete session.codexSyncRequest;
+      delete session.codexStorage; delete session.codexNeedsRegistration; delete session.codexPrivateFork;
+      // Persist the ownership change before a shared runtime may append anything.
+      // After this point failures must recover that runtime, never fork back.
+      await this.store.save(); committed = true;
+      const shared = await this.runtime(session, true); await shared.ensureStarted();
+      if (shared instanceof AgentRuntime && session.nativeId) {
+        await shared.rpc.request('thread/name/set', { threadId: session.nativeId, name: session.title }).catch(() => {});
+      }
+      this.ensureNativeTranscriptSync(); await this.store.save();
+      if (previous.codexSyncRequest && !this.closing) await this.openCodexDesktopIfClosed(session);
+      return session;
+    } catch (error: any) {
+      const runtime = privateReleased && this.runtimes.get(id); if (runtime) { this.runtimes.delete(id); await runtime.close().catch(() => {}); }
+      if (!committed) {
+        for (const key of ['codexDesktop', 'codexSyncRequest', 'nativeId', 'nativePath', 'nativeLive', 'codexStorage', 'codexNeedsRegistration', 'codexPrivateFork', 'desktopSyncState', 'desktopSyncError', 'status', 'error'] as const) {
+          if (key in previous) (session as any)[key] = previous[key]; else delete session[key];
+        }
+      } else { session.desktopSyncState = 'disconnected'; session.status = 'error'; session.error = error.message; }
+      if (!committed && error instanceof CodexDesktopRestartRequired) {
+        session.codexSyncRequest = { requestedAt: previous.codexSyncRequest?.requestedAt || new Date().toISOString() };
+        session.desktopSyncError = undefined;
+        try { await this.store.save(); }
+        catch (saveError) { session.codexSyncRequest = previous.codexSyncRequest; throw saveError; }
+        this.ensureDeferredCodexSync();
+        this.sessionNotice(session, '已安排同步。可继续在工作台对话；方便时退出 Codex，工作台会自动完成同步并重新打开。');
+        return session;
+      }
+      session.desktopSyncError = error.message;
+      await this.store.save(); throw error;
+    } finally {
+      this.attachingCodex.delete(id); this.sending.delete(id); this.changingSettings.delete(id); this.broadcast();
+    }
+  }
+  async cancelCodexSync(id: string) {
+    const session = this.session(id); this.assertCanWork(session.binding);
+    if (this.attachingCodex.has(id)) throw new Error('正在完成同步，请稍后重试');
+    const previous = session.codexSyncRequest; delete session.codexSyncRequest;
+    try { await this.store.save(); } catch (error) { session.codexSyncRequest = previous; throw error; }
+    this.ensureDeferredCodexSync(); this.broadcast();
+  }
+  private ensureDeferredCodexSync() {
+    const pending = this.store.sessions.some(s => s.codexSyncRequest && !s.codexSyncRequest.error && !s.closedAt && !s.codexDesktop && s.networkRoute !== 'management');
+    if (this.closing || !pending) { clearInterval(this.codexSyncTimer); this.codexSyncTimer = undefined; return; }
+    if (!this.codexSyncTimer) { this.codexSyncTimer = setInterval(() => void this.drainDeferredCodexSync(), 5000); this.codexSyncTimer.unref(); }
+  }
+  private drainDeferredCodexSync() {
+    if (this.codexSyncJob) return this.codexSyncJob;
+    const job = (async () => {
+      if (this.closing || this.configuring) return;
+      const candidates = this.store.sessions.filter(s => s.codexSyncRequest && !s.codexSyncRequest.error && !s.codexDesktop && !s.closedAt && s.networkRoute !== 'management');
+      if (!candidates.length) return;
+      try {
+        if (!await this.codexDesktop.readyToPrepare()) return;
+      } catch (error: any) {
+        // Uncertain process/connection state is not permission to migrate.
+        for (const s of candidates) if (s.codexSyncRequest) s.codexSyncRequest.error = error.message;
+        await this.store.save(); this.broadcast(); return;
+      }
+      for (const s of candidates) {
+        if (this.closing || this.configuring) return;
+        if (!s.codexSyncRequest || s.closedAt || s.networkRoute === 'management' || this.attachingCodex.has(s.id) || this.sending.has(s.id) || this.steering.has(s.id) || this.stoppingSessions.has(s.id) || this.changingSettings.has(s.id) || this.runtimeJobs.has(s.id) || ['starting', 'running', 'approval'].includes(s.status)) continue;
+        try {
+          await this.syncCodexDesktop(s.id);
+          if (s.codexDesktop && !this.closing) {
+            this.sessionNotice(s, `“${s.title}”已与 Codex 同步。`);
+          }
+        } catch (error: any) {
+          if (s.codexSyncRequest) s.codexSyncRequest.error = error.message;
+          else s.desktopSyncError = error.message;
+          await this.store.save(); this.broadcast();
+        }
+      }
+    })().catch(error => { if (!this.closing) this.notice('同步请求暂未完成：' + error.message); });
+    this.codexSyncJob = job;
+    void job.finally(() => { if (this.codexSyncJob === job) this.codexSyncJob = undefined; this.ensureDeferredCodexSync(); });
+    return job;
   }
   async deleteSession(id: string) {
     return this.edit('subsession-tree', async () => {
@@ -3145,5 +3212,5 @@ export class Workbench {
   async flushEdits() { await this.edits.catch(() => {}); for (const [key, fn] of this.unsavedEdits) { await fn(); if (this.unsavedEdits.get(key) === fn) this.unsavedEdits.delete(key); } await this.store.save(); }
   listDirections() { return this.remote.memberDirections(); }
   saveDirections(directions: unknown) { return this.remote.memberDirections(directions); }
-  async close() { this.closing = true; await this.rsi.close(); await this.questions.close(); this.stopNativeTranscriptSync(); clearInterval(this.contentWatch); await this.activity.close(); await this.contentSyncJob; for (const timer of this.trajectoryTimers.values()) clearTimeout(timer); this.trajectoryTimers.clear(); await Promise.allSettled(this.archiving.values()); clearTimeout(this.timer); this.timer = undefined; try { await this.flushEdits(); } catch (error) { this.closing = false; this.changed(); throw error; } this.closing = true; for (const timer of this.preparationTimers.values()) clearTimeout(timer); this.preparationTimers.clear(); for (const job of this.catalogJobs.values()) job.controller.abort(); await Promise.allSettled([...this.catalogJobs.values()].map(job => job.promise)); await this.projectSync.close(); await this.accounts.close(); await this.accountSync.close(); const interrupted = this.store.sessions.filter(s => { const runtime = this.runtimes.get(s.id); return !(runtime instanceof AgentRuntime && runtime.sharedDesktop) && s.purpose === 'work' && !s.closedAt && ['starting', 'running', 'approval'].includes(s.status) && !s.stoppedAt; }); await Promise.all([...this.runtimes.values()].map(runtime => runtime.close())); this.remote.disconnect(); for (const s of interrupted) { s.status = 'error'; s.error = '应用关闭时任务尚未完成，已中断；可检查已有结果后继续发送。'; } await Promise.all(this.eventWrites.values()); await this.store.save(); await this.journal.close(); await this.cursorDesktop.close(); }
+  async close() { this.closing = true; clearInterval(this.codexSyncTimer); await this.codexSyncJob; await this.rsi.close(); await this.questions.close(); this.stopNativeTranscriptSync(); clearInterval(this.contentWatch); await this.activity.close(); await this.contentSyncJob; for (const timer of this.trajectoryTimers.values()) clearTimeout(timer); this.trajectoryTimers.clear(); await Promise.allSettled(this.archiving.values()); clearTimeout(this.timer); this.timer = undefined; try { await this.flushEdits(); } catch (error) { this.closing = false; this.changed(); throw error; } this.closing = true; for (const timer of this.preparationTimers.values()) clearTimeout(timer); this.preparationTimers.clear(); for (const job of this.catalogJobs.values()) job.controller.abort(); await Promise.allSettled([...this.catalogJobs.values()].map(job => job.promise)); await this.projectSync.close(); await this.accounts.close(); await this.accountSync.close(); const interrupted = this.store.sessions.filter(s => { const runtime = this.runtimes.get(s.id); return !(runtime instanceof AgentRuntime && runtime.sharedDesktop) && s.purpose === 'work' && !s.closedAt && ['starting', 'running', 'approval'].includes(s.status) && !s.stoppedAt; }); await Promise.all([...this.runtimes.values()].map(runtime => runtime.close())); this.remote.disconnect(); for (const s of interrupted) { s.status = 'error'; s.error = '应用关闭时任务尚未完成，已中断；可检查已有结果后继续发送。'; } await Promise.all(this.eventWrites.values()); await this.store.save(); await this.journal.close(); await this.cursorDesktop.close(); }
 }

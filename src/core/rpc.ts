@@ -65,7 +65,7 @@ export class JsonRpc extends EventEmitter {
       else if (typeof message.id === 'number') {
         const call = this.pending.get(message.id); if (!call) return;
         this.pending.delete(message.id); clearTimeout(call.timer);
-        message.error ? call.reject(Object.assign(new Error(message.error.message), { data: message.error.data })) : call.resolve(message.result);
+        message.error ? call.reject(Object.assign(new Error(message.error.message), { code: message.error.code, data: message.error.data })) : call.resolve(message.result);
       }
     });
     this.process.stderr.on('data', data => this.emit('diagnostic', data.toString()));

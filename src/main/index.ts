@@ -174,7 +174,7 @@ async function dispatch(action: string, raw: unknown, owner: BrowserWindow, pref
       await atomicJson(windowStateFile(active!.slot), { profile: active!.workbench.store.settings.workspaceSnapshot?.profile, sidebarProjectHeight: active!.sidebarProjectHeight, sidebarPanes: active!.sidebarPanes, selectedProjectId: active!.selectedProjectId });
       return true;
     }
-    case 'beta.set': { const p = z.object({ feature: z.enum(['sessionHandoff', 'subsessions', 'codexDesktopSync', 'cursorDesktopSync']), enabled: z.boolean() }).parse(raw); return workbench.setBetaFeature(p.feature, p.enabled); }
+    case 'beta.set': { const p = z.object({ feature: z.enum(['sessionHandoff', 'subsessions', 'cursorDesktopSync']), enabled: z.boolean() }).parse(raw); return workbench.setBetaFeature(p.feature, p.enabled); }
     case 'providers.detect': return workbench.detect();
     case 'account.sync': await workbench.accountSync.sync(); return workbench.accountSync.state;
     case 'account.sync.resolve': { const p = z.object({ key: z.string(), token: z.string(), choice: z.enum(['local', 'remote', 'merged', 'both']), fields: z.array(z.object({ path: z.array(z.string()).max(20), text: text })).max(100).optional() }).parse(raw); await workbench.accountSync.resolve(p.key, p.choice, p.token, p.fields); return workbench.accountSync.state; }
@@ -267,7 +267,8 @@ async function dispatch(action: string, raw: unknown, owner: BrowserWindow, pref
       return workbench.cursorNativeSettings(input.id,input.kind,input.value,input.revision,input.cancel);
     }
     case 'session.cursorNative.queue': { const p=z.object({id,action:z.enum(['cancel','resume','reconcile','confirm','withdraw']),requestId:z.string().uuid().optional(),nativeMessageId:z.string().uuid().optional()}).parse(raw);return workbench.cursorQueueAction(p.id,p.action,p.requestId,p.nativeMessageId); }
-    case 'session.native.publish': return workbench.publishToDesktop(sessionInput.parse(raw).id);
+    case 'session.codexDesktop.sync': return workbench.syncCodexDesktop(sessionInput.parse(raw).id);
+    case 'session.codexDesktop.cancel': return workbench.cancelCodexSync(sessionInput.parse(raw).id);
     case 'subsession.create': { const p = z.object({ parentId: id, focus: z.string().trim().max(120).default('子会话'), selectedText: z.string().max(128 * 1024).default('') }).parse(raw); return workbench.forkSubsession(p.parentId, p.focus, p.selectedText); }
     case 'subsession.promote': return workbench.promoteSubsession(sessionInput.parse(raw).id);
     case 'subsession.history': return workbench.subsessionHistory(sessionInput.parse(raw).id);

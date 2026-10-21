@@ -1,6 +1,7 @@
 """Run on demand over SSH, as an already authorized Linux administrator.
 
-SSH is the only account authentication. A restricted file worker manages public writes.
+SSH authenticates administrators; importing a legacy member also verifies its local password.
+A restricted file worker manages public writes.
 The Windows admin app sends this fixed program and a JSON request on stdin.
 """
 import base64
@@ -33,7 +34,7 @@ if "acl_apply" not in globals():
 if "tg_handle" not in globals():
     exec(compile(pathlib.Path(__file__).with_name("group_ops.py").read_text(encoding="utf-8"), "group_ops.py", "exec"))
 OPS = {"group_control", "probe", "environment_prepare", "initialize", "status", "storage_usage", "storage_upgrade", "project_catalog", "project_purge", "user_create", "user_password", "user_enabled", "group_create", "user_groups", "group_member", "workspace_prepare", "recover", "egress_jump", "egress_jump_probe"}
-OPS.update({'members_sync', 'members_apply'})
+OPS.update({'members_sync', 'members_apply', 'user_import_probe', 'user_import'})
 REQUIRED_COMMANDS = ["useradd", "usermod", "groupadd", "gpasswd", "chpasswd", "pkill", "sshd", "setfacl"]
 MANAGED_SUPERVISOR = pathlib.Path('/etc/team-agent-workbench')
 SUPERVISOR_CONFIGS = [pathlib.Path('/etc/supervisor/supervisord.conf'), pathlib.Path('/etc/supervisord.conf'), MANAGED_SUPERVISOR / 'supervisord.conf']
@@ -352,6 +353,56 @@ def check_password(password):
     if not isinstance(password, str) or not 1 <= len(password) <= 4096 or any(c in password for c in '\r\n\x00:'):
         raise ValueError('密码不能为空，不能含换行、冒号或空字符；恢复时请重新输入')
     return password
+
+
+def existing_member(root, state, username, allow_registered=False):
+    """Inspect only a dedicated account created for this exact team."""
+    import grp, pwd
+    username = account_name(username)
+    login = system_username(username)
+    if not allow_registered and any(name.lower() == username.lower() or user_login(state, name) == login for name in state['users']):
+        raise ValueError('[MEMBER_EXISTS] 此账号已在团队成员中，请刷新列表')
+    try:
+        account = pwd.getpwnam(login)
+        login_group = grp.getgrnam(state['loginGroup'])
+    except KeyError:
+        raise ValueError('[MEMBER_IMPORT] 当前服务器或团队没有可接入的同名账号')
+    if any(name != username and user.get('uid') == account.pw_uid for name, user in state['users'].items()):
+        raise ValueError('[MEMBER_IMPORT] 此 Linux UID 已登记给其他成员，不能接入')
+    marker = 'workbench-' + state['teamId'] + '-' + login
+    if (account.pw_uid == 0 or account.pw_gecos != marker or account.pw_gid != login_group.gr_gid
+            or pathlib.PurePosixPath(account.pw_shell).name != 'nologin' or account.pw_dir != '/'):
+        raise ValueError('[MEMBER_IMPORT] 账号不属于当前团队的专用 SFTP 身份，不能接管其他系统或团队账号')
+    os_groups = {group.gr_name for group in grp.getgrall() if login in group.gr_mem or group.gr_gid == account.pw_gid}
+    groups = sorted(name for name, group in state['groups'].items() if name in os_groups and group.get('workspace') and not group.get('provisioning') and not group.get('deletedAt') and not group.get('purgedAt'))
+    admins = sorted(name for name in groups if state['groups'][name].get('adminGroup') in os_groups)
+    managed = {state['loginGroup']} | set(groups) | {state['groups'][name].get('adminGroup') for name in groups}
+    unknown = sorted(os_groups - managed)
+    identity = member_hash([state['teamId'], login, account.pw_uid, account.pw_gid, account.pw_gecos, account.pw_dir, account.pw_shell, sorted(os_groups), groups, admins])
+    return dict(username=username, login=login, uid=account.pw_uid, marker=marker, groups=groups, contentAdminGroups=admins, unknownGroups=unknown, identity=identity)
+
+
+def verify_existing_password(login, password):
+    """Verify a local shadow password without changing it or logging the secret."""
+    import ctypes, ctypes.util, hmac
+    if not isinstance(password, str) or not 1 <= len(password) <= 4096 or '\x00' in password:
+        raise ValueError('[MEMBER_IMPORT] 请输入原账号密码')
+    try:
+        shadow = next(line.split(':', 2)[1] for line in pathlib.Path('/etc/shadow').read_text().splitlines() if line.startswith(login + ':'))
+    except StopIteration:
+        raise ValueError('[MEMBER_IMPORT] 没有可验证的本地密码，不能接入')
+    if not shadow or shadow.startswith(('!', '*')):
+        raise ValueError('[MEMBER_IMPORT] 账号密码已锁定，不能接入')
+    library = ctypes.util.find_library('crypt') or 'libcrypt.so.1'
+    try:
+        crypt = ctypes.CDLL(library).crypt
+        crypt.argtypes = (ctypes.c_char_p, ctypes.c_char_p)
+        crypt.restype = ctypes.c_char_p
+        computed = crypt(password.encode('utf-8'), shadow.encode('ascii'))
+    except (OSError, UnicodeEncodeError, AttributeError):
+        raise ValueError('[MEMBER_IMPORT] 服务器不支持验证此账号的本地密码')
+    if not computed or not hmac.compare_digest(computed.decode('ascii'), shadow):
+        raise ValueError('[MEMBER_IMPORT] 原密码不正确')
 
 def run(args, data=None, allowed=(0,)):
     if args[0] == "setfacl":
@@ -746,7 +797,7 @@ def start_operation(root, state, request):
     previous = state.setdefault("operations", {}).get(key)
     if previous and previous.get("status") == "done" and request["op"] in ["user_create", "group_create"]:
         raise ValueError("创建已经完成，请刷新查看已有资源")
-    sanitized = {k: request[k] for k in ["op", "username", "name", "groups", "contentAdminGroups", "label", "group", "enabled", "role", "host", "port", "requestId", "handoffs"] if k in request}
+    sanitized = {k: request[k] for k in ["op", "username", "name", "groups", "contentAdminGroups", "label", "group", "enabled", "role", "host", "port", "requestId", "handoffs", "expectedIdentity"] if k in request}
     state["operations"][key] = {"id": key, "op": request["op"], "request": sanitized, "status": "running", "completed": previous.get("completed", []) if previous and previous.get("status") != "done" else []}
     state["activeOperation"] = key
     save(root, state)
@@ -1115,7 +1166,7 @@ def prepare_member_operation(state, current, request):
     if not isinstance(request_id, str) or not re.fullmatch(r'[a-f0-9-]{36}', request_id) or not isinstance(command, dict):
         raise ValueError('无效成员请求')
     op = command.get('op')
-    if op not in ('user_create', 'user_password', 'user_enabled', 'member_groups', 'recover'):
+    if op not in ('user_create', 'user_import', 'user_password', 'user_enabled', 'member_groups', 'recover'):
         raise ValueError('无效成员操作')
     username = account_name(command.get('username'))
     signature = member_hash({k: v for k, v in command.items() if k != 'password'})
@@ -1128,9 +1179,16 @@ def prepare_member_operation(state, current, request):
             raise ValueError('[MEMBER_REQUEST] 请求编号已用于其他密码操作')
         if previous['status'] == 'done': return None
         raise ValueError('[MEMBER_RECOVERY] 此操作可能已部分完成，请通过待恢复操作核对后继续')
-    if op == 'user_create':
+    if op in ('user_create', 'user_import'):
         if any(name.lower() == username.lower() for name in state['users']):
             raise ValueError('[MEMBER_EXISTS] 账号已存在，请查看已有成员或更换账号')
+        if op == 'user_import':
+            inspected = existing_member(request['root'], state, username)
+            if inspected['identity'] != command.get('expectedIdentity'):
+                raise ValueError('[MEMBER_CONFLICT] Linux 账号或所属项目组已变化，请重新检测')
+            if inspected['unknownGroups']:
+                raise ValueError('[MEMBER_IMPORT] 账号仍属于未登记或已停用的 Linux 组，请先核对其权限')
+            verify_existing_password(inspected['login'], command.get('password'))
     else:
         public = member_public_state(current)
         user = public['users'].get(username)
@@ -1140,7 +1198,7 @@ def prepare_member_operation(state, current, request):
             if successor and public['users'].get(successor, {}).get('revision') != (command.get('handoffRevisions') or {}).get(successor):
                 raise ValueError('[MEMBER_CONFLICT] 接任成员已变化，请重新确认')
     # Construct a fixed legacy operation; wrapper fields can never override root/op.
-    legacy = {k: command[k] for k in ('username', 'name', 'groups', 'contentAdminGroups', 'password', 'enabled', 'handoffs', 'operationId') if k in command}
+    legacy = {k: command[k] for k in ('username', 'name', 'groups', 'contentAdminGroups', 'password', 'enabled', 'handoffs', 'operationId', 'expectedIdentity') if k in command}
     legacy.update(op=op, root=request['root'], requestId=request_id)
     if op == 'user_create': legacy['password'] = '123456'
     if op == 'member_groups':
@@ -1161,7 +1219,7 @@ def prepare_member_operation(state, current, request):
         legacy.update(op='user_groups', groups=sorted(groups), contentAdminGroups=sorted(admins))
     if op == 'recover':
         job = state.get('operations', {}).get(command.get('operationId'))
-        if not job or job.get('request', {}).get('username') != username or job.get('op') not in ('user_create', 'user_groups', 'user_enabled', 'user_password', 'group_member'):
+        if not job or job.get('request', {}).get('username') != username or job.get('op') not in ('user_create', 'user_import', 'user_groups', 'user_enabled', 'user_password', 'group_member'):
             raise ValueError('无效成员恢复任务')
     receipts[request_id] = dict(signature=signature, status='running')
     if command.get('password') is not None:
@@ -1275,6 +1333,11 @@ def _execute(request):
             raise ValueError("请先初始化团队空间")
         state = load(root)
         return project_catalog(root, state) if request["op"] == "project_catalog" else project_purge(root, state, request)
+    if request['op'] == 'user_import_probe':
+        state = load(root)
+        if not state.get('initialized'):
+            raise ValueError('请先初始化团队空间')
+        return {'state': member_public_state(actual_state(state)), 'value': existing_member(root, state, request.get('username'))}
     if missing and request['op'] != 'status':
         hint = '；ACL 安装命令：' + acl_install_hint() if 'setfacl' in missing else ''
         raise ValueError("服务器缺少命令：" + ", ".join(missing) + "。请先安装发行版的 OpenSSH、shadow/passwd、procps、acl 软件包" + hint)
@@ -1299,7 +1362,30 @@ def _execute(request):
         if not missing:
             write_roles(root, current)
         return member_public_state(current)
-    if op == "user_create":
+    if op == 'user_import':
+        username = account_name(request.get('username'))
+        previous = state['users'].get(username)
+        inspected = existing_member(root, state, username, allow_registered=bool(previous))
+        if inspected['identity'] != request.get('expectedIdentity'):
+            raise ValueError('[MEMBER_CONFLICT] Linux 账号或所属项目组已变化，请重新检测')
+        if inspected['unknownGroups']:
+            raise ValueError('[MEMBER_IMPORT] 账号仍属于未登记或已停用的 Linux 组，请先核对其权限')
+        verify_existing_password(inspected['login'], request.get('password'))
+        if previous and (not previous.get('imported') or previous.get('uid') != inspected['uid'] or previous.get('marker') != inspected['marker']):
+            raise ValueError('[MEMBER_EXISTS] 此账号已有不同的团队登记，不能覆盖')
+        if not previous:
+            state['users'][username] = dict(username=username, systemUsername=inspected['login'], uid=inspected['uid'], marker=inspected['marker'], name=str(request.get('name') or username)[:120], enabled=True, imported=True, groups=inspected['groups'], contentAdminGroups=inspected['contentAdminGroups'], accessVersion=uuid.uuid4().hex)
+        for old_job in state.get('operations', {}).values():
+            if (old_job.get('op') == 'user_create' and old_job.get('request', {}).get('username') == username
+                    and old_job.get('status') != 'done' and old_job.get('error', '').startswith('Linux 账号已存在')):
+                old_job.update(status='done', resolution='已通过原密码接入已有账号')
+                old_job.pop('error', None)
+                old_receipt = state.get('memberRequests', {}).get(old_job.get('request', {}).get('requestId'))
+                if old_receipt: old_receipt['status'] = 'done'
+        # Publish access before committing the member record. A publication failure
+        # leaves the import job recoverable, without claiming a completed member.
+        write_roles(root, actual_state(state))
+    elif op == "user_create":
         import pwd, grp
         username = account_name(request.get("username"))
         login = system_username(username)
@@ -1438,7 +1524,10 @@ def _execute(request):
         for receipt_id in (request.get('requestId'), request.get('completionRequestId')):
             receipt = state.get('memberRequests', {}).get(receipt_id)
             if receipt: receipt['status'] = 'done'
-        save(root, state)
+        if op == 'user_import':
+            atomic_json(child(root, '.workbench/admin/state.json'), state)
+        else:
+            save(root, state)
         with child(root, ".workbench/admin/audit.jsonl").open("a", encoding="utf-8") as audit:
             json.dump({"at": datetime.datetime.now(datetime.timezone.utc).isoformat(), "actor": actor, "operation": op, "username": request.get("username"), "groups": request.get("groups"), "label": request.get("label"), "group": request.get("group"), "role": request.get("role"), **({"host": request['host'], "port": request['port'], "enabled": request['enabled']} if op == 'egress_jump' else {})}, audit, ensure_ascii=False)
             audit.write("\n")
@@ -1461,7 +1550,7 @@ def execute(request):
     try:
         return _execute(request)
     except Exception as error:
-        if request["op"] not in ["members_sync", "members_apply", "status", "probe", "storage_usage", "project_catalog", "project_purge", "environment_prepare", "egress_jump_probe"]:
+        if request["op"] not in ["members_sync", "members_apply", "status", "probe", "storage_usage", "project_catalog", "project_purge", "environment_prepare", "egress_jump_probe", "user_import_probe"]:
             try:
                 state = load(root)
                 key = operation_key(request)

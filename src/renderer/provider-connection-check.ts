@@ -19,7 +19,7 @@ export async function checkProviderConnection(call: Call, provider: Provider, cw
   const auth = await call<ProviderAuth>('provider.auth', { provider, cwd, ...(networkRoute ? { networkRoute } : {}) });
   current();
   let catalog: ProviderCatalog | undefined;
-  if (reachable && ['authenticated', 'configured', 'not-required'].includes(auth.status)) {
+  if (reachable && !auth.connectionIssue && ['authenticated', 'configured', 'not-required'].includes(auth.status)) {
     try { catalog = await call<ProviderCatalog>('provider.catalog', { provider, cwd, ...(networkRoute ? { networkRoute } : {}) }); if (catalog.modelError) issues.push('模型读取失败：' + catalog.modelError); }
     catch (error: any) { issues.push('模型与额度读取失败：' + error.message); }
   }

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -53,9 +54,13 @@ def read_meta(source: Path = SOURCE) -> ManualMeta:
             raise ValueError(f'Missing or invalid {label} in {source}')
         return match.group(1).strip()
 
+    commit_match = re.search(r'^功能核对版本\s+([0-9a-f]{7,40})\s*$', text, re.M)
+    commit = commit_match.group(1) if commit_match else subprocess.check_output(
+        ['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True,
+    ).strip()
     return ManualMeta(
         version=field('文档版本', r'\d+\.\d+(?:\.\d+)?'),
         software_version=field('适用软件版本', r'[^\r\n]+'),
-        commit=field('功能核对版本', r'[0-9a-f]{7,40}'),
+        commit=commit,
         date=field('发布日期', r'\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日'),
     )

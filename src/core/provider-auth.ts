@@ -8,12 +8,57 @@ const identityText = (value: unknown) => typeof value === 'string' && value.trim
 // Network diagnostics take precedence: some CLIs describe a failed network request as invalid auth.
 export function authFailure(error: unknown): ProviderAuth {
   const message = error instanceof Error ? error.message : String(error);
-  if (/network|fetch failed|econn|enotfound|eai_again|dns|socket|proxy|certificate|tls|timed? ?out|timeout|超时|网络/i.test(message))
+  if (/workspace routing discovery timed out/i.test(message))
+    return state('error', 'Codex 工作区路由发现超时（workspace routing discovery timed out）。请检查当前网络；这不表示账号未登录。');
+  if (/certificate|tls|ssl|证书/i.test(message))
+    return state('error', 'CLI 无法验证服务证书，请检查本机或所选出口的证书配置；这不表示账号未登录。');
+  if (/network|fetch failed|error sending request|econn|enotfound|eai_again|dns|socket|proxy|timed? ?out|timeout|超时|网络/i.test(message))
     return state('error', '无法完成登录检测，请检查网络、代理或证书后重试；这不表示账号未登录。');
   if (/not (?:logged|signed) in|not authenticated|unauthenticated|unauthorized|\b401\b|please (?:log|sign) in|authentication required|refresh_token_(?:expired|reused|invalidated)|token (?:has )?expired|invalid (?:access |refresh )?token|未登录|登录已过期/i.test(message))
     return state('unauthenticated', '尚未登录或登录已过期，请登录个人账号后重新检测。');
   return state('error', '无法确认登录状态，请检查 CLI 路径、版本和配置后重试。');
 }
+// Unlike account/read, this endpoint reads the native credential store without
+// requiring workspace routing discovery. Never request tokens for a status check.
+export function codexLocalAuth(result: any): ProviderAuth | undefined {
+  if (typeof result?.requiresOpenaiAuth !== 'boolean') return;
+  if (!result.requiresOpenaiAuth) return state('not-required', '当前 CLI 服务配置不要求 OpenAI 登录，将沿用该配置。');
+  if (result.authMethod === 'chatgpt' || result.authMethod === 'chatgptAuthTokens')
+    return { ...state('authenticated', '本机 Codex 已保存 ChatGPT 登录。模型服务连通性将在读取模型或执行任务时单独确认。'), verifiedLocally: true };
+  if (result.authMethod === 'apikey')
+    return { ...state('configured', '本机 Codex 已配置 API 凭据，尚未验证模型服务连通性。'), verifiedLocally: true };
+  if (result.authMethod === null) return state('unauthenticated', '尚未登录 Codex，请先登录个人账号。');
+}
+
+export function codexLoginStatus(output: string, code: number | null): ProviderAuth | undefined {
+  const clean = output.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '');
+  if (code === 0 && /^Logged in using ChatGPT\s*$/im.test(clean)) return codexLocalAuth({ requiresOpenaiAuth: true, authMethod: 'chatgpt' });
+  if (code === 0 && /^Logged in using (?:an? )?API key\b/im.test(clean)) return codexLocalAuth({ requiresOpenaiAuth: true, authMethod: 'apikey' });
+  if (code === 1 && /^Not logged in\s*$/im.test(clean)) return state('unauthenticated', '尚未登录 Codex，请先登录个人账号。');
+}
+
+async function inspectSavedCodexLogin(executable: string, cwd: string, signal: AbortSignal | undefined, timeout: number, env: NodeJS.ProcessEnv) {
+  if (signal?.aborted) return;
+  return new Promise<ProviderAuth | undefined>(resolve => {
+    const child = spawnCLI(executable, ['login', 'status'], cwd, env);
+    let output = '', settled = false;
+    const finish = (auth?: ProviderAuth, stop = false) => {
+      if (settled) return; settled = true; clearTimeout(timer); signal?.removeEventListener('abort', abort);
+      if (stop) void stopCLI(child).then(() => resolve(auth)); else resolve(auth);
+    };
+    const abort = () => finish(undefined, true), timer = setTimeout(abort, timeout);
+    signal?.addEventListener('abort', abort, { once: true });
+    const read = (data: Buffer) => { output += data.toString(); if (output.length > 65536) finish(undefined, true); };
+    // Codex prints login status on stderr. Parse it in memory; never forward raw
+    // output, which may include an API-key preview, to UI, logs or saved sessions.
+    child.stdout.on('data', read); child.stderr.on('data', read);
+    child.on('error', () => finish()); child.on('close', code => finish(codexLoginStatus(output, code)));
+    if (signal?.aborted) abort();
+  });
+}
+
+const unsupportedAuthMethod = (error: any) => error?.code === -32601 || /method not found|unknown method|unsupported method/i.test(error?.message || '');
+const transientAuthError = (error: unknown) => /network|fetch failed|error sending request|econn|enotfound|eai_again|dns|socket|proxy|certificate|tls|ssl|timed? ?out|timeout|超时|网络/i.test(error instanceof Error ? error.message : String(error));
 export function codexAuth(result: any): ProviderAuth {
   if (!result || typeof result.requiresOpenaiAuth !== 'boolean') return state('error', 'CLI 返回了无法识别的认证状态，请检查版本后重试。');
   if (result.account?.type) return { ...state(result.account.type === 'chatgpt' ? 'authenticated' : 'configured', result.account.type === 'chatgpt' ? '正在使用 CLI 已登录的个人 ChatGPT 账号。' : '沿用 CLI 的认证凭据；此认证方式未提供个人账号身份。'), identity: result.account.type === 'chatgpt' ? identityText(result.account.email) : undefined, plan: identityText(result.account.planType) };
@@ -48,12 +93,28 @@ export async function inspectAuth(provider: Provider, executable: string, cwd: s
     const abort = () => { void rpc.close(); }; signal?.addEventListener('abort', abort, { once: true });
     let timedOut = false;
     const timer = setTimeout(() => { timedOut = true; abort(); }, timeout);
+    let failure: unknown;
     try {
       await rpc.request('initialize', { clientInfo: { name: 'team_agent_workbench_auth', version: '0.3.0' } }, timeout);
       rpc.notify('initialized');
-      return codexAuth(await rpc.request('account/read', { refreshToken: true }, timeout));
-    } catch (error) { return authFailure(timedOut ? 'timeout' : error); }
+      try {
+        const result = codexLocalAuth(await rpc.request('getAuthStatus', { includeToken: false, refreshToken: false }, timeout));
+        if (result) return result;
+      } catch (error) { if (!unsupportedAuthMethod(error)) throw error; }
+      // Compatibility with versions that only expose the account API. This is a
+      // read, never a forced refresh of the desktop app's shared login.
+      return codexAuth(await rpc.request('account/read', { refreshToken: false }, timeout));
+    } catch (error) { failure = timedOut ? new Error('timeout') : error; }
     finally { clearTimeout(timer); signal?.removeEventListener('abort', abort); await rpc.close(); }
+    if (signal?.aborted) return state('error', '登录检测已取消。');
+    const failed = authFailure(failure);
+    if (transientAuthError(failure)) {
+      const saved = await inspectSavedCodexLogin(executable, cwd, signal, Math.min(timeout, 3000), env);
+      if (signal?.aborted) return state('error', '登录检测已取消。');
+      if (saved && authReady(saved)) return { ...saved, connectionIssue: failed.detail };
+      if (saved?.status === 'unauthenticated') return saved;
+    }
+    return failed;
   }
   return new Promise(resolve => {
     const child = spawnCLI(executable, provider === 'claude' ? ['auth', 'status'] : ['status', '--format', 'json'], cwd, env);

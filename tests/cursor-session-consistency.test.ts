@@ -7,7 +7,7 @@ import { NativeDesktopControls } from '../src/renderer/native-desktop-controls';
 import { BetaFeaturesModal } from '../src/renderer/beta-features';
 import { NativeSessionPicker } from '../src/renderer/native-sessions';
 import { CursorNativeQueue } from '../src/renderer/cursor-native-record';
-import { publishToNativeList } from '../src/core/native-publish';
+import { prepareDesktopRollout } from '../src/core/native-publish';
 import type { AgentSession } from '../src/shared/types';
 
 const session = (): AgentSession => ({ id:'legacy',nativeId:'original-agent',title:'saved',provider:'cursor',cwd:'D:/work',purpose:'work',createdAt:'2026-10-14T00:00:00Z',status:'idle',messages:[],sources:[],approvals:[],autoUpload:false,handoffPath:'handoff',cursorNative:{managed:true,descriptorFile:'original-descriptor'},desktopSyncState:'connected' });
@@ -49,6 +49,6 @@ test('unconfirmed HTTP submissions remain recoverable before a first queue snaps
 
 test('low-level desktop registration never synthesizes a Cursor model history or writes its session database',async()=>{
   const s=session();s.cursorNative=undefined;const before=JSON.stringify(s);
-  await assert.rejects(publishToNativeList(s,'not-a-real-home'),{code:'CURSOR_SHARED_SESSION_UNAVAILABLE'});
+  await assert.rejects(prepareDesktopRollout(s,'not-a-real-home','not-a-desktop'),/只有 Codex/);
   assert.equal(JSON.stringify(s),before);assert.equal(s.nativePath,undefined);
 });

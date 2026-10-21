@@ -2080,5 +2080,146 @@
         ]
       }
     ]
+  },
+  "case-project-sync": {
+    "caption": "本机项目关联与同步",
+    "steps": [
+      {
+        "title": "先创建本机项目",
+        "panes": [
+          {
+            "actor": "Alice · 项目组管理员",
+            "stage": "create",
+            "screen": "用户版 › 项目同步",
+            "status": "待确认",
+            "rows": [],
+            "action": "先创建本机项目",
+            "image": "case-project-sync-create.png",
+            "heading": "先创建本机项目",
+            "captureHeight": 1000
+          }
+        ]
+      },
+      {
+        "title": "关联中央节点与工作组",
+        "panes": [
+          {
+            "actor": "Alice · 项目组管理员",
+            "stage": "link",
+            "screen": "用户版 › 项目同步",
+            "status": "待确认",
+            "rows": [],
+            "action": "关联中央节点与工作组",
+            "image": "case-project-sync-link.png",
+            "heading": "关联中央节点与工作组",
+            "captureHeight": 1000
+          }
+        ]
+      },
+      {
+        "title": "发现分歧后核对两个版本",
+        "panes": [
+          {
+            "actor": "Alice · 项目组管理员",
+            "stage": "conflict",
+            "screen": "用户版 › 项目同步",
+            "status": "待确认",
+            "rows": [],
+            "action": "发现分歧后核对两个版本",
+            "image": "case-project-sync-conflict.png",
+            "heading": "发现分歧后核对两个版本",
+            "captureHeight": 1150
+          }
+        ]
+      },
+      {
+        "title": "明确采用内容并保留恢复记录",
+        "panes": [
+          {
+            "actor": "Alice · 项目组管理员",
+            "stage": "history",
+            "screen": "用户版 › 项目同步",
+            "status": "待确认",
+            "rows": [],
+            "action": "明确采用内容并保留恢复记录",
+            "image": "case-project-sync-history.png",
+            "heading": "明确采用内容并保留恢复记录",
+            "captureHeight": 1000
+          }
+        ]
+      }
+    ]
+  },
+  "case-member-sync": {
+    "caption": "多台管理端维护成员",
+    "steps": [
+      {
+        "title": "离线登记，联网后开通",
+        "panes": [
+          {
+            "actor": "总管理员",
+            "stage": "pending",
+            "screen": "管理员版 › 用户管理",
+            "status": "待确认",
+            "rows": [],
+            "action": "离线登记，联网后开通",
+            "image": "case-member-sync-pending.png",
+            "heading": "离线登记，联网后开通",
+            "captureHeight": 1000
+          }
+        ]
+      },
+      {
+        "title": "核对另一端的成员修改",
+        "panes": [
+          {
+            "actor": "总管理员",
+            "stage": "concurrent",
+            "screen": "管理员版 › 用户管理",
+            "status": "待确认",
+            "rows": [],
+            "action": "核对另一端的成员修改",
+            "image": "case-member-sync-concurrent.png",
+            "heading": "核对另一端的成员修改",
+            "captureHeight": 1000
+          }
+        ]
+      }
+    ]
+  },
+  "case-project-recommendations": {
+    "caption": "查看和处理项目推荐",
+    "steps": [
+      {
+        "title": "打开项目推荐并核对依据",
+        "panes": [
+          {
+            "actor": "Bob · 项目组成员",
+            "stage": "review",
+            "screen": "用户版 › 项目推荐",
+            "status": "待查看",
+            "rows": [],
+            "action": "打开项目推荐并核对依据",
+            "image": "case-project-recommendations-review.png",
+            "heading": "打开项目推荐并核对依据"
+          }
+        ]
+      },
+      {
+        "title": "按需关联会话并补充反馈",
+        "panes": [
+          {
+            "actor": "Bob · 项目组成员",
+            "stage": "accepted",
+            "screen": "用户版 › 项目推荐",
+            "status": "已接受",
+            "rows": [],
+            "action": "按需关联会话并补充反馈",
+            "image": "case-project-recommendations-accepted.png",
+            "heading": "按需关联会话并补充反馈"
+          }
+        ]
+      }
+    ]
   }
 }

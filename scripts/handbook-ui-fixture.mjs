@@ -1,4 +1,5 @@
 // Example data for screenshots of the production renderers. No server or model calls.
+import { syncFixture } from './handbook-sync-fixture.mjs';
 import { questionFixture } from './handbook-question-fixture.mjs';
 import { activityFixture } from './handbook-activity-fixture.mjs';
 export function makeFixture(id, step, paneIndex, pane, stage = '') {
@@ -116,7 +117,7 @@ export function makeFixture(id, step, paneIndex, pane, stage = '') {
       adminSnapshot.setupIssues=['缺少 ACL 支持，需要安装 acl 软件包以设置团队目录权限。'];
     }
   }
-  return activityFixture(questionFixture({id,step,paneIndex,pane,stage,at,project,profile,workspace,directory,binding,source,brief,session,content,conclusions,updates,task,submissionFiles,draft,snapshot,adminSnapshot,beforeProject,admin,username}));
+  return syncFixture(activityFixture(questionFixture({id,step,paneIndex,pane,stage,at,project,profile,workspace,directory,binding,source,brief,session,content,conclusions,updates,task,submissionFiles,draft,snapshot,adminSnapshot,beforeProject,admin,username})));
 }
 
 export function installFixture(data) {
@@ -126,6 +127,10 @@ export function installFixture(data) {
   const copy = value => structuredClone(value);
   const catalog = { models:[{id:'default',name:'CLI 默认模型',isDefault:true}],quota:{windows:[],detail:'使用个人模型账号',url:''},checkedAt:data.at };
   const call = async (action, payload={}) => {
+    action=action.replace(/^personal:/,'');
+    if(action==='workspace.select'||action==='activity.project')return;
+    if(action==='rsi.inbox')return copy(data.rsiInbox||{enabled:true,items:[],sessions:[],queued:false,busy:false});
+    if(action==='rsi.settings')return {config:{enabled:true,quiet:false},cwd:data.directory};
     window.__handbook.calls.push(action);
     if(action==='snapshot') return copy(data.snapshot);
     if(action==='activity.project') return;
@@ -162,7 +167,8 @@ export function installFixture(data) {
     window.__handbook.unhandled.push(action); throw new Error('Screenshot fixture missing action: '+action);
   };
   window.workbench={call,subscribe(listener){listeners.push(listener);return()=>{const i=listeners.indexOf(listener);if(i>=0)listeners.splice(i,1);};}};
-  window.admin={subscribe(listener){return()=>{};},async call(action,payload={}){
+  const adminListeners=[];window.__handbook.emitAdmin=()=>adminListeners.forEach(listener=>listener());
+  window.admin={subscribe(listener){adminListeners.push(listener);return()=>{};},async call(action,payload={}){
     window.__handbook.calls.push('admin:'+action);
     if(action==='snapshot')return copy(data.adminSnapshot);
     if(action==='project.catalog')return {projects:[{id:data.project.id,name:data.project.name,groupLabel:'项目一组'}]};

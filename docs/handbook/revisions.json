@@ -560,6 +560,41 @@
       "document_commit": "da5fbe759c7e64ed73a6b8613fe8d23ca0fe5cfb",
       "summary": "发布 v0.7.8：合入远端 54bc8f3；恢复 10 月 8 日最后一版的三类整理、每类补充提示词及再次整理，更新成员提问、动态推荐和实际界面配图。",
       "content_sha256": "8c0ee8565b98ec1a8d97174c608cdfe59527fba440b568ac48283b1c1c968bc1"
+    },
+    {
+      "updated_at": "2026-10-21T17:38:43+08:00",
+      "base_commit": "e03f40818aab80a6fd3e7a478ab6f7a050f8ed12",
+      "document_commit": null,
+      "summary": "依据 v2.2.8（e03f408）更新 HTML 手册：本机项目与自动同步、AI 冲突核对与恢复、多管理端成员同步、项目推荐与反馈、个人会话迁移及 Codex 多层子会话；更新联动网络说明与界面标注。",
+      "content_sha256": "5a2178e0bc4f30134bfb846bd373fffaf39160a5a0f8891cef11b8c332b5c6b5"
+    },
+    {
+      "updated_at": "2026-10-21T17:44:30+08:00",
+      "base_commit": "e03f40818aab80a6fd3e7a478ab6f7a050f8ed12",
+      "document_commit": null,
+      "summary": "依据 v2.2.8（e03f408）更新 HTML 手册：本机项目与自动同步、AI 冲突核对与恢复、多管理端成员同步、项目推荐与反馈、个人会话迁移及 Codex 多层子会话；更新联动网络说明与界面标注。",
+      "content_sha256": "3a1efb1225436367852544051bff2a19c16c18761c93b208f3635eceee4fc8e9"
+    },
+    {
+      "updated_at": "2026-10-21T19:24:18+08:00",
+      "base_commit": "e03f40818aab80a6fd3e7a478ab6f7a050f8ed12",
+      "document_commit": null,
+      "summary": "提交前预览：更新 Codex 正式同步、等待退出后自动同步及取消流程，核对网络范围和新版手册入口。",
+      "content_sha256": "2de2b515146d10bcef53f885c9e7bd29e7de22266103063d726be8bcbc3f88e3"
+    },
+    {
+      "updated_at": "2026-10-21T19:25:35+08:00",
+      "base_commit": "e03f40818aab80a6fd3e7a478ab6f7a050f8ed12",
+      "document_commit": "c58927e22b08a0596271bbf6144b5c9bf22724a7",
+      "summary": "提交前预览：更新 Codex 正式同步与延后同步、管理员接入已有账号，核对新版手册入口与网络范围。",
+      "content_sha256": "112a31a394a0249c02c6c5f6196e6cb123ba963cc212c148754f4a0f9e4cbb8e"
+    },
+    {
+      "updated_at": "2026-10-21T19:35:35+08:00",
+      "base_commit": "c58927e22b08a0596271bbf6144b5c9bf22724a7",
+      "document_commit": null,
+      "summary": "发布 v2.2.10：保留 v2.2.9 图片和图表功能，更新 Codex 正式同步、延后同步、账号接入及使用指导。",
+      "content_sha256": "9e6006f26b1d6d7f25d5c5e36e3e687ba07394fdd54948466a43b051f1fbdf42"
     }
   ]
 }

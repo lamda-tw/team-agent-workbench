@@ -38,7 +38,11 @@ async function main(){
       await fs.writeFile(path.join(root, 'model-tools.json'), JSON.stringify(tools.map((tool: any) => ({ type: tool.type, name: tool.name, tools: tool.tools?.map((inner: any) => ({ type: inner.type, name: inner.name })) })), null, 2));
     }
     if(hold)await new Promise<void>(resolve=>{release=resolve;});else await pause(400);
-    const tag=[...body.matchAll(/WF_TASK_[ABC](?:_[A-Z]+)?/g)].at(-1)?.[0]||'BACKGROUND';
+    // Project journal references follow the user's request. Echo that request's
+    // marker, not the last marker found in another session's quoted journal.
+    const payload=JSON.parse(body),latestUser=(payload.input||[]).filter((item:any)=>item.role==='user').at(-1);
+    const userText=typeof latestUser?.content==='string'?latestUser.content:(latestUser?.content||[]).map((item:any)=>item.text||'').join('\n');
+    const tag=userText.match(/WF_TASK_[ABC](?:_[A-Z]+)*/)?.[0]||[...body.matchAll(/WF_TASK_[ABC](?:_[A-Z]+)*/g)].at(-1)?.[0]||'BACKGROUND';
     const text='WF_REPLY_'+tag,itemId='msg_'+randomUUID().replaceAll('-',''),part={type:'output_text',text,annotations:[]};
     if (tag.endsWith('APPROVALWB') || tag.endsWith('APPROVALNATIVE')) {
       if (!requestedTools.has(tag)) {
@@ -85,7 +89,6 @@ async function main(){
     await wb.store.init();await wb.configureWorkspace(profile,'123','',async()=>false);
     const group:any=await wb.groupCommand({action:'create',label:'Codex工作流'});
     const cli=await authLauncher(path.join(root,'cli'),{status:'ready',turn:'success'});wb.store.settings.providerPaths.codex=cli.launcher;
-    await wb.setBetaFeature('codexDesktopSync',true);
     const sessions=[];
     for(const tag of ['A','B','C']){
       const cwd=path.join(root,'workspace-'+tag);await fs.mkdir(cwd,{recursive:true});
@@ -121,33 +124,83 @@ async function main(){
     await wb.store.init();await wb.configureWorkspace(profile,'123','',async()=>false);
     await wb.send(sessions[1].id,'WF_TASK_B_RESUMED');await until(()=>wb.session(sessions[1].id).status==='idle');assert.equal(wb.session(sessions[1].id).nativeId,nativeId);assert.equal(starts,1);assert.equal(desktopOpens,2,'later sends and Workbench restart must not refocus the native window');
     assert(requests.at(-1)!.includes('WF_REPLY_WF_TASK_B_NATIVE'));assert(!requests.at(-1)!.includes('WF_TASK_A'));assert(!requests.at(-1)!.includes('WF_TASK_C'));
-    await wb.store.save();await wb.close();console.log('Core workflow passed: one backend, three independent threads, parallel execution, desktop peer, client close, restart resume.');
+    // Migrate a real private CLI thread, including native compaction, into the
+    // same backend. All inference still goes to the local Responses fixture.
+    const existing=await wb.createSession('codex',sessions[2].cwd,sessions[2].binding!.project.id,'work',undefined,'beta-local','inherit',false,'direct',false);
+    existing.title='已有会话同步验证';
+    const privateStorage=await prepareCodexStorage(userData,existing,personal);
+    const privateRuntime=new AgentRuntime(existing,executable,{changed:()=>{},event:()=>{},done:()=>{}},privateStorage,environment());
+    (wb as any).runtimes.set(existing.id,privateRuntime);
+    let privateRecord='';
+    try {
+      await privateRuntime.prompt('WF_TASK_C_PRIVATE');await until(()=>existing.status==='idle');
+      await privateRuntime.rpc.request('thread/compact/start',{threadId:existing.nativeId});
+      await until(async()=>!!existing.nativePath&&(await fs.readFile(existing.nativePath,'utf8')).includes('"type":"compacted"'));
+      await until(()=>existing.status==='idle');
+      // Simulate a normal desktop in this isolated profile; never touch the
+      // actual user's desktop or its connection record.
+      await fs.rm(desktopFile);desktopRunning=true;
+      const beforeQueue=requests.length;await wb.syncCodexDesktop(existing.id);
+      assert(existing.codexSyncRequest);assert(!existing.codexDesktop);assert.equal(requests.length,beforeQueue);
+      assert.equal((wb as any).runtimes.get(existing.id),privateRuntime,'queuing must retain the private executor');
+      await wb.send(existing.id,'WF_TASK_C_WAITING');await until(()=>existing.status==='idle');
+      assert(existing.messages.some(m=>m.text==='WF_REPLY_WF_TASK_C_WAITING'));
+      privateRecord=await fs.readFile(existing.nativePath!,'utf8');
+    } catch(error) {await privateRuntime.close();throw error;}
+    const privateId=existing.nativeId!,privateFile=existing.nativePath!;
+    wb.store.inputs[existing.id]={text:'还没发送的草稿',sourceIds:[],answers:{}};
+    const beforeAttach=requests.length;desktopRunning=false;
+    await (wb as any).drainDeferredCodexSync();
+    assert.equal(requests.length,beforeAttach,'association must not run another model turn');
+    assert.equal(existing.codexSyncRequest,undefined);assert.equal(desktopOpens,3,'the waiting request automatically reopens the shared desktop');
+    assert.equal(existing.nativeId,privateId);assert.equal(existing.codexDesktop,true);assert.notEqual(existing.nativePath,privateFile);
+    assert((await fs.readFile(existing.nativePath!,'utf8')).startsWith(privateRecord),'native tools and compaction remain intact');
+    assert.equal(wb.store.inputs[existing.id].text,'还没发送的草稿');
+    const linkedHistory=(await peer.request('thread/read',{threadId:privateId,includeTurns:true})).thread;
+    assert(JSON.stringify(linkedHistory).includes('WF_TASK_C_PRIVATE'));assert(JSON.stringify(linkedHistory).includes('WF_TASK_C_WAITING'));
+    await wb.send(existing.id,'WF_TASK_C_AFTER_ATTACH');await until(()=>existing.status==='idle');
+    assert.equal(existing.nativeId,privateId);assert(requests.at(-1)!.includes('WF_REPLY_WF_TASK_C_PRIVATE'),'next turn must use the native compacted context');
+    assert(requests.at(-1)!.includes('WF_REPLY_WF_TASK_C_WAITING'),'work done while waiting must also reach the next turn');
+    assert.equal(await fs.readFile(privateFile,'utf8'),privateRecord,'the old private record is no longer written');
+    await wb.store.save();await wb.close();console.log('Core workflow passed, including existing-session attachment and compacted context.');
     if(process.argv.includes('--ui')){
       const { _electron }=await import('playwright');
       application=await _electron.launch({args:[path.resolve('dist/user')],env:{...process.env,...environment(),ELECTRON_RUN_AS_NODE:undefined,WORKBENCH_TEST:'1',WORKBENCH_DATA_DIR:userData},timeout:30000});
       const page=await application.firstWindow();const snapshot=()=>page.evaluate(()=>window.workbench.call('snapshot')) as Promise<any>;
       page.on('crash',()=>console.log('Test UI renderer crashed'));
-      console.log('UI opened; waiting for login.');
+      console.log('UI opened; connecting the isolated fixture account.');
       await until(async()=>!!(await snapshot()).settings.workspaceSnapshot);
-      await page.getByLabel('登录密码',{exact:true}).waitFor({state:'visible',timeout:20000});
-      await page.getByLabel('登录密码',{exact:true}).fill('123');await page.getByRole('button',{name:'登录',exact:true}).click();await page.getByLabel('登录密码',{exact:true}).waitFor({state:'hidden',timeout:20000});
+      await page.evaluate(profile=>window.workbench.call('remote.connect',{profile,password:'123',newPassword:'123'}),profile);
+      await until(async()=>!!(await snapshot()).connection?.connected);
       await pause(300);
       if(await page.locator('.modal-backdrop').count())console.log('Post-login modal:',await page.locator('.modal-backdrop').innerText());
       console.log('UI logged in; selecting shared session.');
-      await page.locator('[data-session-id="'+sessions[1].id+'"]').click();assert.equal(await page.getByRole('button',{name:'在 Codex 中打开',exact:false}).count(),1);
-      console.log('UI native entry present; testing Beta off.');
-      await page.getByRole('button',{name:'Beta 功能',exact:false}).click();await page.getByRole('switch',{name:'开启 Codex 桌面联动',exact:true}).uncheck();await page.getByRole('button',{name:'完成',exact:true}).click();
-      await page.getByRole('button',{name:'新建会话',exact:true}).click();assert(await page.getByRole('checkbox',{name:'此会话联动 Codex 桌面版',exact:true}).isDisabled());await page.getByRole('button',{name:'取消',exact:true}).click();
-      await page.getByRole('button',{name:'Beta 功能',exact:false}).click();await page.getByRole('switch',{name:'开启 Codex 桌面联动',exact:true}).check();await page.getByRole('button',{name:'完成',exact:true}).click();
-      console.log('UI Beta on; creating ordinary-flow session.');
+      await page.locator('[data-session-id="'+sessions[1].id+'"]').click();
+      assert(!(await page.getByRole('button',{name:'在 Codex 中打开',exact:true}).isVisible()));
+      assert(await page.getByRole('button',{name:'提问',exact:true}).isVisible());assert(await page.getByRole('button',{name:'整理成果',exact:true}).isVisible());
+      await page.getByRole('button',{name:'更多会话操作',exact:true}).click();assert(await page.getByRole('button',{name:'在 Codex 中打开',exact:true}).isVisible());await page.screenshot({path:path.join(root,'sync-menu.png')});await page.keyboard.press('Escape');
+      await page.getByRole('button',{name:'Beta 功能',exact:false}).click();assert.equal(await page.getByRole('switch',{name:'开启 Codex 桌面联动',exact:true}).count(),0);await page.getByRole('button',{name:'完成',exact:true}).click();
+      console.log('UI sync menu and ordinary option passed; creating a new linked session.');
       const before=(await snapshot()).sessions.length;
-      await page.getByRole('button',{name:'新建会话',exact:true}).click();assert(await page.getByRole('checkbox',{name:'此会话联动 Codex 桌面版',exact:true}).isChecked());await page.getByRole('checkbox',{name:'默认引用项目资料（已完善时）',exact:true}).uncheck();await page.getByRole('button',{name:'创建会话',exact:true}).click();await until(async()=>(await snapshot()).sessions.length===before+1);
-      const created=(await snapshot()).sessions.find((s:any)=>!sessions.some(old=>old.id===s.id));assert(created.codexDesktop);assert.equal(created.nativeId,undefined);
+      await page.getByRole('button',{name:'新建会话',exact:true}).click();assert.equal(await page.getByRole('switch',{name:'与 Codex 桌面版同步',exact:true}).getAttribute('aria-checked'),'true');await page.screenshot({path:path.join(root,'new-sync-session.png')});await page.getByRole('checkbox',{name:'默认引用项目资料（已完善时）',exact:true}).uncheck();await page.getByRole('button',{name:'创建会话',exact:true}).click();await until(async()=>(await snapshot()).sessions.length===before+1);
+      const created=(await snapshot()).sessions.find((s:any)=>s.id!==existing.id&&!sessions.some(old=>old.id===s.id));assert(created.codexDesktop);assert.equal(created.nativeId,undefined);
       await page.locator('[data-session-id="'+created.id+'"]').click();
-      await page.locator('.session-title-row h2').filter({hasText:'新会话'}).waitFor({state:'visible'});
+      await page.locator('.session-title-row').filter({hasText:'新会话'}).waitFor({state:'visible'});
       await page.getByRole('textbox',{name:'任务输入',exact:true}).fill('WF_TASK_B_UI');await page.getByRole('button',{name:'发送任务',exact:true}).click();
       await until(async()=>{const s=(await snapshot()).sessions.find((s:any)=>s.id===created.id);if(s.error)throw new Error(s.error);return s.status==='idle'&&s.messages.some((m:any)=>m.text==='WF_REPLY_WF_TASK_B_UI');});
-      await page.screenshot({path:path.join(root,'workflow-ui.png')});assert.equal((await service.ensure()).pid,bridge.pid);console.log('Existing User UI passed: Beta switch, disabled option, new-session binding, native-open entry and sending.');
+      await page.screenshot({path:path.join(root,'workflow-ui.png')});assert.equal((await service.ensure()).pid,bridge.pid);console.log('User UI passed: no Codex Beta gate, sync in more menu, new-session binding and sending.');
+      const priorIds=new Set((await snapshot()).sessions.map((s:any)=>s.id));
+      await page.getByRole('button',{name:'新建会话',exact:true}).click();await page.getByRole('switch',{name:'与 Codex 桌面版同步',exact:true}).click();
+      await page.getByRole('checkbox',{name:'默认引用项目资料（已完善时）',exact:true}).uncheck();await page.getByRole('button',{name:'创建会话',exact:true}).click();
+      await until(async()=>(await snapshot()).sessions.some((s:any)=>!priorIds.has(s.id)));
+      const ordinary=(await snapshot()).sessions.find((s:any)=>!priorIds.has(s.id));assert(!ordinary.codexDesktop);
+      await page.locator('[data-session-id="'+ordinary.id+'"]').click();await page.getByRole('button',{name:'更多会话操作',exact:true}).click();
+      assert(await page.getByRole('button',{name:'同步到 Codex',exact:true}).isVisible());assert.equal(await page.getByRole('button',{name:'恢复同步',exact:true}).count(),0);
+      await page.screenshot({path:path.join(root,'existing-sync-menu.png')});await page.getByRole('button',{name:'同步到 Codex',exact:true}).click();
+      await until(async()=>{const s=(await snapshot()).sessions.find((s:any)=>s.id===ordinary.id);if(s.desktopSyncError)throw Error(s.desktopSyncError);return s.codexDesktop&&s.desktopSyncState==='connected';});
+      await page.getByRole('textbox',{name:'任务输入',exact:true}).fill('WF_TASK_C_UI_ATTACH');await page.getByRole('button',{name:'发送任务',exact:true}).click();
+      await until(async()=>{const s=(await snapshot()).sessions.find((s:any)=>s.id===ordinary.id);if(s.error)throw Error(s.error);return s.status==='idle'&&s.messages.some((m:any)=>m.text==='WF_REPLY_WF_TASK_C_UI_ATTACH');});
+      console.log('Existing ordinary session attached through the real menu and continued successfully.');
     }
     const extendedCases:string[]=[];
     if(process.argv.includes('--extended')){
@@ -202,8 +255,11 @@ async function main(){
       peer.respond(nativeApprovals[0].id, { decision: nativeApprovals[0].params.availableDecisions?.includes('cancel') ? 'cancel' : 'decline' }); await until(() => a.status === 'idle'); assert.equal(a.desktopWaitingApproval, false);
       extendedCases.push('real CLI approvals route only to the initiating client and observers never reject');
     }
-    const result={passed:true,root,backendStarts:starts,nativeThreadCount:3,maxConcurrent,requests:requests.length,externalModelRequests:0,ui:process.argv.includes('--ui'),cases:['lazy creation','single shared manager','automatic window launch on concurrent first sends','automatic reopen on restore without resending','later sends reuse the window without refocusing','independent native thread IDs','parallel model requests','no cross-thread messages','closing one does not close others','native peer receives shared context','closing Workbench preserves native turn','resume after restart',...(process.argv.includes('--ui')?['UI entry and Beta gating']:[]),...extendedCases]};
+    const result={passed:true,root,backendStarts:starts,nativeThreadCount:process.argv.includes('--ui')?6:4,maxConcurrent,requests:requests.length,externalModelRequests:0,ui:process.argv.includes('--ui'),cases:['lazy creation','single shared manager','automatic window launch on concurrent first sends','automatic reopen on restore without resending','later sends reuse the window without refocusing','independent native thread IDs','parallel model requests','no cross-thread messages','closing one does not close others','native peer receives shared context','closing Workbench preserves native turn','resume after restart','ordinary desktop queues sync without closing the private executor','continue a real CLI turn while waiting','desktop exit completes queued sync and reopens the shared window','existing private native history attaches without inference','compacted context continues after attachment','input draft and original native ID preserved',...(process.argv.includes('--ui')?['sync only in more menu', 'new-session option without Beta', 'ordinary session attaches and continues through UI']:[]),...extendedCases]};
     await fs.writeFile(path.join(root,'result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result,null,2));
+  }catch(error){
+    if(application){const page=await application.firstWindow();await page.screenshot({path:path.join(root,'failure.png')}).catch(()=>{});await fs.writeFile(path.join(root,'failure.txt'),await page.locator('body').innerText()).catch(()=>{});}
+    console.error('Workflow artifacts:',root);throw error;
   }finally{
     release?.();await application?.close();await wb.close();admin.disconnect();await peer?.close();
     if(bridge)await stopBridge(bridge.endpoint);else{const record=await fs.readFile(path.join(service.parent,'active.json'),'utf8').then(JSON.parse).catch(()=>undefined);if(record){const d=JSON.parse(await fs.readFile(record.file,'utf8'));await stopBridge(d.endpoint);}}

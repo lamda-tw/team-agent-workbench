@@ -20,7 +20,7 @@ const guides=JSON.parse(await fs.readFile(guideSource,'utf8'));
 const digest=createHash('sha256');
 async function hashTree(dir){for(const entry of (await fs.readdir(dir,{withFileTypes:true})).sort((a,b)=>a.name.localeCompare(b.name))){const file=path.join(dir,entry.name);if(entry.isDirectory())await hashTree(file);else{digest.update(path.relative(root,file));digest.update(await fs.readFile(file));}}}
 await hashTree(path.join(root,'src'));
-for(const file of [source,guideSource,path.join(root,'package.json'),path.join(root,'scripts/handbook-screen-annotations.mjs'),import.meta.filename,path.join(root,'scripts/handbook-ui-fixture.mjs'),path.join(root,'scripts/handbook-question-fixture.mjs'),path.join(root,'scripts/handbook-activity-fixture.mjs'),path.join(root,'start-admin-dev.cmd'),path.join(root,'start-user-dev.cmd')])digest.update(await fs.readFile(file));
+for(const file of [source,guideSource,path.join(root,'package.json'),path.join(root,'scripts/handbook-screen-annotations.mjs'),import.meta.filename,path.join(root,'scripts/handbook-ui-fixture.mjs'),path.join(root,'scripts/handbook-question-fixture.mjs'),path.join(root,'scripts/handbook-activity-fixture.mjs'),path.join(root,'scripts/handbook-sync-fixture.mjs'),path.join(root,'start-admin-dev.cmd'),path.join(root,'start-user-dev.cmd')])digest.update(await fs.readFile(file));
 const hash=digest.digest('hex');
 const filter=process.argv.find(a=>a.startsWith('--case='))?.slice(7);
 const stepFilter=Number(process.argv.find(a=>a.startsWith('--step='))?.slice(7)||0);
@@ -61,10 +61,19 @@ async function clickResultMore(page,name){
 }
 async function adminScene(page,data){
  const {pane,step,paneIndex}=data;
+ if(data.id==='case-member-sync'){
+  await page.locator('.admin-shell').waitFor();
+  if(data.stage==='concurrent'){
+   await page.locator('[data-user="bob"]').getByRole('button',{name:'重置密码',exact:true}).click();
+   await page.evaluate(()=>{const d=window.__handbook.data;d.adminSnapshot.state.users.bob.enabled=false;d.adminSnapshot.state.users.bob.revision='member-v2';window.__handbook.emitAdmin();});
+   await page.getByText('成员状态已更新',{exact:true}).waitFor();
+  }
+  return;
+ }
  await page.locator('.admin-shell').waitFor();
  if(data.id==='case-team-setup'){
   if(step===1&&paneIndex===1){
-   await page.getByRole('heading',{name:'管理员服务器连接',exact:true}).waitFor();
+   await page.getByRole('heading',{name:'连接中央节点',exact:true}).waitFor();
    await page.getByLabel('服务器地址',{exact:true}).fill('team.example.internal');
    await page.getByLabel('管理账号',{exact:true}).fill('root');
    await page.getByLabel('登录密码',{exact:true}).fill('example-password');
@@ -136,16 +145,40 @@ async function saveInventory(page,name){
 }
 async function userScene(page,data){
  const {pane,step,paneIndex,id,beforeProject}=data,screen=pane.screen.replace('项目成果库 › 团队','团队成果').replace('项目成果库 › 个人','个人成果').replace('工作会话 › 网络与登录设置','工作会话 › 模型连接');
- await page.locator('.connection-button').waitFor();
+ await page.locator('.topbar').waitFor();
+ if(id==='case-project-recommendations'){
+  await page.locator('[data-project-id="handbook-project"]').click();
+  await page.getByLabel('查看AI推荐：'+data.project.name,{exact:true}).click();
+  await page.locator('.rsi-detail').waitFor();
+  if(data.stage==='review')await page.getByText('推荐依据',{exact:true}).click();
+  else{await page.getByLabel('关联会话',{exact:true}).selectOption(data.session.id);await page.getByLabel('推荐反馈',{exact:true}).fill('建议动作具体，请继续保留样本范围和验证口径。');}
+  return;
+ }
+ if(id==='case-project-sync'){
+  if(data.stage==='create'){
+   await click(page,'创建项目');await page.getByLabel('项目名称',{exact:true}).fill('验证资料整理');
+   for(const [label,key] of [['项目背景','background'],['项目目标','objectives'],['验收标准','acceptance']])await page.getByLabel(label,{exact:true}).fill(data.brief[key]);
+  }else if(data.stage==='link'){
+   await page.locator('[data-project-id="handbook-project"]').first().click();
+   await page.getByTitle('项目设置：'+data.project.name,{exact:true}).first().click();
+   await page.getByRole('tab',{name:'中央节点',exact:true}).click();
+   await page.getByLabel('同步到工作组',{exact:false}).selectOption('team_one');
+  }else{
+   await page.locator('.topbar-actions > button').first().click();
+   await page.getByRole('dialog',{name:'账号资料同步'}).waitFor();
+   if(data.stage==='history')await page.getByText('合并记录与恢复',{exact:true}).click();
+  }
+  return;
+ }
  if(screen.includes('连接团队空间')){
-  if(beforeProject&&data.admin)await page.getByRole('button',{name:'稍后填写',exact:true}).click();
-  if(!await page.getByRole('heading',{name:'登录团队工作台',exact:true}).count())await page.locator('.connection-button').click();
+
+  if(!await page.getByRole('heading',{name:'连接项目',exact:true}).count())await click(page,'连接项目');
   await page.getByLabel('登录密码',{exact:true}).fill('example-password');
   if(id==='case-egress-mixed'&&data.username==='member-b'&&step===2)await page.getByLabel('管理端网络出口接入码',{exact:true}).fill('TAE2.handbook-example-access-code');
   return;
  }
  if(await page.getByRole('heading',{name:'登录团队工作台',exact:true}).count())await page.locator('.modal').getByRole('button',{name:'取消',exact:true}).click();
- if(beforeProject){await page.getByRole('dialog',{name:'完善项目资料'}).waitFor();await page.getByLabel('引导项目名称').fill(data.project.name);for(const [label,key] of [['项目背景','background'],['项目目标','objectives'],['验收标准','acceptance']])await page.getByLabel(label,{exact:true}).fill(data.brief[key]);return;}
+ if(beforeProject){await click(page,'创建项目');await page.getByLabel('所属工作组',{exact:true}).selectOption('team_one');await page.getByLabel('项目名称',{exact:true}).fill(data.project.name);for(const [label,key] of [['项目背景','background'],['项目目标','objectives'],['验收标准','acceptance']])await page.getByLabel(label,{exact:true}).fill(data.brief[key]);return;}
  await page.locator('[data-project-id="handbook-project"]').click();
  if(id==='case-activity-recommendations'||pane.recommendation){
   const recommendationStage=pane.recommendation||data.stage;
@@ -191,7 +224,7 @@ async function userScene(page,data){
   }
   return;
  }
- if(screen.includes('我的工作组')||screen.includes('项目资料')){await page.locator('#sidebar-project-pane').getByRole('button',{name:'项目说明',exact:true}).click();return;}
+ if(screen.includes('我的工作组')||screen.includes('项目资料')){await page.getByTitle('项目设置：'+data.project.name,{exact:true}).click();return;}
  if(screen.includes('任务')||screen.includes('验收结果')){
   await page.getByRole('button',{name:data.admin?'项目任务':'我的任务',exact:true}).click();
   if(data.admin)await page.getByRole('button',{name:/^我派发的/}).click();
@@ -222,7 +255,7 @@ async function userScene(page,data){
   await openSession(page);
   const input=page.getByLabel('任务输入',{exact:true});
   if(!(await input.inputValue()))await input.fill(id==='example'&&data.stage==='retest'?'请统一设备、输入规模和代码版本，对照格式 A 基线与 Bob 的格式 B 反例复测，记录证据和适用范围。':id==='case-egress-mixed'?'请读取 data/input-samples.csv 中的样本，按项目要求比较两种格式，记录依据与待确认项。':'请按项目验收标准继续验证，记录实验条件、结果与待确认项。');
-  if(screen.includes('AI 参考内容'))await page.locator('summary').filter({hasText:'AI 参考内容'}).click();
+  if(screen.includes('AI 参考内容')){await click(page,'更多会话操作');await click(page,'AI 参考内容');}
   if(screen.includes('模型连接'))await page.getByRole('button',{name:'网络与登录设置',exact:true}).click();
   return;
  }
