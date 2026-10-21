@@ -922,6 +922,11 @@ export class Workbench {
     if (s.nativeId) await (await this.runtime(s)).ensureStarted();
     this.ensureNativeTranscriptSync(); await this.store.save(); this.broadcast(); return true;
   }
+  private async openCodexDesktopIfClosed(session: AgentSession) {
+    if (!session.codexDesktop) return;
+    const executable = await resolveProvider('codex', this.store.settings.providerPaths.codex);
+    await this.codexDesktop.open(session, executable, this.providerEnvironment(session.networkRoute, session), { ifClosed: true });
+  }
   async reconnectCodexDesktop(id: string) {
     const session = this.session(id); this.assertCanWork(session.binding);
     if (!session.codexDesktop || session.closedAt) throw new Error('请选择打开的 Codex 联动会话');
@@ -930,7 +935,8 @@ export class Workbench {
     if (current && ['starting', 'running', 'approval'].includes(session.status)) throw new Error('这条会话仍在运行，无需重新连接');
     if (current) { this.runtimes.delete(id); await current.close(); }
     await (await this.runtime(session)).ensureStarted();
-    this.ensureNativeTranscriptSync(); await this.store.save(); this.broadcast();
+    this.ensureNativeTranscriptSync(); await this.store.save();
+    await this.openCodexDesktopIfClosed(session); this.broadcast();
     return session;
   }
   async restoreDesktopSync(id: string) {
@@ -1527,6 +1533,9 @@ export class Workbench {
       await runtime.ensureStarted();
       await this.store.save(); // Persist a new/private-fork native identity before any model task is sent.
       if(s.codexDesktop)this.ensureNativeTranscriptSync();
+      if (canceled()) return false;
+      if (s.closedAt) throw new Error('此会话已关闭');
+      await this.openCodexDesktopIfClosed(s);
       if (canceled()) return false;
       if (s.closedAt) throw new Error('此会话已关闭');
       s.status = 'starting';

@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import http from 'node:http';
 import { randomUUID } from 'node:crypto';
+import { spawn } from 'node:child_process';
 import { Workbench } from '../src/core/workbench';
 import { CodexDesktopService } from '../src/core/codex-desktop-service';
 import { installedCodexDesktopExecutable } from '../src/core/codex-shared-backend';
@@ -16,12 +17,17 @@ import { memberProfile } from '../tests/fixtures/member-profile';
 import { authLauncher } from '../tests/fixtures/auth-launcher.mjs';
 
 const pause=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms));
+function stopBridge(endpoint:string) {
+  const url=new URL(endpoint);url.protocol='http:';url.pathname+='/stop';
+  return new Promise<void>(resolve=>{const request=http.request(url,{method:'POST',agent:false,signal:AbortSignal.timeout(5000)},response=>{response.on('error',()=>resolve());response.resume();resolve();});request.on('error',()=>resolve());request.end();});
+}
 async function until(check:()=>Promise<boolean>|boolean){const end=Date.now()+35000;while(!await check()){if(Date.now()>end)throw new Error('workflow fixture timed out');await pause(50);}}
 async function main(){
   const root=path.resolve('.test-data','codex-workflow-'+Date.now()),personal=path.join(root,'personal'),userData=path.join(root,'user'),share=path.join(root,'share');
   await fs.mkdir(personal,{recursive:true});await fs.mkdir(share,{recursive:true});
   const requests:string[]=[],priorHome=process.env.CODEX_HOME,priorBridge=process.env.WORKBENCH_CODEX_DESKTOP_BRIDGE;
-  let concurrent=0,maxConcurrent=0,release:undefined|(()=>void),hold=false,starts=0,halfHold=false;
+  let concurrent=0,maxConcurrent=0,release:undefined|(()=>void),hold=false,starts=0,halfHold=false,desktopOpens=0,desktopRunning=false;
+  const openedThreads:string[]=[];
   const requestedTools = new Set<string>();
   const responses=http.createServer(async(req,res)=>{
     let body='';for await(const chunk of req)body+=chunk;
@@ -61,7 +67,15 @@ async function main(){
   await fs.writeFile(path.join(personal,'config.toml'),`model="beta-local"\nmodel_provider="beta_local"\napproval_policy="never"\nsandbox_mode="danger-full-access"\n[model_providers.beta_local]\nname="Local workflow fixture"\nbase_url="http://127.0.0.1:${(responses.address() as any).port}/v1"\nwire_api="responses"\nrequires_openai_auth=false\n`);
   process.env.CODEX_HOME=personal;delete process.env.WORKBENCH_CODEX_DESKTOP_BRIDGE;
   const executable=await installedCodexDesktopExecutable(await resolveProvider('codex'));
-  const service=new CodexDesktopService({sourceHome:personal,workerFile:path.resolve('dist/user/codex-desktop-worker.cjs'),running:async()=>false,discover:async()=>{starts++;return{app:'NOT_OPENED.exe',executable};}});
+  const serviceOptions={sourceHome:personal,running:async()=>desktopRunning,discover:async()=>({app:'NOT_OPENED.exe',executable}),launchWorker:async(file:string,env:NodeJS.ProcessEnv)=>{
+    starts++;
+    const child=spawn(process.execPath,[path.resolve('dist/user/codex-desktop-worker.cjs'),file],{detached:true,windowsHide:true,stdio:'ignore',env:{...process.env,...env,CODEX_APP_SERVER_WS_URL:undefined,WORKBENCH_CODEX_DESKTOP_BRIDGE:undefined}});
+    await new Promise<void>((resolve,reject)=>{child.once('spawn',resolve);child.once('error',reject);});child.unref();
+  },launchDesktop:async(_target:unknown,args:string[],env:NodeJS.ProcessEnv)=>{
+    assert.equal(args.length,1);assert.match(args[0],/^codex:\/\/threads\/[a-f0-9-]+$/);assert(env.CODEX_APP_SERVER_WS_URL);
+    desktopOpens++;desktopRunning=true;openedThreads.push(args[0]);return process.pid;
+  }};
+  const service=new CodexDesktopService(serviceOptions);
   const environment=()=>({HTTP_PROXY:'',HTTPS_PROXY:'',ALL_PROXY:'',NO_PROXY:'127.0.0.1,localhost'});
   let wb=new Workbench(userData,()=>{},console.log,undefined,environment,undefined,service),peer:WebSocketRpc|undefined,application:any;
   const admin=new LocalAdminConnection(()=>{});let bridge:any;
@@ -78,10 +92,16 @@ async function main(){
       const project=await wb.createProject('独立项目'+tag,group.id,{background:'本地工作流验证',objectives:'验证独立会话',acceptance:'单一共享后台，上下文隔离',scope:'本机空目录',deliverables:'验证记录',resources:'',constraints:'本地模型打桩',collaboration:'独立推进'});
       sessions.push(await wb.createSession('codex',cwd,project.id,'work',undefined,'beta-local','inherit',false,'direct',true));
     }
-    assert.equal(starts,0);assert.equal(requests.length,0);console.log('Created three native-linked sessions; no backend or desktop started.');
+    assert.equal(starts,0);assert.equal(desktopOpens,0);assert.equal(requests.length,0);console.log('Created three native-linked sessions; no backend or desktop started.');
     await Promise.all(sessions.map((s,i)=>wb.send(s.id,'WF_TASK_'+['A','B','C'][i])));
     await until(()=>sessions.every(s=>s.status==='idle'&&s.messages.some(m=>m.role==='assistant')));
     assert.equal(starts,1);assert.equal(new Set(sessions.map(s=>s.nativeId)).size,3);assert(maxConcurrent>=2,'independent sessions must run concurrently');
+    assert.equal(desktopOpens,1,'concurrent first sends automatically open one linked window');assert(sessions.some(s=>openedThreads[0]==='codex://threads/'+s.nativeId));
+    const beforeRestore=requests.length,{file:bridgeFile}=JSON.parse(await fs.readFile(path.join(service.parent,'active.json'),'utf8'));
+    const desktopFile=path.join(path.dirname(bridgeFile),'desktop.json'),attachment=JSON.parse(await fs.readFile(desktopFile,'utf8'));
+    await fs.writeFile(desktopFile,JSON.stringify({...attachment,pid:99999999}));desktopRunning=false;
+    await wb.reconnectCodexDesktop(sessions[1].id);
+    assert.equal(desktopOpens,2);assert.equal(openedThreads.at(-1),'codex://threads/'+sessions[1].nativeId);assert.equal(requests.length,beforeRestore,'restoring the desktop must not resend a task');
     for(let i=0;i<3;i++){const tag=['A','B','C'][i];assert(sessions[i].messages.some(m=>m.role==='assistant'&&m.text==='WF_REPLY_WF_TASK_'+tag));for(const other of ['A','B','C'].filter(x=>x!==tag))assert(!sessions[i].messages.some(m=>m.text.includes('WF_TASK_'+other)),'other conversation leaked');}
     bridge=await service.ensure();peer=new WebSocketRpc(bridge.endpoint);await peer.request('initialize',{clientInfo:{name:'native_peer_fixture',version:'1'},capabilities:{experimentalApi:true}});peer.notify('initialized');
     await peer.request('thread/resume',{threadId:sessions[1].nativeId});
@@ -97,9 +117,9 @@ async function main(){
     const history=(await peer.request('thread/read',{threadId:sessions[1].nativeId,includeTurns:true})).thread;
     assert(JSON.stringify(history).includes('WF_REPLY_WF_TASK_B_TWO'));assert(JSON.stringify(history).includes('WF_REPLY_WF_TASK_B_NATIVE'));
     const nativeId=sessions[1].nativeId;
-    wb=new Workbench(userData,()=>{},console.log,undefined,environment,undefined,new CodexDesktopService({sourceHome:personal,workerFile:path.resolve('dist/user/codex-desktop-worker.cjs'),running:async()=>{throw Error('existing manager must be reused');}}));
+    wb=new Workbench(userData,()=>{},console.log,undefined,environment,undefined,new CodexDesktopService(serviceOptions));
     await wb.store.init();await wb.configureWorkspace(profile,'123','',async()=>false);
-    await wb.send(sessions[1].id,'WF_TASK_B_RESUMED');await until(()=>wb.session(sessions[1].id).status==='idle');assert.equal(wb.session(sessions[1].id).nativeId,nativeId);assert.equal(starts,1);
+    await wb.send(sessions[1].id,'WF_TASK_B_RESUMED');await until(()=>wb.session(sessions[1].id).status==='idle');assert.equal(wb.session(sessions[1].id).nativeId,nativeId);assert.equal(starts,1);assert.equal(desktopOpens,2,'later sends and Workbench restart must not refocus the native window');
     assert(requests.at(-1)!.includes('WF_REPLY_WF_TASK_B_NATIVE'));assert(!requests.at(-1)!.includes('WF_TASK_A'));assert(!requests.at(-1)!.includes('WF_TASK_C'));
     await wb.store.save();await wb.close();console.log('Core workflow passed: one backend, three independent threads, parallel execution, desktop peer, client close, restart resume.');
     if(process.argv.includes('--ui')){
@@ -182,11 +202,11 @@ async function main(){
       peer.respond(nativeApprovals[0].id, { decision: nativeApprovals[0].params.availableDecisions?.includes('cancel') ? 'cancel' : 'decline' }); await until(() => a.status === 'idle'); assert.equal(a.desktopWaitingApproval, false);
       extendedCases.push('real CLI approvals route only to the initiating client and observers never reject');
     }
-    const result={passed:true,root,backendStarts:starts,nativeThreadCount:3,maxConcurrent,requests:requests.length,externalModelRequests:0,ui:process.argv.includes('--ui'),cases:['lazy creation','single shared manager','independent native thread IDs','parallel model requests','no cross-thread messages','closing one does not close others','native peer receives shared context','closing Workbench preserves native turn','resume after restart',...(process.argv.includes('--ui')?['UI entry and Beta gating']:[]),...extendedCases]};
+    const result={passed:true,root,backendStarts:starts,nativeThreadCount:3,maxConcurrent,requests:requests.length,externalModelRequests:0,ui:process.argv.includes('--ui'),cases:['lazy creation','single shared manager','automatic window launch on concurrent first sends','automatic reopen on restore without resending','later sends reuse the window without refocusing','independent native thread IDs','parallel model requests','no cross-thread messages','closing one does not close others','native peer receives shared context','closing Workbench preserves native turn','resume after restart',...(process.argv.includes('--ui')?['UI entry and Beta gating']:[]),...extendedCases]};
     await fs.writeFile(path.join(root,'result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result,null,2));
   }finally{
     release?.();await application?.close();await wb.close();admin.disconnect();await peer?.close();
-    if(bridge){const url=new URL(bridge.endpoint);url.protocol='http:';url.pathname+='/stop';await fetch(url,{method:'POST'}).catch(()=>{});}else{const record=await fs.readFile(path.join(service.parent,'active.json'),'utf8').then(JSON.parse).catch(()=>undefined);if(record){const d=JSON.parse(await fs.readFile(record.file,'utf8'));const url=new URL(d.endpoint);url.protocol='http:';url.pathname+='/stop';await fetch(url,{method:'POST'}).catch(()=>{});}}
+    if(bridge)await stopBridge(bridge.endpoint);else{const record=await fs.readFile(path.join(service.parent,'active.json'),'utf8').then(JSON.parse).catch(()=>undefined);if(record){const d=JSON.parse(await fs.readFile(record.file,'utf8'));await stopBridge(d.endpoint);}}
     if(priorHome===undefined)delete process.env.CODEX_HOME;else process.env.CODEX_HOME=priorHome;if(priorBridge===undefined)delete process.env.WORKBENCH_CODEX_DESKTOP_BRIDGE;else process.env.WORKBENCH_CODEX_DESKTOP_BRIDGE=priorBridge;
     responses.closeAllConnections();await new Promise<void>(resolve=>responses.close(()=>resolve()));
   }

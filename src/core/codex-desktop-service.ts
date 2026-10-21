@@ -4,6 +4,7 @@ import os from 'node:os';
 import { randomUUID, createHash } from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
+import { request as httpRequest } from 'node:http';
 import * as asar from '@electron/asar';
 import { userDesktopAppOpen } from './desktop-app-open';
 import { privateBridgeDirectory, installedCodexDesktopExecutable, readBackendRecord } from './codex-shared-backend';
@@ -16,9 +17,10 @@ import { runtimeAssets } from '../shared/runtime-assets';
 
 const run = promisify(execFile), pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 export interface CodexDesktopTarget { app: string; executable: string; archive?: string }
+export interface CodexDesktopOpenOptions { ifClosed?: boolean }
 export interface CodexDesktopIntegration {
   storage(session: AgentSession, executable: string, env: NodeJS.ProcessEnv): Promise<CodexStorage>;
-  open(session: AgentSession, executable: string, env: NodeJS.ProcessEnv): Promise<void>;
+  open(session: AgentSession, executable: string, env: NodeJS.ProcessEnv, options?: CodexDesktopOpenOptions): Promise<void>;
 }
 export async function codexDesktopTarget(): Promise<CodexDesktopTarget> {
   if (process.platform !== 'win32') throw new Error('Codex 桌面联动暂仅支持 Windows');
@@ -34,9 +36,19 @@ export function validateManagedBridge(value: CodexDesktopBridge, sourceHome: str
   let endpoint: URL; try { endpoint = new URL(value.endpoint); } catch { throw new Error('Codex 联动连接记录不可用'); }
   if(value.version!==1||endpoint.protocol!=='ws:'||endpoint.hostname!=='127.0.0.1'||!endpoint.port||endpoint.username||endpoint.password||endpoint.search||endpoint.hash||!/^\/rpc\/[a-f0-9]{64}$/.test(endpoint.pathname)||!sameNativePath(value.sourceHome,sourceHome)||!Number.isInteger(value.pid)||value.pid<=0||!Number.isFinite(Date.parse(value.expiresAt))||!allowExpired&&Date.parse(value.expiresAt)<=Date.now())throw new Error('Codex 联动连接已失效，请核对原生客户端后恢复同步');
 }
-async function ready(bridge: CodexDesktopBridge) {
-  const url = new URL(bridge.endpoint); url.protocol='http:';url.pathname+='/readyz';
-  try{return(await fetch(url,{signal:AbortSignal.timeout(2500),redirect:'error'})).ok;}catch{return false;}
+function bridgeRequest(bridge: CodexDesktopBridge, operation: 'readyz' | 'renew') {
+  const url = new URL(bridge.endpoint); url.protocol='http:';url.pathname+='/'+operation;
+  return new Promise<boolean>(resolve => {
+    // These authenticated loopback checks must stay direct even with NODE_USE_ENV_PROXY.
+    const request = httpRequest(url, { method: operation === 'renew' ? 'POST' : 'GET', agent: false, signal: AbortSignal.timeout(operation === 'renew' ? 5000 : 2500) }, response => {
+      response.on('error', () => resolve(false)); response.resume();
+      resolve(response.statusCode !== undefined && response.statusCode >= 200 && response.statusCode < 300);
+    });
+    request.on('error', () => resolve(false)); request.end();
+  });
+}
+function ready(bridge: CodexDesktopBridge) {
+  return bridgeRequest(bridge, 'readyz');
 }
 const jobs = new Map<string,Promise<CodexDesktopBridge>>();
 const desktopJobs = new Map<string,Promise<void>>();
@@ -75,9 +87,7 @@ export class CodexDesktopService implements CodexDesktopIntegration {
     }
     if (descriptor.approvalRoutingVersion !== 1) throw new Error('联动后台需要更新。请结束当前任务、保存并退出 Codex，再从工作台恢复同步');
     if (Date.parse(descriptor.expiresAt) <= Date.now()) {
-      const url = new URL(descriptor.endpoint); url.protocol='http:';url.pathname+='/renew';
-      const renewed = await fetch(url,{method:'POST',signal:AbortSignal.timeout(5000),redirect:'error'}).catch(()=>undefined);
-      if (!renewed?.ok) throw new Error('连接已到期，请恢复同步；原会话和正在运行的任务保留');
+      if (!await bridgeRequest(descriptor, 'renew')) throw new Error('连接已到期，请恢复同步；原会话和正在运行的任务保留');
       descriptor=JSON.parse(await fs.readFile(record.file,'utf8')); validateManagedBridge(descriptor,this.sourceHome);
     }
     this.recovery = undefined; return descriptor;
@@ -125,7 +135,7 @@ export class CodexDesktopService implements CodexDesktopIntegration {
       const recovery=this.recovery;
       if(await (this.options.running||codexDesktopRunning)()) {
         const attachment=recovery&&await fs.readFile(path.join(recovery.directory,'desktop.json'),'utf8').then(JSON.parse).catch(()=>undefined);
-        if(!attachment || attachment.endpointHash!==createHash('sha256').update(recovery!.bridge.endpoint).digest('hex') || processAlive(attachment.pid)!==true) throw new Error('Codex 当前以普通方式运行。首次联动请保存工作并退出 Codex，再重试；不会自动关闭你的聊天');
+        if(!attachment || attachment.endpointHash!==createHash('sha256').update(recovery!.bridge.endpoint).digest('hex') || processAlive(attachment.pid)!==true) throw new Error('Codex 当前以普通方式运行。首次联动请保存工作并退出 Codex，再重试；联动成功后会自动打开 Codex，不会自动关闭你的聊天');
       }
       const target=await (this.options.discover||codexDesktopTarget)();
       const directory=recovery?.directory||await(this.options.privateDirectory||privateBridgeDirectory)(this.parent),inputFile=path.join(directory,'input.json');
@@ -162,21 +172,22 @@ export class CodexDesktopService implements CodexDesktopIntegration {
     if(session.nativeId&&!resumePath)throw new Error('原 Codex 会话记录未找到，已保留会话与输入；不会另建会话');
     return {home:this.sourceHome,sourceHome:this.sourceHome,args:[],env:{CODEX_HOME:this.sourceHome,CODEX_SQLITE_HOME:this.sourceHome},resumePath,sharedEndpoint:bridge.endpoint,sharedApprovalRouting:bridge.approvalRoutingVersion===1};
   }
-  async open(session:AgentSession,_executable:string,env:NodeJS.ProcessEnv) {
+  async open(session:AgentSession,_executable:string,env:NodeJS.ProcessEnv,options:CodexDesktopOpenOptions={}) {
     const key=path.resolve(this.parent).toLowerCase(),previous=desktopJobs.get(key)||Promise.resolve();
-    const job=previous.catch(()=>{}).then(()=>this.openWindow(session,env));desktopJobs.set(key,job);
+    const job=previous.catch(()=>{}).then(()=>this.openWindow(session,env,options));desktopJobs.set(key,job);
     try{await job;}finally{if(desktopJobs.get(key)===job)desktopJobs.delete(key);}
   }
-  private async openWindow(session:AgentSession,env:NodeJS.ProcessEnv) {
+  private async openWindow(session:AgentSession,env:NodeJS.ProcessEnv,options:CodexDesktopOpenOptions) {
     if(!session.codexDesktop||session.provider!=='codex'||session.networkRoute==='management')throw new Error('请先创建启用桌面联动的 Codex 会话');
-    const bridge=await this.ensure(env),target=await(this.options.discover||codexDesktopTarget)();
+    const bridge=await this.ensure(env);
     const record=await fs.readFile(path.join(this.parent,'active.json'),'utf8').then(JSON.parse);
-    let attachedPid:number|undefined;
-    if(record.managed&&await(this.options.running||codexDesktopRunning)()) {
-      const attachment=await fs.readFile(path.join(path.dirname(record.file),'desktop.json'),'utf8').then(JSON.parse).catch(()=>undefined);
-      let attached=false;try{if(attachment?.endpointHash===createHash('sha256').update(bridge.endpoint).digest('hex')){process.kill(attachment.pid,0);attached=true;attachedPid=attachment.pid;}}catch{}
-      if(!attached)throw new Error('Codex 当前以普通方式运行。请保存并退出后，再点击“在 Codex 中打开”；不会自动关闭你的聊天');
-    }
+    const attachment=record.managed&&await fs.readFile(path.join(path.dirname(record.file),'desktop.json'),'utf8').then(JSON.parse).catch(()=>undefined);
+    const attachedPid=attachment?.endpointHash===createHash('sha256').update(bridge.endpoint).digest('hex')&&processAlive(attachment.pid)===true ? attachment.pid as number : undefined;
+    const running=await(this.options.running||codexDesktopRunning)();
+    if(record.managed&&running&&!attachedPid)throw new Error('Codex 当前以普通方式运行。请保存并退出后，再重试；联动成功后会自动打开 Codex，不会自动关闭你的聊天');
+    // Keep a just-launched window even before OS discovery sees it; background sends never refocus it.
+    if(options.ifClosed&&attachedPid)return;
+    const target=await(this.options.discover||codexDesktopTarget)();
     if(target.archive){const file=asar.listPackage(target.archive,{isPack:false}).find(file=>/application-network-startup-.*\.js$/.test(file));if(!file||!asar.extractFile(target.archive,file.replace(/^[/\\]/,'')).toString().includes('CODEX_APP_SERVER_WS_URL'))throw new Error('当前 Codex 桌面版不支持此联动入口，请更新后再试');}
     const environment={...process.env,...env,CODEX_APP_SERVER_WS_URL:bridge.endpoint,CODEX_APP_SERVER_FORCE_CLI:undefined,ELECTRON_RUN_AS_NODE:undefined};
     const args=session.nativeId?['codex://threads/'+session.nativeId]:[];

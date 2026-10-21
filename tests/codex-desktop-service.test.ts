@@ -87,8 +87,52 @@ test('a desktop started through another route after backend warmup is not silent
   const service=new CodexDesktopService({...f.options,running:async()=>running});
   try{
     await service.ensure();running=true;
-    await assert.rejects(service.open({provider:'codex',codexDesktop:true,networkRoute:'direct',nativeId:randomUUID()} as AgentSession,'ignored',{}),/普通方式运行/);
+    await assert.rejects(service.open({provider:'codex',codexDesktop:true,networkRoute:'direct',nativeId:randomUUID()} as AgentSession,'ignored',{}, {ifClosed:true}),/普通方式运行/);
     assert.equal(f.counts().starts,1);assert.equal(f.counts().desktopOpens,0);
+  }finally{await f.close();}
+});
+
+test('retry after quitting an ordinary desktop automatically opens the linked thread, then reuses its window',async()=>{
+  const f=await fixture();let running=true;
+  const service=new CodexDesktopService({...f.options,running:async()=>running,launchDesktop:async(target,args,env)=>{await f.options.launchDesktop(target,args,env);running=true;return process.pid;}});
+  const session={provider:'codex',purpose:'work',codexDesktop:true,networkRoute:'direct',cwd:f.root} as AgentSession;
+  try{
+    await assert.rejects(service.storage(session,'ignored',{}),/联动成功后会自动打开/);
+    assert.equal(f.counts().starts,0);assert.equal(f.counts().desktopOpens,0);
+    running=false;await service.storage(session,'ignored',{});
+    session.nativeId=randomUUID();
+    await service.open(session,'ignored',{}, {ifClosed:true});
+    assert.equal(f.counts().desktopOpens,1);assert.deepEqual(f.counts().desktopArgs,['codex://threads/'+session.nativeId]);
+    assert.equal(f.counts().desktopEnv.CODEX_APP_SERVER_WS_URL,f.endpoint);
+    await service.open(session,'ignored',{}, {ifClosed:true});assert.equal(f.counts().desktopOpens,1,'later sends must not refocus the existing window');
+    const {file}=JSON.parse(await fs.readFile(path.join(f.parent,'active.json'),'utf8'));
+    const attachment=path.join(path.dirname(file),'desktop.json');const saved=JSON.parse(await fs.readFile(attachment,'utf8'));
+    await fs.writeFile(attachment,JSON.stringify({...saved,pid:99999999}));running=false;
+    await service.open(session,'ignored',{}, {ifClosed:true});assert.equal(f.counts().desktopOpens,2);
+    assert.deepEqual(f.counts().desktopArgs,['codex://threads/'+session.nativeId]);assert.equal(f.counts().starts,1);
+  }finally{await f.close();}
+});
+
+test('concurrent automatic opens launch once even before desktop process discovery catches up',async()=>{
+  const f=await fixture();
+  const options={...f.options,launchDesktop:async(target:any,args:string[],env:NodeJS.ProcessEnv)=>{await f.options.launchDesktop(target,args,env);return process.pid;}};
+  const first=new CodexDesktopService(options),second=new CodexDesktopService(options);
+  const session={provider:'codex',purpose:'work',codexDesktop:true,networkRoute:'direct',nativeId:randomUUID()} as AgentSession;
+  try{
+    await Promise.all([first.open(session,'ignored',{}, {ifClosed:true}),second.open({...session,nativeId:randomUUID()},'ignored',{}, {ifClosed:true})]);
+    assert.equal(f.counts().starts,1);assert.equal(f.counts().desktopOpens,1);
+    await second.open(session,'ignored',{});assert.equal(f.counts().desktopOpens,2,'the explicit open button still focuses its requested thread');
+  }finally{await f.close();}
+});
+
+test('a failed automatic launch can retry on the same backend and native thread',async()=>{
+  const f=await fixture();let failed=false;
+  const service=new CodexDesktopService({...f.options,launchDesktop:async(target,args,env)=>{if(!failed){failed=true;throw Error('desktop launch failed');}await f.options.launchDesktop(target,args,env);return process.pid;}});
+  const session={provider:'codex',purpose:'work',codexDesktop:true,networkRoute:'direct',nativeId:randomUUID()} as AgentSession;
+  try{
+    await assert.rejects(service.open(session,'ignored',{}, {ifClosed:true}),/desktop launch failed/);
+    await service.open(session,'ignored',{}, {ifClosed:true});assert.equal(f.counts().starts,1);assert.equal(f.counts().desktopOpens,1);
+    assert.deepEqual(f.counts().desktopArgs,['codex://threads/'+session.nativeId]);
   }finally{await f.close();}
 });
 test('idle cleanup conservatively preserves loaded threads and uncertain backend state',async()=>{
