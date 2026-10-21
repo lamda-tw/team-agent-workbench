@@ -23,11 +23,13 @@ try {
       assert.equal(state.workspaceReady, false);
       await assert.rejects(page.evaluate(() => window.workbench.call('session.create', { provider: 'codex', cwd: 'C:\\' })));
       assert.deepEqual(state.providers.map(p => p.provider).sort(), ['claude', 'codex', 'cursor']);
-      for (const provider of ['codex', 'cursor']) {
+      for (const provider of ['cursor']) {
         const bundled = state.providers.find(p => p.provider === provider);
         assert(bundled.available && bundled.path.includes('resources'), `${provider} must use its packaged runtime`);
       }
-      // Claude Code uses the user's installation; its absence must not block the app.
+      const codex = state.providers.find(p => p.provider === 'codex');
+      assert(!codex.path.includes('providers\\codex') && !codex.path.includes('providers/codex'), 'Codex must not use a bundled runtime');
+      // Codex and Claude Code use the user's installation; absence must not block the app.
       await assert.rejects(page.evaluate(() => window.workbench.call('operation', { op: 'user_create' })));
     } else {
       assert.equal(await page.evaluate(() => typeof window.workbench), 'undefined');
@@ -36,5 +38,5 @@ try {
     console.log(edition, 'packaged executable starts, first-use connection dialog and edition isolation verified');
   }
   assert.notEqual(apps[0].process().pid, apps[1].process().pid);
-  console.log('Both packaged executables running concurrently; bundled CLIs work without development PATH or repository cwd.');
+  console.log('Both editions start without development PATH or repository cwd; Cursor is bundled, Codex/Claude use local installations.');
 } finally { for (const app of apps.reverse()) await app.close(); }

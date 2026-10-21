@@ -53,7 +53,7 @@ export function EgressView({ snapshot, remote, refresh }: { snapshot: AdminEgres
       <span className={'egress-state ' + (snapshot.running ? 'online' : '')}>{snapshot.running ? <CircleCheck size={17}/> : <WifiOff size={17}/>} {snapshot.running ? '出口运行中' : snapshot.config.enabled ? '出口未运行' : '未启用'}</span>
     </div>
     <div className="egress-context"><span><Network size={14}/>{upstream(snapshot.config)}</span><span>{savedServices || '未允许成员转发'}</span><span><ShieldCheck size={14}/>加密传输</span></div>
-    {snapshot.config.enabled && <p className="egress-footnote">{snapshot.background ? '关闭管理端窗口后，出口和已登录的反向隧道会继续在系统托盘运行。双击托盘图标可重新打开；选择“退出并停止转发”才会结束。注销或关机会停止。' : '系统托盘当前不可用，关闭管理端窗口会停止转发。'}</p>}
+    {snapshot.config.enabled && <p className="egress-footnote">{snapshot.background ? '关闭管理端窗口后，出口和已登录的反向隧道会继续在系统托盘运行。双击托盘图标可重新打开；选择“关闭此节点并停止其转发”才会结束。注销或关机会停止。' : '系统托盘当前不可用，关闭管理端窗口会停止转发。'}</p>}
     {error && <div className="inline-error" role="alert">{error}</div>}
     {message && <div className="admin-success" role="status"><CircleCheck size={17}/>{message}</div>}
     {snapshot.lastError && <div className="egress-start-error" role="alert"><span>出口启动失败：{snapshot.lastError}</span><button className="text-button" onClick={() => setTab('settings')}>检查出口设置<ArrowRight size={14}/></button></div>}

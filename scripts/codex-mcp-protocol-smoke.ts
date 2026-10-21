@@ -3,6 +3,7 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import { JsonRpc } from '../src/core/rpc';
 import { CodexMcp } from '../src/core/codex-mcp';
+import { resolveProvider } from '../src/core/providers';
 import { prepareCodexStorage, refreshCodexConfiguration } from '../src/core/codex-storage';
 import type { AgentSession } from '../src/shared/types';
 
@@ -10,7 +11,7 @@ import type { AgentSession } from '../src/shared/types';
 async function main() {
 const root = path.join(process.cwd(), '.test-data', 'native-mcp-' + Date.now()), sourceHome = path.join(root, 'personal');
 await fs.mkdir(sourceHome, { recursive: true });
-const executable = path.resolve('node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin/codex.exe');
+const executable = await resolveProvider('codex');
 const storage = await prepareCodexStorage(path.join(root, 'data'), { cwd: root, provider: 'codex', purpose: 'work' } as AgentSession, sourceHome);
 const source = new JsonRpc(executable, ['app-server'], root, false, { CODEX_HOME: sourceHome });
 const runtime = new JsonRpc(executable, storage.args, root, false, storage.env);

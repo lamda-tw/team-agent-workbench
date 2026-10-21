@@ -11,6 +11,7 @@ const hashes = [];
 for (const edition of ['admin', 'user']) {
   const base = path.join(releaseRoot, edition, 'win-unpacked'), archive = path.join(base, 'resources/app.asar');
   assert.equal(JSON.parse(extractFile(archive, 'package.json').toString()).version, version);
+  assert.equal(await fs.stat(path.join(base, 'resources/providers/codex')).then(() => true, () => false), false, 'Codex must use the local user installation');
   for (const file of ['main.cjs', 'preload.cjs', 'renderer.js', 'renderer.css', 'index.html']) assert.equal(sha(extractFile(archive, file)), sha(await fs.readFile(path.join('dist', edition, file))), edition + '/' + file);
   const files = listPackage(archive).map(s => s.split(String.fromCharCode(92)).join('/'));
   if (edition === 'admin') assert.equal(sha(extractFile(archive, 'admin.py')), sha(await fs.readFile('server/admin.py')));
@@ -35,7 +36,7 @@ async function walk(root, relative = '') {
   }
   return result;
 }
-for (const [provider, source] of [['cursor', '.tools/cursor/dist-package'], ['codex', 'node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc']]) {
+for (const [provider, source] of [['cursor', '.tools/cursor/dist-package']]) {
   const files = await walk(source);
   for (const file of files) assert.equal(sha(await fs.readFile(path.join(source, file))), sha(await fs.readFile(path.join(releaseRoot, 'user/win-unpacked/resources/providers', provider, file))), provider + '/' + file);
   console.log(provider, files.length, 'runtime files verified');

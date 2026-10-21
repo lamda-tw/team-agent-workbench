@@ -1,7 +1,7 @@
 # 第三方运行组件
 
 - Electron 44.3.0：随两版分发，原许可证及 Chromium notices 保留在应用目录。
-- Codex CLI 0.154.0：来自官方 npm `@openai/codex` 与 Windows x64 平台包，Apache-2.0，原许可证放在用户版 `resources/providers/codex/LICENSE`。
+- Codex CLI 不随工作台分发，使用用户本机安装的 CLI 或 Codex 桌面版携带的 CLI；由用户自行安装和升级。
 - Cursor Agent CLI 2026.09.10-fd3934a：来自 Cursor 官方 Windows 发布包，原运行目录整体保留。用户仍使用自己的 Cursor 账号，产品使用受 Cursor 的条款及账号权限约束。
 - React、ssh2、archiver、zod、lucide-react 等依赖版本及来源由 `package-lock.json` 固定。
 

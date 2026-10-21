@@ -13,7 +13,7 @@ function environmentValue(env: NodeJS.ProcessEnv, name: string) {
 
 // Read Unicode paths directly. Decoding where.exe's OEM output as UTF-8 corrupts
 // Chinese directory names; its output can also include npm's Unix shell shim.
-export async function findWindowsCliOnPath(name: string, env = process.env, cwd = process.cwd()): Promise<string | undefined> {
+export async function findWindowsCliOnPath(name: string, env = process.env, cwd = process.cwd(), exclude: (file: string) => boolean = () => false): Promise<string | undefined> {
   const extensions = [...new Set((environmentValue(env, 'PATHEXT') || windowsExtensions.join(';'))
     .split(';').map(value => value.trim().toLowerCase()).filter(value => windowsExtensions.includes(value)))];
   const directories = [...new Set([cwd, ...environmentValue(env, 'PATH').split(';').map(unquote).filter(Boolean)]
@@ -21,7 +21,7 @@ export async function findWindowsCliOnPath(name: string, env = process.env, cwd 
   for (const directory of directories) {
     for (const extension of extensions) {
       const file = path.join(directory, name + extension);
-      if (await isFile(file)) return file;
+      if (!exclude(file) && await isFile(file)) return file;
     }
   }
 }

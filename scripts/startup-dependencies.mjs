@@ -55,7 +55,6 @@ export function checkDependencies(root, runtime = { major: Number(process.versio
   if (!installed) return result(true, '未找到完整的 npm 安装记录。');
   const requiredOptional = new Set([
     `node_modules/@esbuild/${runtime.platform}-${runtime.arch}`,
-    `node_modules/@openai/codex-${runtime.platform}-${runtime.arch}`,
   ]);
   for (const [location, pkg] of Object.entries(packages)) {
     if (!supports(pkg.os, runtime.platform) || !supports(pkg.cpu, runtime.arch)) continue;

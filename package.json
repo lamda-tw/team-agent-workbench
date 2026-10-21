@@ -1,6 +1,6 @@
 {
   "name": "team-agent-workbench",
-  "version": "2.2.5",
+  "version": "2.2.6",
   "private": true,
   "description": "Windows team workspace for local Codex, Cursor and Claude Code agents with Linux SFTP sharing",
   "main": "dist/user/main.cjs",
@@ -59,7 +59,6 @@
     "test:rsi": "tsx --test --test-concurrency=1 tests/rsi.test.ts tests/rsi-prompts.test.ts tests/rsi-incremental.test.ts tests/rsi-workbench.test.ts tests/project-interactions.test.ts tests/project-recommendation-ui.test.ts"
   },
   "dependencies": {
-    "@openai/codex": "^0.154.0",
     "archiver": "^8.0.0",
     "lucide-react": "^1.46.0",
     "react": "^19.3.0",

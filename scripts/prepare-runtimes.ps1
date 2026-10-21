@@ -17,6 +17,5 @@ Push-Location $taskRoot
 try {
   & node node_modules/electron/install.js
   if ($LASTEXITCODE -ne 0) { throw 'Electron runtime preparation failed' }
-  if (-not (Test-Path -LiteralPath 'node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin/codex.exe')) { throw 'Run npm ci on Windows x64 to install Codex runtime' }
 } finally { Pop-Location }
-Write-Output 'Windows runtimes ready: Cursor, Codex and Electron.'
+Write-Output 'Windows runtimes ready: Cursor and Electron. Codex uses the local user installation.'

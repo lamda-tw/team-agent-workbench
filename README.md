@@ -4,7 +4,9 @@
 
 [快速安装](#install) · [完整前置条件](#requirements) · [启动排障](#troubleshooting) · [使用指南](docs/user-guide.md) · [服务器部署](docs/deployment-guide.md) · [开发与验证](#development)
 
-当前源码版本 **2.2.5**。使用当前功能请按下面的源码方式启动；部署人员已有的旧安装包不包含当前全部修改。
+当前源码版本 **2.2.6**。使用当前功能请按下面的源码方式启动；部署人员已有的旧安装包不包含当前全部修改。
+
+v2.2.6 支持[管理端同时连接多个中央节点](docs/admin-management.md)，每个节点使用独立窗口、连接记录和网络出口，关闭其中一个不影响其他节点。Codex 改为自动检测本机 CLI 或桌面版，不再随依赖或安装包内置分发；详见[模型环境准备](#model-setup)。
 
 v2.2.5 支持直接点击**创建项目**，在创建过程中填写 SSH 连接或复用已登录连接，再选择已有工作组或新建工作组；无需提前登录。也可在**项目设置 → 中央节点**中查看和恢复连接；通过**连接项目**新建 SSH 连接或复用已登录的连接。不同节点在独立窗口中打开，同一节点与账号共用已认证连接。
 
@@ -71,7 +73,7 @@ Write-Host '项目依赖安装完成，可以继续第 4 步。'
 
 终端会显示包下载和安装信息。**看到“项目依赖安装完成”才进入下一步**；若报错，保留终端中的错误，按[安装失败处理](#install-errors)修复后重跑本步骤。不要删除或重新生成 `package-lock.json`。
 
-这一步把 React、SSH/SFTP、Markdown、配套 Codex CLI 和构建工具等安装到本项目的 `node_modules/`。它们不随 Node.js、npm 或 Python 提供，也不包含在 GitHub 源码 ZIP 中。`npm ci` 会按锁文件重建此目录，首次安装或更新依赖时执行即可。
+这一步把 React、SSH/SFTP、Markdown 和构建工具等安装到本项目的 `node_modules/`。它们不随 Node.js、npm 或 Python 提供，也不包含在 GitHub 源码 ZIP 中。`npm ci` 会按锁文件重建此目录，首次安装或更新依赖时执行即可。Codex 使用本机已有安装，不随项目依赖下载。
 
 ### 4. 下载并检查 Electron 桌面运行环境
 
@@ -110,7 +112,7 @@ npm.cmd run start:admin
 | 使用者 | 接下来做什么 |
 | --- | --- |
 | 团队成员 | 向管理员取得 SSH 地址、端口、个人账号和密码，登录后进入已分配的工作组与项目。代码目录进入项目后选填，后续可改。 |
-| 使用 AI 会话的成员 | 在客户端检测并登录自己的模型账号。Codex CLI 随源码依赖安装；Cursor Agent CLI 和 Claude Code 按[模型环境准备](#model-setup)安装或指定。 |
+| 使用 AI 会话的成员 | 按[模型环境准备](#model-setup)安装或指定所用 CLI，再在客户端检测并登录自己的模型账号。Codex 使用本机 CLI 或桌面版携带的 CLI。 |
 | 总管理员 | 准备[符合条件的 Linux 服务器](#server-requirements)，连接后初始化团队空间、创建工作组并分配成员；已有团队继续使用原目录。详细步骤见[部署指导](docs/deployment-guide.md)。 |
 
 模型服务需要代理时，先由管理员启用[管理端网络出口](docs/network-egress.md)，成员再填入接入码。没有团队服务器、只想本机联调时，按[本地模式使用说明](docs/local-filesystem.md)操作。
@@ -225,7 +227,7 @@ where.exe npm
 ### 用户端：团队账号与模型环境
 
 - 团队正式使用需要管理员提供 SSH 地址、端口、个人成员账号和密码，并已完成账号开通、工作组分配与共享目录准备。仅安装客户端不会获得团队或项目权限。
-- 使用 Codex 时，源码依赖安装会提供配套 CLI；也可以在设置中指定已有 CLI。使用者仍需自己的可用模型账号或 CLI 已支持的服务认证配置、相应服务权限及额度。
+- 使用 Codex 时，先在本机安装 Codex CLI 或 Codex 桌面版。工作台不再内置或自动下载 Codex；在 **agent管理 → CLI 程序路径**留空会自动检测本机安装，也可手动指定已有 CLI。检测顺序为终端 PATH、常用安装目录、Windows Codex 桌面版；明确指定路径时优先使用该路径。桌面版的自动检测会重新查找其更新后的运行文件。使用者仍需自己的可用模型账号或 CLI 已支持的服务认证配置、相应服务权限及额度。
 - 使用普通 Cursor CLI 会话时，需要 **Cursor Agent CLI**，仅安装 Cursor 编辑器或提供编辑器的 `cursor` 命令不够。原生桌面联动使用已安装的 Cursor 桌面版和桌面账号。可在应用内指定已有 Agent CLI，或在仓库执行以下命令准备配套运行文件（先安装 npm 依赖，下载脚本需要 Windows 的 `curl.exe` 可用）：
 
 ```powershell
@@ -233,7 +235,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\prepare-runtim
 ```
 
 - 使用 Claude Code 时，按 [Claude Code 官方安装说明](https://code.claude.com/docs/en/quickstart)单独安装 CLI。安装后新开终端执行 `claude --version`，应输出版本；若工作台未检测到，在“agent管理”指定 `claude.exe` 或 `claude.cmd`。官方 Windows 安装建议同时安装 Git for Windows，以使用 Bash 工具。登录、已有 API/云服务配置和部署约定见 [Claude Code 接入](docs/claude-code.md)。
-- 使用安装包时，用户版包含配套 Codex/Cursor 运行文件，Claude Code 需另行安装；仍需在新电脑上完成所用模型服务的认证。只使用其中一种提供方时，不需要登录其他提供方。
+- 新构建的用户版安装包仅保留配套 Cursor 运行文件，Codex 和 Claude Code 使用本机安装；仍需在新电脑上完成所用模型服务的认证。未安装某个 CLI 不影响启动工作台或使用其他提供方。
 - 模型登录过程中通常需要浏览器授权，或按 CLI 提供的方式完成登录。团队 SSH 密码与模型账号是两套独立凭据。
 
 <a id="server-requirements"></a>

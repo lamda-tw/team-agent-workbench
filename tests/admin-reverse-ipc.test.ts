@@ -36,11 +36,14 @@ test('admin IPC authorizes reverse access, tests TLS, copies the pinned route an
   const opened: FakeWindow[] = [], errors: string[] = [], operations: any[] = [];
   let didQuit = false, copied = '', current: FakeConnection;
   Object.assign(app, { setName() {}, setPath(name: string, value: string) { paths[name] = value; }, getPath(name: string) { return paths[name]; }, requestSingleInstanceLock: () => true, whenReady: async () => {}, quit() { didQuit = true; } });
-  class FakeWindow {
+  class FakeWindow extends EventEmitter {
+    destroyed = false;
     entry = '';
     webContents = Object.assign(new EventEmitter(), { send() {}, setWindowOpenHandler() {}, session: { setPermissionRequestHandler() {} } });
-    constructor() { opened.push(this); }
-    isDestroyed() { return false; } setMenuBarVisibility() {}
+    constructor() { super(); opened.push(this); }
+    isDestroyed() { return this.destroyed; } setMenuBarVisibility() {} setTitle() {}
+    isMinimized() { return false; } restore() {} show() {} focus() {}
+    destroy() { this.destroyed = true; this.emit('closed'); }
     async loadFile(file: string) { this.entry = file; }
   }
   class FakeConnection {

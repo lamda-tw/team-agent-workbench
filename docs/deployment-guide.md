@@ -4,7 +4,7 @@
 
 ## 当前交付状态
 
-- 当前源码版本为 2.0.5，具体提交用 `git rev-parse --short HEAD` 查看，管理员版与用户版分别构建。
+- 当前源码版本为 2.2.6，具体提交用 `git rev-parse --short HEAD` 查看，管理员版与用户版分别构建。
 - 本轮只更新开发构建，没有重新生成安装包。
 - v2.0 的[AI推荐](rsi-v2.md)在用户端后台运行，沿用现有模型登录与网络设置，通过各项目下的“AI推荐”开关独立启停，默认开启；已明确关闭的项目保留原设置。无需为 RSI 部署新的中心服务或数据库；证据和策略按本机账号保存。
 - 仓库统一入口：[start-admin-dev.cmd](../start-admin-dev.cmd)、[start-user-dev.cmd](../start-user-dev.cmd)。这两个文件随代码一起交付，不需要部署者重新编写脚本。
@@ -50,7 +50,7 @@
 1. 准备 64 位（x64）Node.js 22.12.0 或更高版本。可安装到系统并保留 npm / PATH 选项；也可将官方便携压缩包完整解压到仓库 `.tools/node-v版本号-win-x64/`，该目录中须同时包含 `node.exe` 和 `npm.cmd`。入口按版本顺序逐一验证 Node 和 npm 的可运行性，每次探测最多 10 秒；失败则尝试下一目录、系统 PATH、自定义目录。所有候选不可用时，窗口允许选择解压后的离线 Node 目录，保存在本仓库 `.tools/node-path.txt`，也可通过 `WORKBENCH_NODE_DIR` 指定。无需修改系统环境变量。
 2. 拉取或解压完整仓库，保留 `package-lock.json`、`scripts`、`src` 等文件。无需复制其他电脑的 `dist` 或生成新的启动脚本。
 3. 双击根目录的 `start-user-dev.cmd` 或 `start-admin-dev.cmd`。启动窗口会显示当前步骤与等待时间，可查看日志或取消。首次运行需要下载依赖；依赖安装和 Electron 下载各限时 10 分钟，构建限时 3 分钟，超过后提示具体阶段。启动日志位于 `.test-data/launcher/`。失败时检查弹窗给出的日志，修复网络或环境后重新双击即可。
-4. 用户版按使用指导连接团队账号并登录个人模型账号。Codex CLI 随 npm 依赖安装；Claude Code 需按官方说明单独安装，使用 `claude auth login` 登录；使用 Cursor 时可在应用内设置已安装的 Cursor Agent CLI 路径，或运行 `powershell -ExecutionPolicy Bypass -File scripts/prepare-runtimes.ps1` 准备仓库配套的 Cursor 运行文件。
+4. 用户版按使用指导连接团队账号并登录个人模型账号。Codex 不随 npm 依赖或新安装包分发，需在本机安装 Codex CLI 或 Codex 桌面版；在 **agent管理** 中保持 CLI 路径为空即可自动检测，也可明确指定。旧设置若指向工作台原内置路径会转为自动查找；其他手动指定路径保持不变。升级本机 CLI 后重新检测，已运行的回复继续使用原进程，关闭并重新打开工作台后统一使用新版本。Claude Code 需单独安装，使用 `claude auth login` 登录；Cursor 可指定已安装的 Agent CLI，或运行 `powershell -ExecutionPolicy Bypass -File scripts/prepare-runtimes.ps1` 准备仓库配套运行文件。
 
 依赖下载发生在应用启动前，使用本机 npm / Electron 的下载和代理配置；工作台中的可选管理端模型出口不负责这一步。无法下载依赖的电脑应由部署人员交付对应版本的完整安装包或免安装目录。
 

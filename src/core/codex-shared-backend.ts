@@ -12,17 +12,12 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { CodexApprovalRouter } from './codex-approval-router';
 import { processAlive, processIdentity, sameProcess, stopOwnedProcess, type ProcessIdentity } from './codex-process';
 import { sameNativePath } from './native-transcript';
+import { extractedCodexCli } from './codex-installation';
 
 const run = promisify(execFile);
 export async function installedCodexDesktopExecutable(fallback: string) {
   if (process.platform !== 'win32' || !process.env.LOCALAPPDATA) return fallback;
-  const bin = path.join(process.env.LOCALAPPDATA, 'OpenAI', 'Codex', 'bin');
-  const candidates: { file: string; time: number }[] = [];
-  for (const name of await fs.readdir(bin).catch(() => [] as string[])) {
-    const file = path.join(bin, name, 'codex.exe'), stat = await fs.stat(file).catch(() => undefined);
-    if (stat?.isFile()) candidates.push({ file, time: stat.mtimeMs });
-  }
-  return candidates.sort((a, b) => b.time - a.time)[0]?.file || fallback;
+  return await extractedCodexCli() || fallback;
 }
 async function availablePort() {
   const server = net.createServer();

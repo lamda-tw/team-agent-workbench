@@ -20,10 +20,6 @@ for (const edition of requested ? [requested] : ['admin', 'user']) {
       await cp('docs', path.join(appOutDir, 'docs'), { recursive: true, filter: source => !/SHA256SUMS/.test(source) });
       await copyFile('THIRD_PARTY.md', path.join(appOutDir, 'THIRD_PARTY.md'));
     },
-    extraResources: edition === 'user' ? [
-      { from: 'node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc', to: 'providers/codex', filter: ['**/*'] },
-      { from: 'third-party/Codex-LICENSE', to: 'providers/codex/LICENSE' },
-    ] : [],
     win: { target: [{ target: 'nsis', arch: ['x64'] }, { target: 'zip', arch: ['x64'] }], signAndEditExecutable: false,
       artifactName: 'TeamAgent-' + edition + '-${version}-${arch}.${ext}' },
     nsis: { oneClick: false, perMachine: false, differentialPackage: false, allowToChangeInstallationDirectory: true, deleteAppDataOnUninstall: false, createDesktopShortcut: true,
