@@ -47,14 +47,13 @@ export function EgressView({ snapshot, remote, refresh }: { snapshot: AdminEgres
   const savedServices = egressServices.filter(service => snapshot.config[service.id]).map(service => service.label).join('、');
   const reverseReady = snapshot.reverse?.state === 'connected' && snapshot.reverse.memberAccessConfigured;
 
-  if (snapshot.standalone) return <div className="egress-view"><div className="page-title"><h1>网络出口</h1><span className="badge">独立后台托管</span></div><p>出口由 Windows 开机任务维护，关闭管理端不会停止转发。接入码、证书和端口保持不变。</p><p>请使用 standalone-egress.ps1 的 Status、Start、Stop 操作查看或管理后台任务。此页不代表后台任务当前已连通。</p><p>修改出口设置前，请先运行 Uninstall，再重新打开管理端；更新设置后重新安装托管。</p><button className="secondary" disabled={!!action} onClick={() => void run('copy', () => window.admin.call('egress.copy'))}>复制原直连接入码</button>{error && <p className="inline-error">{error}</p>}</div>;
-
   return <div className="egress-view">
     <div className="page-title egress-title">
       <div><span className="eyebrow">NETWORK EGRESS</span><h1>网络出口</h1><p>管理本机转发、成员接入与连接状态。</p></div>
       <span className={'egress-state ' + (snapshot.running ? 'online' : '')}>{snapshot.running ? <CircleCheck size={17}/> : <WifiOff size={17}/>} {snapshot.running ? '出口运行中' : snapshot.config.enabled ? '出口未运行' : '未启用'}</span>
     </div>
     <div className="egress-context"><span><Network size={14}/>{upstream(snapshot.config)}</span><span>{savedServices || '未允许成员转发'}</span><span><ShieldCheck size={14}/>加密传输</span></div>
+    {snapshot.config.enabled && <p className="egress-footnote">{snapshot.background ? '关闭管理端窗口后，出口和已登录的反向隧道会继续在系统托盘运行。双击托盘图标可重新打开；选择“退出并停止转发”才会结束。注销或关机会停止。' : '系统托盘当前不可用，关闭管理端窗口会停止转发。'}</p>}
     {error && <div className="inline-error" role="alert">{error}</div>}
     {message && <div className="admin-success" role="status"><CircleCheck size={17}/>{message}</div>}
     {snapshot.lastError && <div className="egress-start-error" role="alert"><span>出口启动失败：{snapshot.lastError}</span><button className="text-button" onClick={() => setTab('settings')}>检查出口设置<ArrowRight size={14}/></button></div>}
