@@ -5,7 +5,7 @@ import { resultPreview } from '../shared/result-reading';
 import { conclusionUploadState, uploadAction, uploadBlocked } from '../shared/conclusion-upload';
 import { destinationLabel } from '../shared/submission';
 import React, { useEffect, useRef, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown from './math-markdown';
 import remarkGfm from 'remark-gfm';
 import { Archive, Check, Sparkles, Plus, RotateCcw, Trash2 } from 'lucide-react';
 import type { AgentSession, Draft, FilePreview, Project, ProjectConclusion } from '../shared/types';

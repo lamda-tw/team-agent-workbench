@@ -6,6 +6,7 @@ import { build } from 'esbuild';
 import { _electron } from '@playwright/test';
 
 const require = createRequire(import.meta.url), root = process.cwd();
+await fs.mkdir(path.join(root, '.test-data'), { recursive: true });
 const out = await fs.mkdtemp(path.join(root, '.test-data', 'markdown-diagrams-'));
 const source = await fs.readFile('tests/fixtures/extraction-flowchart.mmd', 'utf8');
 const errors = [], remoteRequests = [];
@@ -24,12 +25,13 @@ try {
     import { Markdown } from ${modulePath('src/renderer/markdown')};
     import { renderMermaid } from ${modulePath('src/renderer/mermaid-renderer')};
     import ${modulePath('src/renderer/styles.css')};
+    import 'katex/dist/katex.min.css';
     const root=createRoot(document.getElementById('root'));
     window.diagramFixture={render:text=>root.render(<Markdown text={text} sessionId="fixture"/>),renderMermaid};
     window.workbench={call:async()=>{throw Error('Diagram rendering must not read local images or invoke a model');}};
   `);
   // Match production ESM splitting and CSP so lazy imports are actually exercised.
-  await build({ entryPoints:[entry],outdir:out,entryNames:'renderer',chunkNames:'chunk-[hash]',splitting:true,bundle:true,minify:true,platform:'browser',format:'esm',target:'chrome130' });
+  await build({ entryPoints:[entry],outdir:out,entryNames:'renderer',chunkNames:'chunk-[hash]',splitting:true,bundle:true,minify:true,platform:'browser',format:'esm',target:'chrome130',loader:{'.woff2':'file','.woff':'file','.ttf':'file'} });
   await fs.copyFile('src/renderer/index.html', path.join(out, 'index.html'));
   await fs.writeFile(path.join(out, 'main.cjs'), `
     const {app,BrowserWindow}=require('electron');
@@ -48,6 +50,21 @@ try {
     const images=[...document.querySelectorAll('.mermaid-diagram-image')];
     return images.length===count&&images.every(image=>image.complete&&image.naturalWidth>0);
   },count,{timeout:20000});
+
+  await render('行内 $E=mc^2$\n\n$$\\frac{a}{b}$$\n\n`$literal$`');
+  await page.waitForFunction(()=>document.querySelectorAll('.katex').length===2);
+  assert.equal(await page.locator('.katex-display').count(),1);
+  assert.equal(await page.locator('code').filter({hasText:'$literal$'}).count(),1);
+  const mathFont=await page.evaluate(async()=>{
+    await document.fonts.load('16px KaTeX_Main');
+    return document.fonts.check('16px KaTeX_Main');
+  });
+  assert(mathFont,'KaTeX font must load under the packaged CSP');
+
+  await render('```math\n\\sum_{i=1}^{n}i\n```\n\n\\begin{align}a&=b+c\\\\d&=e+f\\end{align}\n\n\\[\\sqrt{x}\\]\n\n\\(\\alpha+\\beta\\)');
+  await page.waitForFunction(()=>document.querySelectorAll('.katex').length===4);
+  assert.equal(await page.locator('.katex-display').count(),3);
+  assert.equal(await page.locator('.katex-error').count(),0);
 
   for(const text of [source,'```mermaid\n'+source+'\n```','```\n'+source+'\n```']){
     await render(text);await loaded(1);
@@ -83,7 +100,7 @@ try {
   assert.deepEqual(errors,[]);assert.deepEqual(remoteRequests,[]);
   await closeFixture();
 
-  const result={passed:true,screenshots:0,realImageFilesRead:0,externalRequests:remoteRequests.length,cases:['provided extraction flowchart: 16 nodes and one subgraph','fenced and standalone source','zoom and fit width','invalid and incomplete syntax fallback and recovery','multiple diagram types in one reply','explicit source examples stay as code','strict rendering and text limits','lazy chunks under production CSP'],fixture:out};
+  const result={passed:true,screenshots:0,realImageFilesRead:0,externalRequests:remoteRequests.length,cases:['inline, display, fenced, and environment LaTeX with local font assets','provided extraction flowchart: 16 nodes and one subgraph','fenced and standalone source','zoom and fit width','invalid and incomplete syntax fallback and recovery','multiple diagram types in one reply','explicit source examples stay as code','strict rendering and text limits','lazy chunks under production CSP'],fixture:out};
   await fs.writeFile(path.join(out,'result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result,null,2));
 }catch(error){
   console.error(JSON.stringify({errors,remoteRequests,fixture:out}));throw error;

@@ -45,7 +45,7 @@ if(!filter&&!inventoryOnly&&!retryFiles){try{const last=JSON.parse(await fs.read
 const temp=await fs.mkdtemp(path.join(os.tmpdir(),'handbook-production-ui-'));
 for(const [edition,entry] of Object.entries({user:'src/renderer/main.tsx',admin:'src/admin/renderer.tsx'})){
  const dir=path.join(temp,edition);await fs.mkdir(dir,{recursive:true});
- await build({absWorkingDir:root,entryPoints:[entry],outfile:path.join(dir,'renderer.js'),bundle:true,minify:true,platform:'browser',format:'iife',target:'chrome130',loader:{'.css':'css'},logLevel:'silent'});
+ await build({absWorkingDir:root,entryPoints:[entry],outfile:path.join(dir,'renderer.js'),bundle:true,minify:true,platform:'browser',format:'iife',target:'chrome130',loader:{'.css':'css','.woff2':'file','.woff':'file','.ttf':'file'},logLevel:'silent'});
  await fs.writeFile(path.join(dir,'index.html'),'<!doctype html><html lang="zh-CN"><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="renderer.css"><div id="root"></div><script src="renderer.js"></script></html>');
 }
 const browser=await chromium.launch({channel:'msedge',headless:true});

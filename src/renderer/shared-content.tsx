@@ -13,7 +13,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { ActivityResultActions } from './activity-result-actions';
 import { SharedAttachments } from './attachments';
 import { SharedContentDeleteDialog, sharedDeleteSelection } from './shared-content-delete';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown from './math-markdown';
 import remarkGfm from 'remark-gfm';
 import type { AgentSession, ConclusionOrganization, ContentUpdate, Draft, Project, ProjectConclusion } from '../shared/types';
 import { contributionCategoryInfo, materialCategories, type ContributionCategory, canDeleteSharedContent, contentAliasKey, titleSubject, type ContentDeleteResult, type SharedContent } from '../shared/content';
