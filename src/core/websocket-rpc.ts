@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { WebSocket } from 'ws';
+import { WebSocket, type ClientOptions } from 'ws';
 import type { AgentRpc, RpcMessage } from './rpc';
 
 // Disconnecting a client must never terminate the shared native backend.
@@ -9,12 +9,12 @@ export class WebSocketRpc extends EventEmitter implements AgentRpc {
   private closed = false;
   private seq = 0;
   private pending = new Map<number, { resolve: (value: any) => void; reject: (error: Error) => void; timer?: NodeJS.Timeout }>();
-  constructor(private endpoint: string) { super(); }
+  constructor(private endpoint: string, private options: ClientOptions = {}) { super(); }
   private connect() {
     if (this.closed) return Promise.reject(new Error('共享 Codex 连接已关闭，请重新打开会话；输入已保留'));
     return this.opening ||= new Promise<void>((resolve, reject) => {
       // Local shared backends must not inherit Node's global environment proxy.
-      const socket = this.socket = new WebSocket(this.endpoint, { agent: false, maxPayload: 8 * 1024 * 1024 });
+      const socket = this.socket = new WebSocket(this.endpoint, { agent: false, maxPayload: 16 * 1024 * 1024, ...this.options } as ClientOptions);
       const timer = setTimeout(() => { const error = new Error('连接未能恢复，请点击“恢复同步”；会话和输入已保留'); reject(error); this.finish(error); socket.close(); }, 10000);
       socket.addEventListener('open', () => { clearTimeout(timer); resolve(); }, { once: true });
       socket.addEventListener('error', () => { clearTimeout(timer); const error = new Error('无法连接，请点击“恢复同步”；会话和输入已保留'); reject(error); this.finish(error); });
@@ -26,7 +26,7 @@ export class WebSocketRpc extends EventEmitter implements AgentRpc {
         else if (typeof message.id === 'number') {
           const call = this.pending.get(message.id); if (!call) return;
           this.pending.delete(message.id); clearTimeout(call.timer);
-          message.error ? call.reject(Object.assign(new Error(message.error.message), { data: message.error.data })) : call.resolve(message.result);
+          message.error ? call.reject(Object.assign(new Error(message.error.message), { code: message.error.code, data: message.error.data })) : call.resolve(message.result);
         }
       });
     });

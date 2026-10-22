@@ -3,8 +3,9 @@ import path from 'node:path';
 import os from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
 import type { NativeSessionCatalog, NativeSessionEntry, NativeSessionGroup } from '../shared/native-sessions';
-import { findCodexRollout, indexCodexRollouts } from './codex-storage';
+import { findCodexRollout } from './codex-storage';
 import { nativeCwd } from './native-transcript';
+import { addCodexRemoteProjects } from './codex-remote-sessions';
 
 const nativeIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const codexHome = () => path.resolve(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'));
@@ -47,6 +48,18 @@ async function codexStateFile(home: string) {
 
 const record = (value: unknown): Record<string, any> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {};
 const pathKey = (value: string) => process.platform === 'win32' ? nativeCwd(value).toLowerCase() : nativeCwd(value);
+
+function codexSourceColumn(db: DatabaseSync) {
+  const columns = db.prepare('PRAGMA table_info(threads)').all() as { name: string }[];
+  return columns.some(column => column.name === 'source') ? 'source' : 'NULL AS source';
+}
+
+function codexSubagent(source: string | null) {
+  if (!source) return false;
+  if (source.toLowerCase() === 'subagent') return true;
+  try { return Object.hasOwn(record(JSON.parse(source)), 'subagent'); }
+  catch { return false; }
+}
 
 async function codexProjects(db: DatabaseSync, home: string) {
   const tables = new Set((db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]).map(row => row.name));
@@ -111,7 +124,7 @@ async function listCodex(home: string, linked: Map<string, string>): Promise<Nat
   try {
     const { projects, groupFor } = await codexProjects(db, home);
     const sections = db.prepare('SELECT id, name FROM thread_sections').all() as { id: string; name: string | null }[];
-    const threads = db.prepare('SELECT id, name, title, first_user_message, cwd, project_id, thread_section_id, archived, recency_at_ms, model FROM threads').all() as { id: string; name: string | null; title: string | null; first_user_message: string | null; cwd: string | null; project_id: string | null; thread_section_id: string | null; archived: number | null; recency_at_ms: number | null; model: string | null }[];
+    const threads = db.prepare('SELECT id, name, title, first_user_message, cwd, project_id, thread_section_id, archived, recency_at_ms, model, ' + codexSourceColumn(db) + ' FROM threads').all() as { id: string; name: string | null; title: string | null; first_user_message: string | null; cwd: string | null; project_id: string | null; thread_section_id: string | null; archived: number | null; recency_at_ms: number | null; model: string | null; source: string | null }[];
     const sectionNames = new Map(sections.map(section => [section.id, (section.name || '').trim()]));
     const groups: NativeSessionGroup[] = [];
     const sessions: (NativeSessionEntry & { model?: string; nativePath?: string })[] = [];
@@ -121,17 +134,16 @@ async function listCodex(home: string, linked: Map<string, string>): Promise<Nat
       const name = (section.name || '').trim();
       if (name) groups.push({ id: 'section:' + section.id, name, position: sectionPosition++, kind: 'section' });
     }
-    const rollouts = await indexCodexRollouts(home);
     for (const thread of threads) {
-      if (thread.archived) continue;
+      if (thread.archived || codexSubagent(thread.source)) continue;
       if (!nativeIdPattern.test(thread.id)) continue;
-      const rollout = rollouts.get(thread.id.toLowerCase());
-      if (!rollout || !nativeRecordAllowed('codex', rollout)) continue;
+      const rollout = await findCodexRollout(home, thread.id);
+      const hasHistory = !!rollout && nativeRecordAllowed('codex', rollout);
       let groupId = groupFor(thread);
       if (!groupId && thread.thread_section_id && sectionNames.get(thread.thread_section_id)) groupId = 'section:' + thread.thread_section_id;
       sessions.push({
         nativeId: thread.id, name: nativeSessionName(thread.name, thread.title || thread.first_user_message), groupId,
-        cwd: thread.cwd || '', updatedAt: Number(thread.recency_at_ms) || 0, linkedSessionId: linked.get(thread.id), unavailable: await continuationBlock(thread.cwd || ''),
+        cwd: thread.cwd || '', updatedAt: Number(thread.recency_at_ms) || 0, linkedSessionId: linked.get(thread.id), unavailable: !hasHistory ? '原会话历史文件未找到，无法在工作台继续' : await continuationBlock(thread.cwd || ''),
         model: thread.model || undefined, nativePath: rollout,
       });
     }
@@ -180,7 +192,7 @@ async function listCursor(root: string, linked: Map<string, string>): Promise<Na
 }
 
 export async function listNativeSessions(provider: 'codex' | 'cursor', linked = new Map<string, string>()): Promise<NativeSessionCatalog> {
-  return provider === 'codex' ? listCodex(codexHome(), linked) : listCursor(cursorChatsRoot(), linked);
+  return provider === 'codex' ? addCodexRemoteProjects(await listCodex(codexHome(), linked), codexHome(), undefined, linked) : listCursor(cursorChatsRoot(), linked);
 }
 
 export async function resolveNativeSession(provider: 'codex' | 'cursor', nativeId: string) {
@@ -190,8 +202,8 @@ export async function resolveNativeSession(provider: 'codex' | 'cursor', nativeI
     if (!state) return;
     const db = openReadOnly(state);
     try {
-      const thread = db.prepare('SELECT id, name, title, first_user_message, cwd, model, archived FROM threads WHERE id = ?').get(nativeId) as { id: string; name: string | null; title: string | null; first_user_message: string | null; cwd: string | null; model: string | null; archived: number | null } | undefined;
-      if (!thread || thread.archived) return;
+      const thread = db.prepare('SELECT id, name, title, first_user_message, cwd, model, archived, ' + codexSourceColumn(db) + ' FROM threads WHERE id = ?').get(nativeId) as { id: string; name: string | null; title: string | null; first_user_message: string | null; cwd: string | null; model: string | null; archived: number | null; source: string | null } | undefined;
+      if (!thread || thread.archived || codexSubagent(thread.source)) return;
       const nativePath = await findCodexRollout(home, nativeId);
       if (!nativePath) return;
       const model = thread.model && thread.model.length <= 256 && /^[^\x00-\x1f]+$/.test(thread.model) ? thread.model : undefined;

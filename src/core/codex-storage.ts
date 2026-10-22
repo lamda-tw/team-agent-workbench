@@ -8,6 +8,7 @@ import type { AgentSession } from '../shared/types';
 import type { AgentRpc } from './rpc';
 import { sameNativePath } from './native-transcript';
 import { readCodexDesktopBridge } from './codex-desktop-bridge';
+import { codexRolloutPath, copyCodexRollout } from './codex-rollout';
 
 export interface CodexStorage { home: string; sourceHome: string; args: string[]; env: NodeJS.ProcessEnv; resumePath?: string; sharedEndpoint?: string; sharedApprovalRouting?: boolean; }
 const inside = (root: string, file: string) => { const rel = path.relative(root, file); return !!rel && !path.isAbsolute(rel) && rel !== '..' && !rel.startsWith('..' + path.sep); };
@@ -57,37 +58,22 @@ async function initialize(home: string, sourceHome: string) {
 }
 
 async function locateRollout(root: string, id: string, keep?: string): Promise<string | undefined> {
+  let compressed: string | undefined;
   for (const item of await fs.readdir(root, { withFileTypes: true }).catch((e: any) => { if (e.code === 'ENOENT') return []; throw e; })) {
     if (item.isSymbolicLink()) continue;
     const file = path.join(root, item.name);
     if (item.isDirectory()) { const found = await locateRollout(file, id, keep); if (found) return found; }
-    else if (item.isFile() && (item.name.endsWith('-' + id + '.jsonl') || item.name.endsWith('-' + id + '.jsonl.zst')) && (!keep || !sameNativePath(file, keep))) return file;
-  }
-}
-
-export async function indexCodexRollouts(home: string) {
-  const paths = new Map<string, string>();
-  async function visit(root: string, entries: Map<string, string>) {
-    for (const item of await fs.readdir(root, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return []; throw error; })) {
-      if (item.isSymbolicLink()) continue;
-      const file = path.join(root, item.name);
-      if (item.isDirectory()) await visit(file, entries);
-      else if (item.isFile()) {
-        const match = item.name.match(/-([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})\.jsonl(\.zst)?$/i);
-        if (match && (!entries.has(match[1].toLowerCase()) || !match[2])) entries.set(match[1].toLowerCase(), file);
-      }
+    else if (item.isFile() && (!keep || !sameNativePath(file, keep))) {
+      if (item.name.endsWith('-' + id + '.jsonl')) return file;
+      if (item.name.endsWith('-' + id + '.jsonl.zst')) compressed = file;
     }
   }
-  for (const directory of ['sessions', 'archived_sessions']) {
-    const entries = new Map<string, string>(); await visit(path.join(home, directory), entries);
-    for (const [id, file] of entries) if (!paths.has(id)) paths.set(id, file);
-  }
-  return paths;
+  return compressed;
 }
 
 export async function findCodexRollout(home: string, id: string) {
   if (!/^[a-f0-9-]{36}$/i.test(id)) return;
-  return (await indexCodexRollouts(home)).get(id.toLowerCase());
+  return await locateRollout(path.join(home, 'sessions'), id) || await locateRollout(path.join(home, 'archived_sessions'), id);
 }
 
 async function releaseIsolatedNativeCopy(home: string, id: string, resumePath: string) {
@@ -137,10 +123,10 @@ export async function prepareCodexStorage(root: string, session: AgentSession, s
     if (!session.nativeId || !/^[a-f0-9-]{36}$/i.test(session.nativeId)) throw new Error('原会话标识无效，无法恢复上下文');
     const original = await findCodexRollout(sourceHome, session.nativeId);
     if (!original) throw new Error('找不到原会话记录，无法恢复上下文；请恢复原 Codex 会话文件后重试');
-    resumePath = path.join(home, path.relative(sourceHome, original));
+    resumePath = codexRolloutPath(path.join(home, path.relative(sourceHome, original)));
     if (!inside(home, resumePath)) throw new Error('原会话路径无效');
     await fs.mkdir(path.dirname(resumePath), { recursive: true, mode: 0o700 });
-    await fs.copyFile(original, resumePath);
+    await copyCodexRollout(original, resumePath);
     await releaseIsolatedNativeCopy(home, session.nativeId, resumePath);
     session.nativeSourceId ||= session.nativeId;
     session.codexPrivateFork = true; session.nativeLive = false; session.codexStorage = 'workbench'; session.nativePath = resumePath;
@@ -157,10 +143,10 @@ export async function prepareCodexStorage(root: string, session: AgentSession, s
     if (!/^[a-f0-9-]{36}$/i.test(session.nativeId)) throw new Error('原会话标识无效，无法恢复上下文');
     const source = await locateRollout(path.join(sourceHome, 'sessions'), session.nativeId) || await locateRollout(path.join(sourceHome, 'archived_sessions'), session.nativeId);
     if (!source) throw new Error('找不到原会话记录，无法恢复上下文；请恢复原 Codex 会话文件后重试');
-    const rel = path.relative(sourceHome, source), target = path.join(home, rel);
+    const rel = path.relative(sourceHome, source), target = codexRolloutPath(path.join(home, rel));
     if (!inside(home, target)) throw new Error('原会话路径无效');
     await fs.mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
-    await fs.copyFile(source, target); resumePath = target;
+    await copyCodexRollout(source, target); resumePath = target;
   }
   const sqlite = path.join(home, 'sqlite');
   return { home, sourceHome, resumePath, env: { CODEX_HOME: home, CODEX_SQLITE_HOME: sqlite }, args: ['app-server', '-c', 'sqlite_home=' + JSON.stringify(sqlite), '-c', 'cli_auth_credentials_store="ephemeral"'] };

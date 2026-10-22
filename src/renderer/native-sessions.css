@@ -9,3 +9,4 @@
 .native-session-modal .native-session-list button.native-session-row:disabled{cursor:default}
 .native-session-modal .native-session-row.linked:disabled small{color:#718779}
 @media(max-width:650px){.native-session-layout{grid-template-columns:1fr}.native-project-nav{flex-direction:row;max-height:none;overflow:auto;border-right:0;border-bottom:1px solid #e4e9ee;padding:0 0 8px}.native-project-nav button{width:auto;flex-shrink:0;max-width:180px}.native-session-main .native-session-list{max-height:40vh}}
+.native-project-host { display: block; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; font-weight: normal; }

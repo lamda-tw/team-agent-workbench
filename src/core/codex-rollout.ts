@@ -1,26 +1,32 @@
-import { createReadStream } from 'node:fs';
-import fs from 'node:fs/promises';
-import { createZstdDecompress } from 'node:zlib';
+import fs from 'node:fs';
+import zlib from 'node:zlib';
+import { pipeline } from 'node:stream/promises';
 
-/** Codex may compress an idle rollout and materialize it again when resumed. */
-export async function resolveCodexRolloutPath(file: string) {
-  const plain = file.endsWith('.jsonl.zst') ? file.slice(0, -4) : file;
-  for (const candidate of [plain, ...(plain.endsWith('.jsonl') ? [plain + '.zst'] : [])]) {
-    if ((await fs.stat(candidate).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'ENOENT') throw error; }))?.isFile()) return candidate;
-  }
+// Paginated Codex histories retain the full rollout as JSONL compressed with Zstandard.
+// App Server paths still name the logical .jsonl file, without the compression suffix.
+export const codexRolloutPath = (file: string) => file.replace(/(\.jsonl)\.zst$/i, '$1');
+
+export async function existingCodexRollout(file: string) {
+  if ((await fs.promises.stat(file).catch(() => undefined))?.isFile()) return file;
+  const logical = codexRolloutPath(file), alternate = logical === file ? file + '.zst' : logical;
+  return (await fs.promises.stat(alternate).catch(() => undefined))?.isFile() ? alternate : file;
 }
 
-export function openCodexRollout(file: string) {
-  const source = createReadStream(file);
-  if (!file.endsWith('.jsonl.zst')) return source;
-  const decoded = createZstdDecompress();
+export function codexRolloutStream(file: string) {
+  if (codexRolloutPath(file) === file) return fs.createReadStream(file);
+  if (typeof zlib.createZstdDecompress !== 'function') throw new Error('当前运行环境不支持读取压缩的 Codex 历史，请更新工作台');
+  const source = fs.createReadStream(file), decoded = zlib.createZstdDecompress();
   source.on('error', error => decoded.destroy(error));
-  decoded.once('close', () => source.destroy());
+  decoded.on('close', () => source.destroy());
   return source.pipe(decoded);
 }
 
 export async function readCodexRollout(file: string) {
   const chunks: Buffer[] = [];
-  for await (const chunk of openCodexRollout(file)) chunks.push(Buffer.from(chunk));
+  for await (const chunk of codexRolloutStream(await existingCodexRollout(file))) chunks.push(Buffer.from(chunk));
   return Buffer.concat(chunks);
+}
+
+export async function copyCodexRollout(source: string, destination: string) {
+  await pipeline(codexRolloutStream(await existingCodexRollout(source)), fs.createWriteStream(destination, { mode: 0o600 }));
 }

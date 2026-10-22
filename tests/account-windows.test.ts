@@ -134,7 +134,7 @@ test('production window routing reuses project connections, separates nodes and 
       assert.equal((await snapshot(nodeTwoAlias)).connection?.connected, true);
       assert.equal((await snapshot(first)).connection?.connected, true);
       nodeTwoAlias.close(); await until(() => nodeTwoAlias.destroyed);
-      await assert.rejects(call(first, 'project.connection.open', { key: accountIdentity(nodeTwoProfile), projectId: project.id }), /已经断开/);
+      await assert.rejects(call(first, 'project.connection.open', { key: accountIdentity(nodeTwoProfile), projectId: project.id }), /中央节点连接已断开/);
     } finally { SharedFiles.prototype.connect = connectBeforeReuse; }
   } finally { await otherServer.close(); }
   // A duplicate stored slot is not another dormant account. Once the two

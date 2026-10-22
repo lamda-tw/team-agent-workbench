@@ -55,6 +55,31 @@ test('an idle authoritative snapshot releases a joined turn even if its completi
   try { await f.runtime.ensureStarted(); assert.equal(f.session.status, 'idle'); assert.equal(f.session.desktopSyncPending, false); }
   finally { await f.runtime.close(); }
 });
+
+test('compressed desktop rollouts resume by ID, validate the logical path and preserve the actual transcript source', async () => {
+  const f = setup();
+  (f.runtime as any).storage.resumePath = 'C:/fixture/rollout.jsonl.zst';
+  try {
+    await f.runtime.ensureStarted();
+    const resume = f.rpc.calls.find(call => call.method === 'thread/resume')!;
+    assert.equal(resume.params.threadId, 'thread');
+    assert.equal(Object.hasOwn(resume.params, 'path'), false);
+    assert.equal(f.session.nativePath, 'C:/fixture/rollout.jsonl.zst');
+    assert.equal(f.session.desktopSyncState, 'connected');
+    assert.equal(f.rpc.calls.filter(call => ['thread/start', 'thread/fork'].includes(call.method)).length, 0);
+  } finally { await f.runtime.close(); }
+});
+
+test('compressed history never bypasses the shared thread identity or path checks', async () => {
+  for (const changes of [{ id: 'foreign' }, { path: 'C:/other/rollout.jsonl' }]) {
+    const f = setup();
+    (f.runtime as any).storage.resumePath = 'C:/fixture/rollout.jsonl.zst';
+    const thread = f.rpc.thread.bind(f.rpc);
+    f.rpc.thread = status => ({ ...thread(status), ...changes });
+    try { await assert.rejects(f.runtime.ensureStarted(), /没有继续写原来的会话文件/); }
+    finally { await f.runtime.close(); }
+  }
+});
 test('observer approvals never generate a decision; routed resolved requests expire', async () => {
   const f = setup();
   try {

@@ -3,7 +3,7 @@ import path from 'node:path';
 import type { AgentSession } from '../shared/types';
 import { findCodexRollout } from './codex-storage';
 import { sameNativePath } from './native-transcript';
-import { readCodexRollout } from './codex-rollout';
+import { codexRolloutPath, readCodexRollout } from './codex-rollout';
 
 const inside = (root: string, file: string) => {
   const relative = path.relative(path.resolve(root), path.resolve(file));
@@ -38,7 +38,7 @@ export async function prepareDesktopRollout(session: AgentSession, privateHome: 
   const directory = path.join(desktopHome, 'sessions');
   await fs.mkdir(directory, { recursive: true });
   if (!inside(await fs.realpath(desktopHome), await fs.realpath(directory))) throw new Error('Codex 会话目录指向其他位置，未同步');
-  const destination = path.join(directory, path.basename(source).replace(/\.jsonl\.zst$/, '.jsonl'));
+  const destination = path.join(directory, path.basename(codexRolloutPath(source)));
   // Exclusive creation preserves the exact validated snapshot and prevents
   // simultaneous windows from replacing another record.
   try { await fs.writeFile(destination, content, { flag: 'wx', mode: 0o600 }); }

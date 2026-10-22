@@ -22,12 +22,12 @@ export function codexPermissionParams(s: Pick<AgentSession, 'purpose' | 'permiss
   return {};
 }
 // Loaded shared threads keep their original startup settings. Apply the user's choice to the next turn.
-export function codexTurnPermissionParams(s: Pick<AgentSession, 'purpose' | 'permissionMode' | 'cwd'>): { approvalPolicy?: string; approvalsReviewer?: string; sandboxPolicy?: { type: string; writableRoots?: string[]; networkAccess?: boolean } } {
+export function codexTurnPermissionParams(s: Pick<AgentSession, 'purpose' | 'permissionMode' | 'cwd' | 'codexRemote'>): { approvalPolicy?: string; approvalsReviewer?: string; sandboxPolicy?: { type: string; writableRoots?: string[]; networkAccess?: boolean } } {
   const { sandbox, ...policy } = codexPermissionParams(s);
   if (!sandbox) return {};
   const sandboxPolicy = sandbox === 'danger-full-access' ? { type: 'dangerFullAccess' }
     : sandbox === 'read-only' ? { type: 'readOnly' }
-    : { type: 'workspaceWrite', writableRoots: [path.resolve(s.cwd)], networkAccess: false };
+    : { type: 'workspaceWrite', writableRoots: [s.codexRemote ? path.posix.resolve(s.codexRemote.cwd) : path.resolve(s.cwd)], networkAccess: false };
   return { ...policy, sandboxPolicy };
 }
 export function cursorPermissionArgs(s: Pick<AgentSession, 'purpose' | 'permissionMode'>) {

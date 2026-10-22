@@ -19,21 +19,23 @@ const browser = await chromium.launch({ channel: 'msedge', headless: true });
 const page = await browser.newPage({ viewport: { width: 1100, height: 760 } }), errors = [];
 page.on('pageerror', error => errors.push(error.message));
 await page.addInitScript(() => {
-  window.calls = []; window.markLinked = false; window.failImport = false;
+  window.calls = []; window.markLinked = false; window.failImport = false; window.remoteLinked = false;
   window.workbench = { call: async (action, payload) => {
     window.calls.push({ action, payload });
     if (action === 'session.native.list') return { provider: payload.provider,
-      groups: [{ id: 'p1', name: '算法优化项目', position: 0, kind: 'project' }, { id: 'p2', name: '软件开发项目', position: 1, kind: 'project' }],
+      groups: [{ id: 'p1', name: '算法优化项目', position: 0, kind: 'project' }, { id: 'p2', name: '软件开发项目', position: 1, kind: 'project' }, ...(payload.provider === 'codex' ? [{ id: 'remote', name: 'workspace-tw', position: 2, kind: 'project', hostId: 'ssh', hostName: 'seetacloud_09' }, { id: 'offline', name: '未连接的远程项目', position: 3, kind: 'project', hostId: 'offline', hostName: 'offline-host', error: '远程会话暂时读不了，请连接后刷新' }] : [])],
       sessions: [
         { nativeId: 'a', name: '量化误差分析', groupId: 'p1', cwd: 'D:/algorithm', updatedAt: 3, ...(window.markLinked ? { linkedSessionId: 'wb-a' } : {}) },
         { nativeId: 'b', name: '已经加入工作台', groupId: 'p1', cwd: 'D:/algorithm', updatedAt: 2, linkedSessionId: 'wb-b' },
         { nativeId: 'c', name: '工作目录已删除', groupId: 'p1', cwd: '', updatedAt: 1, unavailable: '工作目录已经不在，无法在工作台继续' },
         { nativeId: 'd', name: '修复测试覆盖', groupId: 'p2', cwd: 'D:/software', updatedAt: 4 },
         { nativeId: 'e', name: '尚未归入项目', cwd: 'D:/other', updatedAt: 5 },
+        ...(payload.provider === 'codex' ? [{ nativeId: 'a', name: '远程项目的对话', groupId: 'remote', cwd: '/root/workspace-tw', updatedAt: 6, hostId: 'ssh', hostName: 'seetacloud_09', ...(window.remoteLinked ? { linkedSessionId: 'remote-wb-a' } : {}) }] : []),
       ] };
     if (action === 'session.native.linkMany') {
       if (window.failImport) { window.markLinked = true; throw new Error('量化误差分析已在工作台，不能重复导入'); }
-      return payload.nativeIds.map(id => ({ id, provider: payload.provider }));
+      if (payload.selections?.some(source => source.hostId)) window.remoteLinked = true;
+      return (payload.nativeIds || payload.selections.map(source => source.nativeId)).map(id => ({ id, provider: payload.provider }));
     }
     throw new Error('Unexpected IPC: ' + action);
   } };
@@ -44,9 +46,31 @@ try {
     await page.evaluate(() => { window.markLinked = false; window.failImport = false; });
     await page.getByRole('button', { name: '打开 ' + provider + ' 导入' }).click();
     const dialog = page.getByRole('dialog'), nav = page.getByRole('navigation');
+    if (provider === 'Codex') {
+      await nav.getByRole('button', { name: /workspace-tw/ }).click();
+      await expect(dialog.getByText('远程主机：seetacloud_09')).toBeVisible();
+      await expect(dialog.getByRole('checkbox', { name: /远程项目的对话/ })).toBeVisible();
+      await expect(dialog.getByRole('checkbox', { name: /远程项目的对话/ })).toBeEnabled();
+      await dialog.getByRole('checkbox', { name: /远程项目的对话/ }).click();
+      await nav.getByRole('button', { name: /算法优化项目/ }).click();
+      await expect(dialog.getByRole('checkbox', { name: /量化误差分析/ })).toHaveAttribute('aria-checked', 'false');
+      await nav.getByRole('button', { name: /workspace-tw/ }).click();
+      await page.screenshot({ path: path.join(output, 'remote-projects.png') });
+      await dialog.getByRole('button', { name: '导入 1 条' }).click();
+      await expect(dialog).toHaveCount(0);
+      const imported = await page.evaluate(() => window.calls.filter(call => call.action === 'session.native.linkMany').at(-1));
+      assert.deepEqual(imported.payload.selections, [{ nativeId: 'a', hostId: 'ssh' }]);
+      await page.getByRole('button', { name: '打开 Codex 导入' }).click();
+      await nav.getByRole('button', { name: /workspace-tw/ }).click();
+      await expect(dialog.getByRole('checkbox', { name: /远程项目的对话/ })).toBeDisabled();
+      await nav.getByRole('button', { name: /未连接的远程项目/ }).click();
+      await expect(dialog.getByRole('status')).toContainText('远程会话暂时读不了');
+      await nav.getByRole('button', { name: /全部会话/ }).click();
+    }
     await expect(dialog.getByRole('checkbox', { name: /已经加入工作台/ })).toBeDisabled();
     await expect(dialog.getByRole('checkbox', { name: /工作目录已删除/ })).toBeDisabled();
     await nav.getByRole('button', { name: /算法优化项目/ }).click();
+    await expect(dialog.getByText('远程主机：seetacloud_09')).toHaveCount(0);
     await expect(dialog.getByRole('checkbox')).toHaveCount(3);
     await expect(dialog.getByRole('checkbox', { name: /修复测试覆盖/ })).toHaveCount(0);
     await dialog.getByRole('button', { name: '全选当前列表', exact: true }).click();
@@ -84,5 +108,5 @@ try {
   await dialog.getByRole('button', { name: '取消', exact: true }).click();
   await expect(dialog).toHaveCount(0);
   assert.deepEqual(errors, []);
-  console.log('Native import UI passed: project navigation, cross-project selection, disabled linked/unavailable sessions, scoped select-all, refresh and stale-submit protection, Codex/Cursor separation, cancellation and small-window layout.');
+  console.log('Native import UI passed: desktop remote projects, host labels and connection errors, project navigation, cross-project selection, disabled linked/unavailable sessions, scoped select-all, refresh and stale-submit protection, Codex/Cursor separation, cancellation and small-window layout. Screenshot: ' + path.join(output, 'remote-projects.png'));
 } finally { await browser.close(); }

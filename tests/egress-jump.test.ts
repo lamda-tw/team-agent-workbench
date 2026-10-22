@@ -40,7 +40,7 @@ test('model traffic and health checks use SSH forwarding with end-to-end TLS ide
   const proxy = new EgressClientProxy(config, (host, port, signal) => shared.openEgressTunnel(host, port, signal));
   let client: net.Socket | undefined;
   try {
-    await assert.rejects(proxy.probe(), /请先登录/); assert.match(proxy.status().detail, /请先登录/);
+    await assert.rejects(proxy.probe(), /请先连接中央节点/); assert.match(proxy.status().detail, /请先连接中央节点/);
     await donor.connect(server.profile('alice'), 'test-password', async () => true); shared.adoptConnection(donor); donor.disconnect();
     await proxy.start(); await proxy.probe(); assert.equal(proxy.status().available, true); assert.match(proxy.status().detail, /中转/);
     const localPort = Number(new URL(proxy.environment().HTTPS_PROXY!).port);
@@ -58,7 +58,7 @@ test('model traffic and health checks use SSH forwarding with end-to-end TLS ide
     client = net.connect(localPort, '127.0.0.1'); await once(client, 'connect'); client.write('CONNECT chatgpt.com:443 HTTP/1.1\r\n\r\n');
     assert.match(String((await once(client, 'data'))[0]), /200/);
     const disconnected = once(client, 'close'); shared.disconnect(); proxy.sharedServerConnectionChanged(false); await disconnected;
-    assert.equal(proxy.status().available, false); await assert.rejects(proxy.probe(), /请先登录/);
+    assert.equal(proxy.status().available, false); await assert.rejects(proxy.probe(), /请先连接中央节点/);
   } finally { client?.destroy(); await proxy.stop(); donor.disconnect(); shared.disconnect(); for (const socket of sockets) socket.destroy(); await server.close(); await new Promise<void>(resolve => gateway.close(() => resolve())); }
 });
 
