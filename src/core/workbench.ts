@@ -3004,12 +3004,12 @@ export class Workbench {
     // Freeze renderer-visible output before any asynchronous setup. Never wait for
     // the parent turn to finish or read a later handoff as the fork's context.
     const parent = this.session(parentId); let captured = structuredClone(parent), capturedAt = new Date().toISOString();
-    if (parent.codexRemote) throw new Error('请在 Codex 远程项目中创建子会话，再从接入窗口导入');
     const title = focus.trim() || '子会话';
     if (parent.provider !== 'codex') throw new Error('当前仅支持从 Codex 创建子会话');
     if (parent.closedAt || parent.purpose !== 'work' || !parent.binding) throw new Error('请选择未关闭的工作会话');
     if (title.length > 120 || selectedText.length > 128 * 1024) throw new Error('子会话名称或引用过长');
     this.assertCanWork(parent.binding);
+    if (parent.codexRemote && !parent.nativeId) throw new Error('远程父会话标识缺失，请重新连接后创建子会话');
     // Dispatch the native fork now, before the lifecycle queue or file copies.
     // In-progress native history is forked as interrupted; the visible partial
     // output below supplements deltas not yet persisted by Codex.
@@ -3028,6 +3028,7 @@ export class Workbench {
       const result = await nativeResult;
       if ('error' in result) throw result.error;
       const native = result.value;
+      if (captured.codexRemote && !native?.remote) throw new Error('远程子会话连接信息缺失，未创建本地替代会话');
       if (this.session(parentId).closedAt) throw new Error('父会话已关闭，未保存子会话');
       let child: AgentSession | undefined;
       try {
@@ -3045,12 +3046,14 @@ export class Workbench {
           }
         }
         const partial = captured.messages.slice(from).filter(message => message.role !== 'user' || message.context?.accepted !== false);
-        const context = `# 子会话创建快照\n\n创建时间：${capturedAt}\n父会话：${captured.title}\n工作目录：${captured.cwd}\n本会话与父会话共用工作目录；上下文已独立。\n${active ? '父会话当时仍在生成。以下是当时已显示的本轮片段，可能尚未完成；不要猜测其后续内容或重复执行父会话的工具。' : '已继承创建时的原生上下文。'}\n请以用户在本子会话提出的问题为准。\n\n` + partial.map(message => `## ${message.role}\n${message.userText ?? message.text}\n`).join('\n');
+        const accepted = acceptedSessionContext(captured).sourceHashes;
+        const pendingRemoteContext = captured.codexRemote && captured.fork?.remoteContext && accepted[captured.fork.sourceId] !== captured.fork.snapshotHash ? captured.fork.remoteContext + '\n\n' : '';
+        const context = pendingRemoteContext + `# 子会话创建快照\n\n创建时间：${capturedAt}\n父会话：${captured.title}\n工作目录：${captured.codexRemote?.cwd || captured.cwd}\n本会话与父会话共用工作目录；上下文已独立。\n${active ? '父会话当时仍在生成。以下是当时已显示的本轮片段，可能尚未完成；不要猜测其后续内容或重复执行父会话的工具。' : '已继承创建时的原生上下文。'}\n请以用户在本子会话提出的问题为准。\n\n` + partial.map(message => `## ${message.role}\n${message.userText ?? message.text}\n`).join('\n');
         const sourceId = randomUUID(), localPath = path.join(directory, sourceId + '-fork-context.md'), snapshotHash = createHash('sha256').update(context).digest('hex');
         await fs.writeFile(localPath, context, { flag: 'wx' });
         child.sources.push({ id: sourceId, name: '创建时的上下文', localPath, sourcePath: 'session-handoff:fork:' + parentId, sha256: snapshotHash, size: Buffer.byteLength(context), fetchedAt: capturedAt });
-        const accepted = acceptedSessionContext(captured).sourceHashes, inheritedSourceIds: string[] = [];
-        for (const original of captured.sources.filter(source => accepted[source.id] === source.sha256 || source.id === captured.fork?.sourceId || captured.fork?.inheritedSourceIds.includes(source.id))) {
+        const inheritedSourceIds: string[] = [];
+        for (const original of captured.sources.filter(source => !captured.codexRemote && (accepted[source.id] === source.sha256 || source.id === captured.fork?.sourceId || captured.fork?.inheritedSourceIds.includes(source.id)))) {
           const frozen = await freezeFile(original.localPath, directory);
           Object.assign(frozen, { name: original.name, sourcePath: original.sourcePath, contentRef: original.contentRef });
           if (frozen.sha256 !== original.sha256) throw new Error('父会话引用已改变，请重新创建');
@@ -3058,10 +3061,11 @@ export class Workbench {
         }
         child.title = title; child.reasoningEffort = captured.reasoningEffort; child.mode = captured.mode;
         child.followProjectBrief = captured.followProjectBrief;
-        child.fork = { parentId, capturedAt, parentMessageId: captured.messages.at(-1)?.id, parentMessageCount: captured.messages.length, snapshotHash, sourceId, inheritedSourceIds, workspaceKind: 'shared-directory', workspaceRoot: captured.cwd, nativeFork: !!native, parentWasRunning: active, visibleSnapshotPath };
+        child.fork = { parentId, capturedAt, parentMessageId: captured.messages.at(-1)?.id, parentMessageCount: captured.messages.length, snapshotHash, sourceId, inheritedSourceIds, workspaceKind: 'shared-directory', workspaceRoot: captured.codexRemote?.cwd || captured.cwd, nativeFork: !!native, ...(captured.codexRemote ? { remoteContext: context } : {}), parentWasRunning: active, visibleSnapshotPath };
         if (native) {
           child.nativeId = native.id; child.nativePath = native.path;
-          if (native.desktop) { child.codexDesktop = true; child.nativeLive = true; }
+          if (native.remote) { child.codexRemote = native.remote; child.nativeLive = true; }
+          else if (native.desktop) { child.codexDesktop = true; child.nativeLive = true; }
           else child.codexStorage = 'workbench';
         }
         this.store.inputs[child.id] = { text: selectedText.trim() ? selectedText : '', sourceIds: [], answers: {} };
