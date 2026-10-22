@@ -61,7 +61,7 @@ import { listSessionFiles } from './session-files';
 import { attachmentList, freezeDraftAttachments } from './draft-attachments';
 import { AccountSync } from './account-sync';
 import { accountIdentity } from '../shared/account-data';
-import { ownsBinding, scopeAccountSnapshot } from '../shared/account-scope';
+import { ownedLocalProjects, ownsBinding, scopeAccountSnapshot } from '../shared/account-scope';
 import { projectDirectory, projectDirectoryKey } from '../shared/project-directory';
 import { normalizedResultBody, teamResultDifference } from '../shared/team-result-difference';
 import { linkConclusionPublications } from './conclusion-publications';
@@ -193,6 +193,7 @@ export class Workbench {
     this.projectSync = new ProjectSync(root, {
       owner: () => { const profile = this.personal ? personalWorkspace().profile : this.remote.connected ? this.remote.profile : this.store.settings.workspaceSnapshot?.profile; return profile ? accountIdentity(profile) : 'unlinked'; },
       projects: () => (this.remote.connected ? this.remote.profile : this.store.settings.workspaceSnapshot?.profile)?.projects || [],
+      retainedProjects: () => ownedLocalProjects(this.remote.connected ? this.remote.profile : this.store.settings.workspaceSnapshot?.profile, [...this.store.sessions, ...this.store.drafts]),
       binding: id => this.remote.binding(id), connected: () => !this.configuring && !this.personal && this.remote.connected,
       create: async (name, group, brief, id) => {
         const result = await this.remote.createProject(name, group, brief, id);
@@ -2928,6 +2929,10 @@ export class Workbench {
   }
   private async createTrajectory(id: string, automatic: boolean) {
     const s = this.session(id); if (this.personal) throw new Error('请先将会话迁移到团队项目，再上传轨迹'); if (!s.binding) throw new Error('会话没有绑定远端项目'); this.assertCanWork(s.binding);
+    if (this.projectSync.isHistoryOnly(s.binding.project.id)) {
+      if (automatic) return;
+      throw new Error('此项目当前仅保留本地历史，恢复原项目访问后才能上传轨迹');
+    }
     if (automatic && s.sources.some(isPersonalHandoffSource)) {
       s.autoUpload = false; clearTimeout(this.trajectoryTimers.get(id)); this.trajectoryTimers.delete(id);
       await this.store.save(); this.broadcast(); return;

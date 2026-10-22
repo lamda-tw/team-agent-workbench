@@ -1,9 +1,17 @@
 import { accountIdentity } from './account-data';
 import { projectDirectoryKey } from './project-directory';
-import type { ConnectionProfile, RemoteBinding, Snapshot } from './types';
+import type { ConnectionProfile, Project, RemoteBinding, Snapshot } from './types';
 
 export function ownsBinding(profile: ConnectionProfile | undefined, binding: RemoteBinding | undefined): boolean {
   return !!profile && !!binding && accountIdentity(profile) === accountIdentity(binding);
+}
+
+// Local conversation ownership survives a changed central project directory.
+// Never infer ownership from a project name, username alone or an unbound record.
+export function ownedLocalProjects(profile: ConnectionProfile | undefined, records: readonly { binding?: RemoteBinding }[]): Project[] {
+  const projects = new Map<string, Project>();
+  for (const { binding } of records) if (binding?.project?.id && ownsBinding(profile, binding) && !projects.has(binding.project.id)) projects.set(binding.project.id, { ...binding.project });
+  return [...projects.values()];
 }
 
 export function snapshotAccountKey(snapshot: Snapshot): string {

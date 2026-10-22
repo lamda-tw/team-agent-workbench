@@ -9,7 +9,7 @@ import { applyConflictText, applyConflictVersion, canonicalSync, mergeSyncValue,
 import { conflictToken, type SyncConflicts } from './sync-conflicts';
 
 interface Entry { project: Project; pendingCreate?: boolean; creation?: { brief?: ProjectBrief }; localOnly?: boolean; brief?: ProjectBrief; base?: ProjectBrief; revision: number; centralRevision: number; error?: string; conflict?: SyncConflict }
-interface Host { owner?(): string; projects(): Project[]; binding(id: string): RemoteBinding; connected(): boolean; create(name: string, group: string | undefined, brief: ProjectBrief | undefined, id: string): Promise<Project>; read(binding: RemoteBinding): Promise<ProjectBriefState>; save(binding: RemoteBinding, brief: ProjectBrief, revision: number): Promise<unknown>; changed(): void }
+interface Host { owner?(): string; projects(): Project[]; retainedProjects?(): Project[]; binding(id: string): RemoteBinding; connected(): boolean; create(name: string, group: string | undefined, brief: ProjectBrief | undefined, id: string): Promise<Project>; read(binding: RemoteBinding): Promise<ProjectBriefState>; save(binding: RemoteBinding, brief: ProjectBrief, revision: number): Promise<unknown>; changed(): void }
 
 export class ProjectSync {
   private accounts: Record<string, Record<string, Entry>> = {};
@@ -23,8 +23,19 @@ export class ProjectSync {
   private closed = false;
   constructor(private root: string, private host: Host, private conflicts: SyncConflicts) {}
   init() { return this.ready ||= fs.readFile(path.join(this.root, 'project-sync.json'), 'utf8').then(raw => { this.accounts = JSON.parse(raw).accounts || {}; }).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'ENOENT') throw new Error('本机项目记录无法读取，原文件已保留'); }); }
-  projects() { return [...new Map([...this.host.projects(), ...Object.values(this.entries).map(entry => entry.project)].map(project => [project.id, project])).values()]; }
-  states() { return Object.fromEntries(Object.entries(this.entries).map(([id, entry]) => [id, { pending: !!entry.pendingCreate || canonicalSync(entry.brief) !== canonicalSync(entry.base), localOnly: !!entry.localOnly, error: entry.error, history: this.conflicts.history.filter(item => item.key === 'project:' + id && item.owner === this.owner()).slice(0, 30).map(({ id, at, method }) => ({ id, at, method })), conflict: entry.conflict && this.conflicts.view(entry.conflict) }])); }
+  projects() {
+    const projects = new Map([...this.host.projects(), ...Object.values(this.entries).map(entry => entry.project)].map(project => [project.id, project]));
+    for (const project of this.host.retainedProjects?.() || []) if (!projects.has(project.id)) projects.set(project.id, project);
+    return [...projects.values()];
+  }
+  isHistoryOnly(id: string) { const entry = this.entries[id]; return !entry?.localOnly && !entry?.pendingCreate && !this.host.projects().some(project => project.id === id) && this.projects().some(project => project.id === id); }
+  states() {
+    const ids = new Set([...Object.keys(this.entries), ...this.projects().filter(project => this.isHistoryOnly(project.id)).map(project => project.id)]);
+    return Object.fromEntries([...ids].map(id => {
+      const entry = this.entries[id], historyOnly = this.isHistoryOnly(id);
+      return [id, { pending: !historyOnly && (!!entry?.pendingCreate || canonicalSync(entry?.brief) !== canonicalSync(entry?.base)), localOnly: historyOnly || !!entry?.localOnly, historyOnly, error: historyOnly ? undefined : entry?.error, history: this.conflicts.history.filter(item => item.key === 'project:' + id && item.owner === this.owner()).slice(0, 30).map(({ id, at, method }) => ({ id, at, method })), conflict: !historyOnly && entry?.conflict ? this.conflicts.view(entry.conflict) : undefined }];
+    }));
+  }
   private persist() { const data = structuredClone({ accounts: this.accounts }); const next = this.writes.catch(() => {}).then(() => atomicJson(path.join(this.root, 'project-sync.json'), data)); this.writes = next; return next; }
   async create(name: string, groupName?: string, brief?: ProjectBrief, localOnly = false, identifier?: string) {
     await this.init(); name = projectName(name); if (brief) brief = projectBriefSchema.parse(brief);
@@ -68,6 +79,7 @@ export class ProjectSync {
     const valid = () => { if (owner !== this.owner()) throw new Error('账号已改变，本机项目保持原归属'); };
     for (const project of this.projects()) {
       if (this.closed || !this.host.connected() || owner !== this.owner()) break;
+      if (this.isHistoryOnly(project.id)) continue;
       const entry = entries[project.id] ||= { project, revision: 0, centralRevision: 0 };
       if (entry.localOnly) continue;
       try {
