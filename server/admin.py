@@ -356,7 +356,7 @@ def check_password(password):
 
 
 def existing_member(root, state, username, allow_registered=False):
-    """Inspect only a dedicated account created for this exact team."""
+    """Inspect a dedicated Workbench account on this Linux system."""
     import grp, pwd
     username = account_name(username)
     login = system_username(username)
@@ -369,17 +369,24 @@ def existing_member(root, state, username, allow_registered=False):
         raise ValueError('[MEMBER_IMPORT] 当前服务器或团队没有可接入的同名账号')
     if any(name != username and user.get('uid') == account.pw_uid for name, user in state['users'].items()):
         raise ValueError('[MEMBER_IMPORT] 此 Linux UID 已登记给其他成员，不能接入')
-    marker = 'workbench-' + state['teamId'] + '-' + login
-    if (account.pw_uid == 0 or account.pw_gecos != marker or account.pw_gid != login_group.gr_gid
-            or pathlib.PurePosixPath(account.pw_shell).name != 'nologin' or account.pw_dir != '/'):
-        raise ValueError('[MEMBER_IMPORT] 账号不属于当前团队的专用 SFTP 身份，不能接管其他系统或团队账号')
+    marker = account.pw_gecos
+    primary = next((group.gr_name for group in grp.getgrall() if group.gr_gid == account.pw_gid), None)
+    legacy = re.fullmatch(r'workbench-([a-zA-Z0-9_-]{1,32})-' + re.escape(login), marker)
+    dedicated = (marker == 'workbench-account-' + login and bool(re.fullmatch(r'wb_[a-zA-Z0-9_-]{1,32}_members', primary or ''))
+                 or bool(legacy and primary == 'wb_' + legacy.group(1) + '_members'))
+    if (account.pw_uid == 0 or not dedicated or pathlib.PurePosixPath(account.pw_shell).name != 'nologin' or account.pw_dir != '/'):
+        raise ValueError('[MEMBER_IMPORT] 账号不是本 Linux 系统上的 Workbench 专用 SFTP 账号，不能接管其他系统账号')
     os_groups = {group.gr_name for group in grp.getgrall() if login in group.gr_mem or group.gr_gid == account.pw_gid}
     groups = sorted(name for name, group in state['groups'].items() if name in os_groups and group.get('workspace') and not group.get('provisioning') and not group.get('deletedAt') and not group.get('purgedAt'))
     admins = sorted(name for name in groups if state['groups'][name].get('adminGroup') in os_groups)
     managed = {state['loginGroup']} | set(groups) | {state['groups'][name].get('adminGroup') for name in groups}
-    unknown = sorted(os_groups - managed)
-    identity = member_hash([state['teamId'], login, account.pw_uid, account.pw_gid, account.pw_gecos, account.pw_dir, account.pw_shell, sorted(os_groups), groups, admins])
-    return dict(username=username, login=login, uid=account.pw_uid, marker=marker, groups=groups, contentAdminGroups=admins, unknownGroups=unknown, identity=identity)
+    historical = sorted(name for name in os_groups - managed if not name.startswith('wb_' + state['teamId'] + '_') and re.fullmatch(r'wb_[a-zA-Z0-9_-]{1,32}_(?:members|[a-zA-Z][a-zA-Z0-9_-]{0,31}(?:_admin)?)', name))
+    unknown = sorted(os_groups - managed - set(historical))
+    # Adding this team's login group is the only OS membership mutation during
+    # import. Exclude it so a failed publication can be retried safely.
+    identity_groups = sorted(os_groups - {state['loginGroup']})
+    identity = member_hash([state['teamId'], login, account.pw_uid, account.pw_gid, marker, account.pw_dir, account.pw_shell, identity_groups, groups, admins])
+    return dict(username=username, login=login, uid=account.pw_uid, marker=marker, groups=groups, contentAdminGroups=admins, historicalGroups=historical, unknownGroups=unknown, needsLoginGroup=state['loginGroup'] not in os_groups, crossSpace=account.pw_gid != login_group.gr_gid, identity=identity)
 
 
 def verify_existing_password(login, password):
@@ -923,6 +930,16 @@ def member_access_config(root, state):
     return ('Match Group ' + state["loginGroup"] + '\n    ChrootDirectory "' + str(root) + '"\n    ForceCommand internal-sftp\n    PasswordAuthentication yes\n    AuthenticationMethods password\n    PubkeyAuthentication no\n' + forwarding + '    PermitTTY no\nMatch all\n')
 
 
+def effective_member_chroot(login):
+    """Ask sshd which chroot an existing Linux identity actually receives."""
+    output = run([shutil.which('sshd') or '/usr/sbin/sshd', '-T', '-C', 'user=' + login + ',host=localhost,addr=127.0.0.1'])
+    for line in output.splitlines():
+        if line.lower().startswith('chrootdirectory '):
+            value = line.split(None, 1)[1].strip().strip('"')
+            return None if value.lower() == 'none' else value
+    raise ValueError('[MEMBER_IMPORT] 无法核对账号实际的 SFTP 目录，已停止接入')
+
+
 def sshd_includes_member_access(file, config_file=pathlib.Path("/etc/ssh/sshd_config")):
     """Return whether sshd's global config includes the generated rule file.
 
@@ -1373,6 +1390,25 @@ def _execute(request):
         verify_existing_password(inspected['login'], request.get('password'))
         if previous and (not previous.get('imported') or previous.get('uid') != inspected['uid'] or previous.get('marker') != inspected['marker']):
             raise ValueError('[MEMBER_EXISTS] 此账号已有不同的团队登记，不能覆盖')
+        if inspected['crossSpace']:
+            active_root = effective_member_chroot(inspected['login'])
+            if active_root and os.path.realpath(active_root) != os.path.realpath(root):
+                raise ValueError('[MEMBER_IMPORT] 此账号当前的 SFTP 目录属于本系统另一团队空间，不能同时绑定不同目录；请先核对旧空间的 SSH 配置')
+            if not member_access_ready(root, state):
+                configure_member_access(root, state)
+                checkpoint(root, state, '当前空间的成员登录能力已配置')
+            if inspected['needsLoginGroup']:
+                run(['usermod', '-a', '-G', state['loginGroup'], inspected['login']])
+            try:
+                routed_root = effective_member_chroot(inspected['login'])
+                if not routed_root or os.path.realpath(routed_root) != os.path.realpath(root):
+                    raise ValueError('[MEMBER_IMPORT] 接入后 SFTP 目录与当前空间不符，已停止接入')
+            except Exception:
+                if inspected['needsLoginGroup']:
+                    run(['gpasswd', '-d', inspected['login'], state['loginGroup']])
+                raise
+            if inspected['needsLoginGroup']:
+                checkpoint(root, state, '已有账号已加入当前空间登录组')
         if not previous:
             state['users'][username] = dict(username=username, systemUsername=inspected['login'], uid=inspected['uid'], marker=inspected['marker'], name=str(request.get('name') or username)[:120], enabled=True, imported=True, groups=inspected['groups'], contentAdminGroups=inspected['contentAdminGroups'], accessVersion=uuid.uuid4().hex)
         for old_job in state.get('operations', {}).values():
@@ -1406,7 +1442,7 @@ def _execute(request):
                 pass
             else:
                 raise ValueError("Linux 账号已存在，工具不会接管已有系统账号")
-            record = {"username": username, "systemUsername": login, "uid": allocate_id(pwd.getpwall(), "pw_uid", [u.get("uid") for u in state["users"].values()]), "name": str(request.get("name", username))[:120], "enabled": True, "provisioning": True, "marker": "workbench-" + state["teamId"] + "-" + login}
+            record = {"username": username, "systemUsername": login, "uid": allocate_id(pwd.getpwall(), "pw_uid", [u.get("uid") for u in state["users"].values()]), "name": str(request.get("name", username))[:120], "enabled": True, "provisioning": True, "marker": "workbench-account-" + login}
             state["users"][username] = record
             save(root, state)
         elif not record.get("provisioning"):
