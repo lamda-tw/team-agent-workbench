@@ -10,7 +10,7 @@ export function makeFixture(id, step, paneIndex, pane, stage = '') {
   const name = username === 'alice' ? 'Alice' : username === 'carol' ? 'Carol' : username === 'bob' ? 'Bob' : pane.actor;
   const project = { id: 'handbook-project', name: ocr ? '票据 OCR 优化' : '量化转换项目', groupName: 'team_one', groupLabel: ocr ? '项目一组' : '算法研发', remoteRoot: '/srv/teamspace/projects/example', uploadPath: '/srv/teamspace/projects/example/成果', historyPath: '/srv/teamspace/projects/example/轨迹', managed: true, briefRevision: 1 };
   const beforeProject = ocr && (step <= 3 || step === 4 && paneIndex === 1);
-  const profile = { id: 'handbook-team', mode: 'sftp', name: name + ' · 团队账号', host: 'team.example.internal', port: 22, username, fingerprint: 'SHA256:handbook-example', manifestPath: '', workPath: '', projects: beforeProject ? [] : [project] };
+  const profile = { id: 'handbook-team', mode: 'sftp', name: name + ' · 成员账号', host: 'team.example.internal', port: 22, username, fingerprint: 'SHA256:handbook-example', manifestPath: '', workPath: '', projects: beforeProject ? [] : [project] };
   const workspace = { path: '/srv/teamspace/projects', canonicalPath: '/srv/teamspace/projects', canCreateProject: admin, groupName: project.groupName, groupLabel: project.groupLabel, isEmpty: beforeProject };
   const directory = 'D:\\work\\' + username + (ocr ? '\\ocr' : '\\quantization');
   const binding = { connectionId: profile.id, host: profile.host, port: 22, username, fingerprint: profile.fingerprint, project };

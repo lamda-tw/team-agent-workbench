@@ -220,7 +220,7 @@ async function dispatch(action: string, raw: unknown, owner: BrowserWindow, pref
       const profile = { ...p.profile, fingerprint: p.profile.mode === 'local' ? p.profile.fingerprint : serverIdentities.get(key) };
       return loginWindow(owner, profile, p.password, p.localPath, async fingerprint => {
         const accepted = (await dialog.showMessageBox(owner, {
-        type: 'question', title: '首次连接团队服务器', message: p.profile.name || '团队共享服务器',
+        type: 'question', title: '首次连接中央节点', message: p.profile.name || '团队中央节点',
         detail: `这是本机第一次连接 ${p.profile.host}:${p.profile.port}，请确认服务器地址填写正确。`,
         buttons: ['取消', '继续登录'], defaultId: 0, cancelId: 0,
         })).response === 1;
@@ -537,7 +537,7 @@ async function openProjectConnection(owner: BrowserWindow, key: string, projectI
   if (projectId && createProject) throw new Error('请选择打开已有项目或创建新项目');
   return routeAccount(async () => {
     const source = liveConnectionContexts().find(context => context.workbench.remote.profile && accountIdentity(context.workbench.remote.profile) === key);
-    if (!source) throw new Error('此连接已经断开，请重新登录');
+    if (!source) throw new Error('中央节点连接已断开，请重新连接');
     await source.workbench.refreshGroups();
     const profile = source.workbench.remote.profile;
     if (!profile || ![...contexts.values()].some(context => context.workbench === source.workbench) || !source.workbench.remote.connected || accountIdentity(profile) !== key) throw new Error('连接已改变，请重新选择');
@@ -575,7 +575,7 @@ async function loginWindow(window: BrowserWindow, profile: import('../shared/typ
     if (expectedConnection && accountIdentity(result) !== expectedConnection) throw new Error('此项目的中央节点或账号已改变，请重新打开项目设置');
     connectionProject(result, projectId);
     return await routeAccount(async () => {
-      if (window.isDestroyed() || destination.isDestroyed() || closingWindows.has(window) || closingWindows.has(destination) || closing) throw new Error('窗口正在关闭，请重新登录');
+      if (window.isDestroyed() || destination.isDestroyed() || closingWindows.has(window) || closingWindows.has(destination) || closing) throw new Error('窗口正在关闭，请重新连接中央节点');
       const seedRoot = previous.workbench.store.root;
       if (separateProjectWindow(currentProfile, result)) { destination = await createWindow(undefined, true); previous = contexts.get(destination)!; switchingWindows.add(destination); }
       acquired = await accountWorkspaces.acquire(result, seedRoot);
@@ -588,7 +588,7 @@ async function loginWindow(window: BrowserWindow, profile: import('../shared/typ
       // temporary connection above still verifies this login's password and server.
       target.egress.setUsername(result.username);
       if (target.workbench.store.settings.egress?.enabled) void target.egress.probe().catch(() => {});
-      if (window.isDestroyed() || destination.isDestroyed() || closingWindows.has(window) || closingWindows.has(destination) || closing) throw new Error('窗口正在关闭，请重新登录');
+      if (window.isDestroyed() || destination.isDestroyed() || closingWindows.has(window) || closingWindows.has(destination) || closing) throw new Error('窗口正在关闭，请重新连接中央节点');
       await atomicJson(windowStateFile(previous.slot), { profile: target.workbench.remote.profile || result, sidebarProjectHeight: previous.sidebarProjectHeight, sidebarPanes: previous.sidebarPanes, selectedProjectId: projectId || result.projects[0]?.id });
       try { await previous.release(); }
       catch (error) { await atomicJson(windowStateFile(previous.slot), { profile: previous.workbench.store.settings.workspaceSnapshot?.profile, sidebarProjectHeight: previous.sidebarProjectHeight, sidebarPanes: previous.sidebarPanes, selectedProjectId: previous.selectedProjectId }); throw error; }
@@ -709,7 +709,7 @@ async function createWindow(preferredSlot?: number, fresh = false, reuse?: { pro
     if (profile) {
       const acquired = await accountWorkspaces.acquire(profile, instanceRoot(slot));
       contexts.set(window, { ...acquired.value, projectCreation: reuse?.projectCreation, selectedProjectId, slot, sidebarProjectHeight, sidebarPanes, release: acquired.release });
-      if (reuse) { if (!acquired.value.workbench.remote.connected) throw new Error('此连接已经断开，请重新登录'); await atomicJson(windowStateFile(slot), { profile, selectedProjectId, sidebarProjectHeight, sidebarPanes }); }
+      if (reuse) { if (!acquired.value.workbench.remote.connected) throw new Error('中央节点连接已断开，请重新连接'); await atomicJson(windowStateFile(slot), { profile, selectedProjectId, sidebarProjectHeight, sidebarPanes }); }
     } else {
       const context = await createDataContext(path.join(app.getPath('userData'), 'window-state', String(slot)));
       contexts.set(window, { ...context, slot, sidebarProjectHeight, sidebarPanes, release: async () => { await context.workbench.close(); await context.egress.stop(); } });

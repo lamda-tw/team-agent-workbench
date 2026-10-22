@@ -33,7 +33,7 @@ export function BetaFeaturesModal({ features, close, changed }: { features: Beta
   return <div className="modal-backdrop"><section className="modal" role="dialog" aria-modal="true" aria-labelledby="beta-features-title">
     <header><h2 id="beta-features-title">Beta 功能</h2><button className="icon" aria-label="关闭窗口" onClick={close}><X size={19}/></button></header>
     <div className="modal-body">
-      <p className="muted small">试用功能可分别开启或关闭，设置只作用于当前团队账号。</p>
+      <p className="muted small">试用功能可分别开启或关闭，设置只作用于当前成员账号。</p>
       <div className="beta-feature"><div><strong>跨会话引用</strong><span className="badge">Beta</span>
         <p>手动选择同项目其他会话的摘要快照。项目会话日志已默认自动提供，不受此开关影响。</p>
         <p className="muted small">引用个人会话内容后，轨迹自动上传会关闭；如需共享轨迹，请先核对内容再手动上传。</p>

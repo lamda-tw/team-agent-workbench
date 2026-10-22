@@ -38,7 +38,7 @@ const call = (page: Page, action: string, payload?: unknown): Promise<any> => pa
 try {
   const a = await launch('user', 'alice'), b = await launch('user', 'bob'), management = await launch('admin', 'admin');
   for (const [client, name] of [[a, 'alice'], [b, 'bob']] as const) {
-    const login = client.page.locator('.modal').filter({ hasText: '登录团队工作台' });
+    const login = client.page.locator('.modal').filter({ hasText: '连接中央节点' });
     await login.waitFor();
     await call(client.page, 'remote.connect', { profile: profiles[name], password: '1', localPath: data });
     await login.getByRole('button', { name: '取消', exact: true }).click();
@@ -49,7 +49,7 @@ try {
   const exitCode = await new Promise<number | null>((resolve, reject) => { const timer = setTimeout(() => { duplicate.kill(); reject(new Error('duplicate instance did not exit')); }, 10000); duplicate.on('exit', code => { clearTimeout(timer); resolve(code); }); duplicate.on('error', reject); });
   assert.equal(exitCode, 0); await expect.poll(() => b.app.windows().length).toBe(2);
   const secondBobWindow = b.app.windows().find(page => page !== bp)!; pages.push(secondBobWindow); secondBobWindow.on('pageerror', error => errors.push(error.message));
-  await secondBobWindow.getByText('登录团队工作台', { exact: true }).waitFor();
+  await secondBobWindow.getByText('连接中央节点', { exact: true }).waitFor();
   assert.equal((await call(secondBobWindow, 'snapshot')).sessions.length, 0);
   await call(secondBobWindow, 'remote.connect', { profile: profiles.alice, password: '1', localPath: data });
   assert.equal((await call(bp, 'snapshot')).connection.profile.username, 'bob');
@@ -150,7 +150,7 @@ try {
   const beforeRestart = JSON.parse(JSON.stringify(await call(bp, 'snapshot'))), conclusionsBefore = JSON.parse(JSON.stringify(await call(bp, 'conclusion.list', { projectId: project.id, includeArchived: true })));
   await b.app.close();
   const reopened = await launch('user', 'bob');
-  await reopened.page.locator('.modal').filter({ hasText: '登录团队工作台' }).getByRole('button', { name: '取消', exact: true }).click();
+  await reopened.page.locator('.modal').filter({ hasText: '连接中央节点' }).getByRole('button', { name: '取消', exact: true }).click();
   const afterRestart = await call(reopened.page, 'snapshot');
   assert.deepEqual(afterRestart.sessions, beforeRestart.sessions); assert.deepEqual(afterRestart.inputs, beforeRestart.inputs);
   assert.deepEqual(afterRestart.settings.contentUpdates, beforeRestart.settings.contentUpdates);

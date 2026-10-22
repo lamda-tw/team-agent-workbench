@@ -14,7 +14,7 @@ test('personal ownership and relay authentication are independent axes', () => {
     assert.doesNotThrow(() => assertPersonalRelay('direct', true, account, { relayAccount: 'alice' }));
     assert.doesNotThrow(() => assertPersonalRelay('management', false, account, { relayAccount: 'alice' }));
   }
-  assert.throws(() => assertPersonalRelay('management', true, undefined), /登录中央节点/);
+  assert.throws(() => assertPersonalRelay('management', true, undefined), /连接中央节点/);
   assert.throws(() => assertPersonalRelay('management', true, 'bob', { relayAccount: 'alice' }), /原来使用的中央账号/);
   assert.doesNotThrow(() => assertPersonalRelay('management', true, 'alice', { relayAccount: 'alice' }));
 });
@@ -37,7 +37,7 @@ test('cached runtimes, preparation helpers and background summaries keep the ori
     for (let i = 0; session.status !== 'idle' && i < 100; i++) await new Promise(resolve => setTimeout(resolve, 25));
     assert.equal(session.status, 'idle'); const count = session.messages.length;
     account = 'bob'; await assert.rejects(wb.send(session.id, 'must not send'), /原来使用的中央账号/);
-    account = undefined; await assert.rejects(wb.send(session.id, 'must not send'), /登录中央节点/);
+    account = undefined; await assert.rejects(wb.send(session.id, 'must not send'), /连接中央节点/);
     assert.equal(session.messages.length, count);
     const helper = await wb.createSession('codex', root, undefined, 'prepare', session.id);
     assert.equal(helper.relayAccount, 'alice');

@@ -22,7 +22,7 @@ const errors = []; let app;
 const launch = async () => {
   app = await electron.launch({ args: ['--disable-gpu', application], cwd: root, env, timeout: 60000 });
   const page = await app.firstWindow(); page.on('pageerror', error => errors.push(error.message));
-  await expect(page.getByRole('heading', { name: '登录团队工作台', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '连接中央节点', exact: true })).toBeVisible();
   await expect(page.getByLabel('代码目录（选填）')).toHaveCount(0);
   await page.locator('.modal').getByRole('button', { name: '跳过', exact: true }).click();
   await page.locator('[data-project-id="' + offlineProjectId + '"]').click();
@@ -84,12 +84,12 @@ try {
   await fs.writeFile(path.join(application, 'main.cjs'), originalMain.replaceAll(originalAssets, changed));
   await fs.writeFile(path.join(application, 'index.html'), '<h1>incompatible future UI</h1>');
   await page.reload();
-  await expect(page.getByRole('heading', { name: '登录团队工作台', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '连接中央节点', exact: true })).toBeVisible();
   assert(new URL(page.url()).pathname.includes(originalAssets));
   const additional = app.waitForEvent('window');
   await app.evaluate(({ app }) => app.emit('second-instance'));
   const next = await additional;
-  await expect(next.getByRole('heading', { name: '登录团队工作台', exact: true })).toBeVisible();
+  await expect(next.getByRole('heading', { name: '连接中央节点', exact: true })).toBeVisible();
   assert(new URL(next.url()).pathname.includes(originalAssets), 'additional account windows must match their running main process');
   assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().some(window => window.isVisible())), false);
   assert.deepEqual(errors, []);

@@ -329,7 +329,7 @@ export class EgressClientProxy extends EventEmitter {
     let transport: Duplex | undefined;
     try {
       if (config.viaSharedServer) {
-        if (!this.sharedServerDialer) throw new EgressRouteError('共享服务器中转尚未连接，请重新登录');
+        if (!this.sharedServerDialer) throw new EgressRouteError('中央节点中转尚未连接，请重新连接中央节点');
         const route = config.sharedServer;
         try { transport = this.track(await this.sharedServerDialer(route ? '127.0.0.1' : config.host, route?.relayPort || config.port, controller.signal, route)); }
         catch (error) { throw new EgressRouteError(error instanceof Error ? error.message : '共享服务器中转失败'); }

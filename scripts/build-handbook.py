@@ -151,14 +151,14 @@ def heading(identifier,title,level='h2'):
 def beta_features_page():
  title='Beta 功能'
  sections=[
-  ('beta-open','开启跨会话引用','用户版顶部点击 Beta 功能，开启“跨会话引用”。开关按当前团队账号保存在本机，默认关闭。'),
+  ('beta-open','开启跨会话引用','用户版顶部点击 Beta 功能，开启“跨会话引用”。开关按当前成员账号保存在本机，默认关闭。'),
   ('beta-use','引用另一段会话的摘要','先在来源会话的“更多会话操作 → AI 参考内容 → 查看阶段摘要”核对或更正摘要。打开同一项目的目标会话，在输入区点击“引用会话摘要”，预览后点击“加入当前会话”。确认参考资料已选中，填写本轮要求并发送。'),
-  ('beta-scope','使用范围与共享','只能引用同一团队账号、同一项目在本机保存的其他工作会话。加入摘要后不会立即发送给 AI；发送下一条消息时才会带入。摘要不自动同步给团队，也不作为团队成果上传。引用摘要会关闭目标会话的轨迹自动上传；如需共享轨迹，请先核对并手动上传。'),
+  ('beta-scope','使用范围与共享','只能引用同一成员账号、同一项目在本机保存的其他工作会话。加入摘要后不会立即发送给 AI；发送下一条消息时才会带入。摘要不自动同步给团队，也不作为团队成果上传。引用摘要会关闭目标会话的轨迹自动上传；如需共享轨迹，请先核对并手动上传。'),
   ('beta-close','关闭 Beta 功能','回到顶部“Beta 功能”关闭开关。关闭后隐藏新增引用入口，已加入会话的摘要仍保留；发送前可从输入区参考资料中移除。')]
  sections.extend([
   ('beta-codex-desktop','联动 Codex 桌面版','Codex 桌面同步已正式开放，无需 Beta。新建 Codex 会话默认开启“与 Codex 桌面版同步”，也可关闭；已有会话点击“… → 同步到 Codex”。若 Codex 正以普通方式运行，工作台会保存同步请求，显示“等待 Codex 退出后同步”；仍可继续当前对话，也可从“…”取消请求。稍后保存工作并退出 Codex，保持工作台打开，它会在会话空闲时同步最新历史并提示完成，不打开 Codex 窗口；需要时由用户点击“在 Codex 中打开”。等待期间尚未同步。已共享后台的会话可直接打开，无需重启。后续点击“… → 在 Codex 中打开”，两端轮流发送并沿用同一执行上下文。当前仅支持本机网络。'),
   ('beta-cursor-native','联动 Cursor 原生会话','开启“Cursor 原生联动”，从“接入 Cursor 会话”选择原生会话。保留普通 IDE 窗口；需要返回对应聊天时点击“在 Cursor 中打开”。后续消息等待前一轮结束，模型、模式和权限在两端同步，工具和授权在 Cursor 中处理。独立 Agents 窗口暂不关联。')])
- body='<p class="read-first">从用户版顶部的“Beta 功能”分别开启跨会话引用和 Cursor 原生联动；Codex 桌面同步已正式开放，不受 Beta 开关控制。开关按当前团队账号保存在本机。</p>'
+ body='<p class="read-first">从用户版顶部的“Beta 功能”分别开启跨会话引用和 Cursor 原生联动；Codex 桌面同步已正式开放，不受 Beta 开关控制。开关按当前成员账号保存在本机。</p>'
  body+=''.join(heading(identifier,name)+'<p>'+html.escape(description)+'</p>' for identifier,name,description in sections)
  return {'id':'beta-features','title':title,'group':GROUPS['beta-features'],'html':body,
          'headings':[{'id':identifier,'title':name,'level':'h2'} for identifier,name,_ in sections],

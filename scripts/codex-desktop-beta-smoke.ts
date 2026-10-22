@@ -98,7 +98,7 @@ async function main() {
         assert.ok(linked?.nativeLive); assert.equal(state.settings.workspaceSnapshot.profile.mode, 'local');
         if (await page.locator('.modal-backdrop').count()) {
           await page.getByLabel('登录密码', { exact: true }).fill('123');
-          await page.getByRole('button', { name: '登录', exact: true }).click();
+          await page.getByRole('button', { name: '连接', exact: true }).click();
           await page.locator('.modal-backdrop').waitFor({ state: 'hidden', timeout: 15000 });
         }
         await page.locator('[data-session-id="' + demo.sessionId + '"]').click();

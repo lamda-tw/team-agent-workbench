@@ -40,7 +40,7 @@ async function main() {
       const next = await app.firstWindow(); next.on('pageerror', error => errors.push(error.message)); return { app, page: next };
     };
     const connect = async (client: Page) => {
-      const login = client.locator('.modal').filter({ hasText: '登录团队工作台' });
+      const login = client.locator('.modal').filter({ hasText: '连接中央节点' });
       await client.waitForLoadState('domcontentloaded');
       await login.waitFor({ timeout: 1500 }).catch(() => {});
       if (await login.isVisible()) {

@@ -69,7 +69,7 @@ try {
 
   await page.getByRole('button', { name: '连接设置', exact: true }).click(); await page.getByLabel('共享区类型').selectOption('sftp');
   await expect(page.getByLabel('管理账号', { exact: true })).toBeVisible(); await expect(page.getByLabel('登录密码', { exact: true })).toBeVisible();
-  await page.getByLabel('服务器地址').fill('127.0.0.1'); await page.getByLabel('管理账号', { exact: true }).fill('root');
+  await page.getByLabel('中央节点地址').fill('127.0.0.1'); await page.getByLabel('管理账号', { exact: true }).fill('root');
   await expect(page.getByRole('button', { name: '连接并验证权限', exact: true })).toBeDisabled();
   await assert.rejects(page.evaluate(() => window.admin.call('connect', { profile: { mode: 'sftp', host: '127.0.0.1', port: 22, username: 'root', root: '/srv/teamspace' } })), /请输入服务器登录密码/);
   checks.push('Linux mode still requires credentials in both the UI and IPC validation');

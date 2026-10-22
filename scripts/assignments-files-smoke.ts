@@ -36,7 +36,7 @@ async function main() {
       const env = { ...process.env, WORKBENCH_TEST: '1', WORKBENCH_DATA_DIR: path.join(data, username) }; delete env.ELECTRON_RUN_AS_NODE;
       const app = await electron.launch({ args: ['dist/user'], cwd: process.cwd(), env, timeout: 60000 }); apps.push(app);
       const page = await app.firstWindow(); pages.push(page); page.on('pageerror', error => errors.push(error.message));
-      const login = page.locator('.modal').filter({ hasText: '登录团队工作台' }); await login.waitFor();
+      const login = page.locator('.modal').filter({ hasText: '连接中央节点' }); await login.waitFor();
       await call(page, 'remote.connect', { profile: profiles[username], password: '1' });
       const connected = (await call(page, 'snapshot')).connection.profile;
       await call(page, 'project.directory.save', { projectId: project.id, directory: data, contextKey: projectDirectoryKey(connected, project.id) });

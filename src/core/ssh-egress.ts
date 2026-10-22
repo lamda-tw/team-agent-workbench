@@ -32,7 +32,7 @@ export function forwardEgress(client: Client, host: string, port: number, signal
       }
     };
     const cancel = () => finish(new Error('中转连接已取消'));
-    const closed = () => finish(new Error('共享服务器连接已断开，请重新登录'));
+    const closed = () => finish(new Error('中央节点连接已断开，请重新连接'));
     const timer = setTimeout(() => finish(new Error('共享服务器连接管理端超时，请检查中转地址和网络')), 15000);
     signal.addEventListener('abort', cancel, { once: true }); const unsubscribe = onDisconnect(client, closed);
     try {

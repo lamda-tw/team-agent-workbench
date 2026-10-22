@@ -42,16 +42,16 @@ try {
     await adminCases({ app: admin, page: adminPage, data });
   } finally { await admin.close(); }
   const errors = []; page.on('pageerror', e => errors.push(e.message));
-  await page.getByText('登录团队工作台', { exact: true }).waitFor();
-  assert.equal(await page.getByRole('button', { name: '登录', exact: true }).isDisabled(), true);
+  await page.getByText('连接中央节点', { exact: true }).waitFor();
+  assert.equal(await page.getByRole('button', { name: '连接', exact: true }).isDisabled(), true);
   await page.getByRole('button', { name: '取消', exact: true }).click();
-  await page.getByText('先连接团队账号', { exact: true }).waitFor();
+  await page.getByText('先连接中央节点', { exact: true }).waitFor();
   await assert.rejects(page.evaluate(cwd => window.workbench.call('session.create', { provider: 'codex', cwd }), data));
-  await page.getByRole('button', { name: '连接团队账号', exact: true }).click();
+  await page.getByRole('button', { name: '连接中央节点', exact: true }).click();
   const profile = server.profile('alice');
 
   assert.equal(await page.getByLabel('Linux 工作路径', { exact: true }).count(), 0);
-  await page.getByLabel('服务器地址', { exact: true }).fill(profile.host);
+  await page.getByLabel('中央节点地址', { exact: true }).fill(profile.host);
   await page.getByLabel('SFTP 端口', { exact: true }).fill(String(profile.port));
   await page.getByLabel('成员账号', { exact: true }).fill(profile.username);
   await page.getByLabel('登录密码', { exact: true }).fill('wrong-password');
@@ -59,15 +59,15 @@ try {
     const original = dialog.showMessageBox.bind(dialog);
     globalThis.__serverIdentityPrompts = 0;
     dialog.showMessageBox = async (window, options) => {
-      if (options?.title === '首次连接团队服务器') { globalThis.__serverIdentityPrompts++; return { response: 1, checkboxChecked: false }; }
+      if (options?.title === '首次连接中央节点') { globalThis.__serverIdentityPrompts++; return { response: 1, checkboxChecked: false }; }
       return original(window, options);
     };
   });
-  await page.getByRole('button', { name: '登录', exact: true }).click();
+  await page.getByRole('button', { name: '连接', exact: true }).click();
   await page.getByRole('alert').filter({ hasText: 'authentication' }).waitFor();
-  assert.equal(await page.getByText('先连接团队账号', { exact: true }).count(), 1);
+  assert.equal(await page.getByText('先连接中央节点', { exact: true }).count(), 1);
   await page.getByLabel('登录密码', { exact: true }).fill('test-password');
-  await page.getByRole('button', { name: '登录', exact: true }).click();
+  await page.getByRole('button', { name: '连接', exact: true }).click();
   await completeProjectSetup(page, '实体抽取');
   assert.equal(await app.evaluate(() => globalThis.__serverIdentityPrompts), 1);
   const duplicateLaunch = launch('user');
@@ -75,7 +75,7 @@ try {
   const exitCode = await new Promise((resolve, reject) => { const timer = setTimeout(() => { duplicate.kill(); reject(new Error('duplicate user instance did not exit')); }, 10000); duplicate.on('exit', code => { clearTimeout(timer); resolve(code); }); duplicate.on('error', reject); });
   assert.equal(exitCode, 0); await expect.poll(() => app.windows().length).toBe(2);
   const secondUser = app.windows().find(candidate => candidate !== page);
-  await secondUser.getByText('登录团队工作台', { exact: true }).waitFor();
+  await secondUser.getByText('连接中央节点', { exact: true }).waitFor();
   const bobProfile = server.profile('bob');
   await secondUser.evaluate(([profile, localPath]) => window.workbench.call('remote.connect', { profile, password: 'test-password', localPath }), [bobProfile, data]);
   assert.equal((await page.evaluate(() => window.workbench.call('snapshot'))).connection.profile.username, 'alice');
@@ -137,8 +137,8 @@ try {
   if (!packaged) await page.screenshot({ path: path.join(root, 'artifacts', 'settings.png') });
   await page.getByRole('button', { name: '关闭窗口', exact: true }).click();
   await page.locator('.connection-button').click();
-  await page.getByLabel('服务器地址', { exact: true }).waitFor();
-  assert.equal(await page.getByLabel('服务器地址', { exact: true }).inputValue(), profile.host);
+  await page.getByLabel('中央节点地址', { exact: true }).waitFor();
+  assert.equal(await page.getByLabel('中央节点地址', { exact: true }).inputValue(), profile.host);
   if (!packaged) await page.screenshot({ path: path.join(root, 'artifacts', 'connection.png') });
   await page.getByRole('button', { name: '取消', exact: true }).click();
   const state = await page.evaluate(() => window.workbench.call('snapshot'));
@@ -150,8 +150,8 @@ try {
   expected = await usabilityCases({ page, app, data, auth, profile });
   await page.getByTitle('上传文件到当前目录', { exact: true }).click();
   const disconnected = page.locator('.toast').filter({ hasText: '连接已断开' });
-  await disconnected.getByRole('button', { name: '连接团队账号', exact: true }).click();
-  await page.getByText('登录团队工作台', { exact: true }).waitFor();
+  await disconnected.getByRole('button', { name: '重新连接中央节点', exact: true }).click();
+  await page.getByRole('heading', { name: '重新连接中央节点', exact: true }).waitFor();
   await page.getByRole('button', { name: '取消', exact: true }).click();
 } catch (error) {
   console.error('UI case failed:', error);

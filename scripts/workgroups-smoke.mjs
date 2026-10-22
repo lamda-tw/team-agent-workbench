@@ -41,9 +41,9 @@ try {
   await setConnectionProfile(user, config);
   await up.getByLabel('成员账号').fill('test1'); await up.getByLabel('登录密码', { exact: true }).fill('123456');
   await expect(up.getByLabel('共享工作路径', { exact: true })).toHaveCount(0); await expect(up.getByLabel('Linux 工作路径', { exact: true })).toHaveCount(0);
-  await up.getByRole('button', { name: '登录', exact: true }).click();
+  await up.getByRole('button', { name: '连接', exact: true }).click();
   await up.getByLabel('新密码', { exact: true }).fill('1'); await up.getByLabel('确认新密码', { exact: true }).fill('1');
-  await up.getByRole('button', { name: '登录', exact: true }).click(); await expect(up.locator('.modal')).toHaveCount(0);
+  await up.getByRole('button', { name: '连接', exact: true }).click(); await expect(up.locator('.modal')).toHaveCount(0);
   await expect(up.locator('.workgroup')).toHaveCount(0); await expect(up.getByLabel('空白工作台')).toBeVisible(); await up.screenshot({ path: path.join(data, 'no-groups.png') });
   await expect(up.getByTitle('新建会话', { exact: true })).toBeEnabled();
   const snap = () => up.evaluate(() => window.workbench.call('snapshot'));
@@ -67,7 +67,7 @@ try {
   await expect(up.getByRole('button', { name: '添加其他服务器', exact: true })).toHaveCount(0);
   await expect(up.getByLabel('本地共享区根目录', { exact: true })).toHaveCount(0);
   await up.getByLabel('登录密码', { exact: true }).fill('1');
-  await up.getByRole('button', { name: '登录', exact: true }).click();
+  await up.getByRole('button', { name: '连接', exact: true }).click();
   await expect(up.locator('.modal')).toHaveCount(0);
   await expect(up.locator('.workgroup')).toHaveCount(2);
   await expect(up.locator('.workgroup-project')).toHaveCount(2);

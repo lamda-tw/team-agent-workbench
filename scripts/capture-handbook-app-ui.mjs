@@ -74,7 +74,7 @@ async function adminScene(page,data){
  if(data.id==='case-team-setup'){
   if(step===1&&paneIndex===1){
    await page.getByRole('heading',{name:'连接中央节点',exact:true}).waitFor();
-   await page.getByLabel('服务器地址',{exact:true}).fill('team.example.internal');
+   await page.getByLabel('中央节点地址',{exact:true}).fill('team.example.internal');
    await page.getByLabel('管理账号',{exact:true}).fill('root');
    await page.getByLabel('登录密码',{exact:true}).fill('example-password');
    await page.getByLabel('团队根路径',{exact:true}).fill('/srv/teamspace');
@@ -172,12 +172,12 @@ async function userScene(page,data){
  }
  if(screen.includes('连接团队空间')){
 
-  if(!await page.getByRole('heading',{name:'连接项目',exact:true}).count())await click(page,'连接项目');
+  if(!await page.getByRole('heading',{name:'连接中央节点',exact:true}).count())await click(page,'连接中央节点');
   await page.getByLabel('登录密码',{exact:true}).fill('example-password');
   if(id==='case-egress-mixed'&&data.username==='member-b'&&step===2)await page.getByLabel('管理端网络出口接入码',{exact:true}).fill('TAE2.handbook-example-access-code');
   return;
  }
- if(await page.getByRole('heading',{name:'登录团队工作台',exact:true}).count())await page.locator('.modal').getByRole('button',{name:'取消',exact:true}).click();
+ if(await page.getByRole('heading',{name:'连接中央节点',exact:true}).count())await page.locator('.modal').getByRole('button',{name:'取消',exact:true}).click();
  if(beforeProject){await click(page,'创建项目');await page.getByLabel('所属工作组',{exact:true}).selectOption('team_one');await page.getByLabel('项目名称',{exact:true}).fill(data.project.name);for(const [label,key] of [['项目背景','background'],['项目目标','objectives'],['验收标准','acceptance']])await page.getByLabel(label,{exact:true}).fill(data.brief[key]);return;}
  await page.locator('[data-project-id="handbook-project"]').click();
  if(id==='case-activity-recommendations'||pane.recommendation){

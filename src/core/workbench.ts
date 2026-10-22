@@ -834,7 +834,7 @@ export class Workbench {
   async setBetaFeature(feature: BetaFeature, enabled: boolean) {
     if (feature === 'cursorDesktopSync' && enabled && !this.cursorDesktop.fileBridge) assertCursorSharedSessionAvailable();
     const profile = this.localProfile();
-    if (!profile) throw new Error('请先连接团队账号');
+    if (!profile) throw new Error('请先连接中央节点');
     const key = accountIdentity(profile);
     this.store.settings.betaFeatures ||= {};
     const previous = this.store.settings.betaFeatures[key];
@@ -1049,7 +1049,7 @@ export class Workbench {
     // A reload failure must not present a successfully saved config as an unsaved failure.
     return { pendingReload: sessions.filter((s, index) => s.settingsPending || results[index].status === 'rejected').length };
   }
-  assertWorkspace() { this.assertAccountReady(); if (!this.workspaceReady && !this.localProfile()?.projects.length) throw new Error(this.remote.connected ? '还没有加入工作组，请联系管理员；未分组账号没有工作台' : '请先验证团队账号'); }
+  assertWorkspace() { this.assertAccountReady(); if (!this.workspaceReady && !this.localProfile()?.projects.length) throw new Error(this.remote.connected ? '还没有加入工作组，请联系管理员；未分组账号没有工作台' : '请先连接中央节点并验证成员身份'); }
   async saveProjectDirectory(projectId: string, directory: string, contextKey: string) {
     const checkContext = () => {
       const profile = this.localProfile();
@@ -1074,7 +1074,7 @@ export class Workbench {
   }
   assertCanLeaveAccount() {
     this.assertAccountReady();
-    if (this.publishingConclusions.size || this.accountMutations.size || this.store.sessions.some(session => ['starting', 'running', 'approval'].includes(session.status)) || this.store.drafts.some(draft => draft.generation === 'running') || this.store.transfers.some(transfer => ['queued', 'running'].includes(transfer.status)) || this.sending.size || this.steering.size || this.changingSettings.size || this.preparing.size || this.preparingMerges.size || this.reorganizing.size || this.submittingDrafts.size || this.deletingDrafts.size || this.deletingSharedContent.size || this.archiving.size) throw new Error('请先停止运行中的会话和整理，并等待传输或保存操作完成，再切换团队账号');
+    if (this.publishingConclusions.size || this.accountMutations.size || this.store.sessions.some(session => ['starting', 'running', 'approval'].includes(session.status)) || this.store.drafts.some(draft => draft.generation === 'running') || this.store.transfers.some(transfer => ['queued', 'running'].includes(transfer.status)) || this.sending.size || this.steering.size || this.changingSettings.size || this.preparing.size || this.preparingMerges.size || this.reorganizing.size || this.submittingDrafts.size || this.deletingDrafts.size || this.deletingSharedContent.size || this.archiving.size) throw new Error('请先停止运行中的会话和整理，并等待传输或保存操作完成，再切换成员账号');
   }
   async configureWorkspace(profile: ConnectionProfile, password: string, localPath: string, trust: (fingerprint: string) => Promise<boolean>, verified?: SharedFiles) {
     if (this.configuring) throw new Error('正在登录，请等待结果');
@@ -1122,7 +1122,7 @@ export class Workbench {
     return this.createProject(name, groupName, projectBriefSchema.parse(brief));
   }
   async groupCommand(raw: GroupCommand) {
-    this.assertAccountReady(); if (!this.remote.connected) throw new Error('请先登录团队账号');
+    this.assertAccountReady(); if (!this.remote.connected) throw new Error('请先连接中央节点');
     const result = await this.remote.groupCommand(groupCommandSchema.parse(raw));
     if (!['list','details','directory'].includes(raw.action)) await this.refreshGroups();
     this.broadcast(); return result;

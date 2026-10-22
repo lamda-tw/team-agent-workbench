@@ -169,7 +169,7 @@ async function initializeWindow(slot: number): Promise<AdminContext> {
         remote.disconnect();
         remote = input.profile.mode === 'local' ? new LocalAdminConnection(changed) : new AdminConnection(path.join(__dirname, 'admin.py'), changed);
         value = await remote.connect(input.profile, input.password, input.sudoPassword, async fingerprint => (await dialog.showMessageBox(window, {
-          type: 'question', title: '首次连接团队服务器', message: input.profile.host,
+          type: 'question', title: '首次连接中央节点', message: input.profile.host,
           detail: `当前管理员电脑尚未连接过这台服务器。请确认地址无误；确认后，本机会记住服务器身份，后续连接将自动验证。\n\n技术信息：${fingerprint}`,
           buttons: ['取消', '确认并连接'], defaultId: 0, cancelId: 0,
         })).response === 1);

@@ -21,7 +21,7 @@ export class SharedFiles {
     return this.backend.connect(profile, password, trust);
   }
   adoptConnection(source: SharedFiles) {
-    if (source === this || !source.connected || !source.profile) throw new Error('已验证的账号连接不可用，请重新登录');
+    if (source === this || !source.connected || !source.profile) throw new Error('中央节点连接不可用，请重新连接并验证成员身份');
     const profile = source.profile;
     this.disconnect(); this.backend = source.backend;
     source.changed = () => this.changed();

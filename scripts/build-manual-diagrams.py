@@ -105,7 +105,7 @@ def publish_flow(*, handbook_roles: bool = False):
 
 
 def sync_scope(*, handbook_roles: bool = False):
-    canvas, draw = base("个人成果的同步范围", "连接同一团队账号后，可在另一台电脑恢复已同步的个人内容。", 478)
+    canvas, draw = base("个人成果的同步范围", "连接同一成员账号后，可在另一台电脑恢复已同步的个人内容。", 478)
     blocks = [
         (46, "随账号私有同步", ["个人成果 · 别名", "整理草稿 · 附件 · 动态处理记录"], TEAL),
         (868, "仅保留在本机", ["Session · 完整对话 · 输入草稿", "代码目录 · CLI 登录凭据"], BLUE),
@@ -197,7 +197,7 @@ def deployment_logic(*, handbook_roles: bool = False):
     draw.rounded_rectangle((45, 650, 1065, 895), 20, fill=WHITE, outline=LINE, width=3)
     draw.text((78, 671), "Linux 团队服务器", font=font(34, True), fill=NAVY)
     server_parts = [
-        (72, "身份与权限", ["登录团队账号", "控制可见项目和文件"]),
+        (72, "身份与权限", ["使用成员账号连接中央节点", "控制可见项目和文件"]),
         (399, "安全写入服务", ["检查谁在操作", "核对目标、版本与权限"]),
         (726, "内容空间", ["团队项目共享资料", "本人账号私有资料"]),
     ]

@@ -139,7 +139,7 @@ export class Questions {
     return { binding, path: attachmentPath({ ...binding, username: file.owner }, file.sha256), file };
   }
   private async request(projectId: string, command: QuestionCommand) {
-    const owner = this.owner(), inbox = this.inbox(); if (!owner || !inbox) throw new Error('请先连接团队账号');
+    const owner = this.owner(), inbox = this.inbox(); if (!owner || !inbox) throw new Error('请先连接中央节点');
     const question = await this.remote.questionRequest(this.remote.binding(projectId), command) as TeamQuestion;
     if (owner !== this.owner()) throw new Error('账号已切换');
     this.merge(inbox, question);
@@ -186,7 +186,7 @@ export class Questions {
   }
   async importReply(projectId: string, id: string, sessionId: string, answerId: string) {
     const inbox = this.inbox(), profile = this.hooks.profile();
-    if (!inbox || !profile) throw new Error('请先连接团队账号');
+    if (!inbox || !profile) throw new Error('请先连接中央节点');
     const question = inbox.items.find(item => item.id === id && item.projectId === projectId);
     if (!question || question.author !== profile.username) throw new Error('只有发问人可以引入回复');
     if (question.closedAt) throw new Error('问题已关闭');
@@ -203,7 +203,7 @@ export class Questions {
   }
   async startAuto(projectId: string, id: string, peer: string, sessionId: string) {
     const inbox = this.inbox(), profile = this.hooks.profile();
-    if (!inbox || !profile) throw new Error('请先连接团队账号');
+    if (!inbox || !profile) throw new Error('请先连接中央节点');
     const question = inbox.items.find(item => item.id === id && item.projectId === projectId);
     if (!question) throw new Error('问题不存在');
     if (question.author !== profile.username) {
@@ -229,7 +229,7 @@ export class Questions {
   }
   async fillDraft(projectId: string, id: string, peer: string) {
     const inbox = this.inbox(), profile = this.hooks.profile();
-    if (!inbox || !profile) throw new Error('请先连接团队账号');
+    if (!inbox || !profile) throw new Error('请先连接中央节点');
     const question = inbox.items.find(item => item.id === id && item.projectId === projectId);
     if (!question || question.author !== profile.username) throw new Error('只有发问人可以起草继续提问');
     if (question.closedAt) throw new Error('问题已关闭');

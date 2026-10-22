@@ -75,7 +75,7 @@ try {
   app = await electron.launch({ args: [entry], cwd: root, env, timeout: 60000 });
   const page = await app.firstWindow(); page.on('pageerror', error => errors.push(error.message));
   await page.waitForLoadState('domcontentloaded');
-  const login = page.locator('.modal').filter({ hasText: '登录团队工作台' });
+  const login = page.locator('.modal').filter({ hasText: '连接中央节点' });
   await login.waitFor({ timeout: 1500 }).catch(() => {});
   await call(page, 'remote.connect', { profile, password: '123', localPath: data });
   if (await login.isVisible()) await login.getByRole('button', { name: '取消', exact: true }).click();

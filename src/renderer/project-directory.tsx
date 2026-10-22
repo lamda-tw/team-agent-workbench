@@ -63,7 +63,7 @@ export function ProjectSettingsDialog({ project, admin, contextKey, directory, m
     <div className="project-settings-pane" id="project-settings-ai-panel" role="tabpanel" aria-labelledby="project-settings-ai-tab" hidden={tab !== 'recommendations'}>{recommendationsOpened && <RsiProjectSettings projectId={project.id}/>}</div>
     {members && <div className="project-settings-pane" id="project-settings-members-panel" role="tabpanel" aria-labelledby="project-settings-members-tab" hidden={tab !== 'members'}>
       <p className="project-members-scope">成员与权限对项目组「{members.groupLabel}」内所有项目生效。</p>
-      {members.connected ? membersOpened && <TeamGroupDialog embedded groupId={members.groupId} call={members.call} close={close} changed={members.changed}/> : <div className="modal-body"><p className="muted small">连接团队账号后，可查看和管理成员与权限。</p></div>}
+      {members.connected ? membersOpened && <TeamGroupDialog embedded groupId={members.groupId} call={members.call} close={close} changed={members.changed}/> : <div className="modal-body"><p className="muted small">连接中央节点后，可查看和管理成员与权限。</p></div>}
     </div>}
   </section></div>;
 }

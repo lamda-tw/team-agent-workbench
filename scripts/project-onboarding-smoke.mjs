@@ -29,7 +29,7 @@ async function login(user, username, first = false, profile) {
   }
   if (first) await setConnectionProfile(user, profile);
   await page.getByLabel('成员账号').fill(username); await page.getByLabel('登录密码', { exact: true }).fill('1');
-  await page.getByRole('button', { name: '登录', exact: true }).click(); await expect(page.getByLabel('成员账号')).toHaveCount(0);
+  await page.getByRole('button', { name: '连接', exact: true }).click(); await expect(page.getByLabel('成员账号')).toHaveCount(0);
 }
 try {
   const admin = await launch('admin', 'admin'), ap = admin.page;

@@ -92,11 +92,11 @@ export async function usabilityCases({ page, app, data, auth, profile }) {
 }
 
 export async function restoredCases(page, expected) {
-  await page.getByText('登录团队工作台', { exact: true }).waitFor();
+  await page.getByText('连接中央节点', { exact: true }).waitFor();
   await page.getByRole('button', { name: '取消', exact: true }).click();
   await page.getByLabel('任务输入', { exact: true }).waitFor();
-  await expect(page.getByText('先连接团队账号', { exact: true })).toHaveCount(0);
-  await expect(page.getByText('登录团队工作台', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('先连接中央节点', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('连接中央节点', { exact: true })).toHaveCount(0);
   for (const [session, text] of [[expected.a, 'A 独立输入'], [expected.b, 'B 独立输入']]) {
     await page.locator(`.session-row[data-session-id="${session.id}"]`).click();
     await expect(page.getByLabel('任务输入', { exact: true })).toHaveValue(text);

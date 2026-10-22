@@ -42,7 +42,7 @@ async function main() {
     await expect(ap.getByRole('button',{name:'项目内容管理',exact:true})).toHaveCount(0);
     const login=async(username:string)=>{
       const page=await launch('user',path.join(data,username));
-      const modal=page.locator('.modal').filter({hasText:'登录团队工作台'});await modal.waitFor({timeout:1500}).catch(()=>{});
+      const modal=page.locator('.modal').filter({hasText:'连接中央节点'});await modal.waitFor({timeout:1500}).catch(()=>{});
       await call(page,'remote.connect',{profile:profiles[username],password:'test-member-123',localPath:data});
       if(await modal.isVisible())await modal.getByRole('button',{name:'取消',exact:true}).click();await dismissDirectory(page);return page;
     };

@@ -17,8 +17,8 @@ try {
     const page = await app.firstWindow(); await page.getByRole('button', { name: '取消', exact: true }).waitFor();
     const dataPath = await app.evaluate(({ app }) => app.getPath('userData')); assert.equal(dataPath, data + '-' + edition);
     if (edition === 'user') {
-      await page.getByText('登录团队工作台', { exact: true }).waitFor();
-      assert.equal(await page.getByRole('button', { name: '登录', exact: true }).isDisabled(), true);
+      await page.getByText('连接中央节点', { exact: true }).waitFor();
+      assert.equal(await page.getByRole('button', { name: '连接', exact: true }).isDisabled(), true);
       const state = await page.evaluate(() => window.workbench.call('snapshot'));
       assert.equal(state.workspaceReady, false);
       await assert.rejects(page.evaluate(() => window.workbench.call('session.create', { provider: 'codex', cwd: 'C:\\' })));
