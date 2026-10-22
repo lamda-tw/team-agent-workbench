@@ -16,6 +16,30 @@ spec.loader.exec_module(admin)
 
 
 class MemberProtocolTests(unittest.TestCase):
+    def test_id_allocator_does_not_reuse_deleted_linux_identity(self):
+        accounts = [types.SimpleNamespace(pw_uid=1001), types.SimpleNamespace(pw_uid=1002)]
+        self.assertEqual(admin.allocate_id(accounts, 'pw_uid'), 1003)
+        self.assertEqual(admin.allocate_id([], 'pw_uid'), 1000)
+        with self.assertRaisesRegex(ValueError, '不会复用'):
+            admin.allocate_id([types.SimpleNamespace(pw_uid=59999)], 'pw_uid')
+
+    def test_successful_creation_closes_only_superseded_attempts(self):
+        state = {'operations': {
+            'current': {'op': 'user_create', 'status': 'running', 'request': {'username': 'taowen', 'requestId': 'current-id'}},
+            'old-create': {'op': 'user_create', 'status': 'failed', 'error': 'Linux 账号已存在', 'request': {'username': 'taowen', 'requestId': 'create-id'}},
+            'old-import': {'op': 'user_import', 'status': 'failed', 'error': 'SFTP 目录冲突', 'request': {'username': 'taowen', 'requestId': 'import-id'}},
+            'other-user': {'op': 'user_create', 'status': 'failed', 'request': {'username': 'someone-else', 'requestId': 'other-id'}},
+            'other-action': {'op': 'user_password', 'status': 'failed', 'request': {'username': 'taowen', 'requestId': 'password-id'}},
+        }, 'memberRequests': {key: {'status': 'failed'} for key in ('create-id', 'import-id', 'other-id', 'password-id')}}
+        admin.resolve_superseded_member_jobs(state, 'taowen', 'current')
+        for key, receipt in (('old-create', 'create-id'), ('old-import', 'import-id')):
+            self.assertEqual(state['operations'][key]['status'], 'done')
+            self.assertNotIn('error', state['operations'][key])
+            self.assertEqual(state['memberRequests'][receipt]['status'], 'done')
+        self.assertEqual(state['operations']['current']['status'], 'running')
+        self.assertEqual(state['operations']['other-user']['status'], 'failed')
+        self.assertEqual(state['operations']['other-action']['status'], 'failed')
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

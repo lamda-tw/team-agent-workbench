@@ -711,10 +711,13 @@ def storage_usage(root, state, request):
 
 def allocate_id(records, field, reserved=()):
     used = {getattr(r, field) for r in records} | set(reserved)
-    for value in range(1000, 60000):
+    # Do not recycle a recently deleted account's low UID/GID while higher
+    # identities still exist: old files may retain the numeric owner.
+    start = max((value for value in used if type(value) is int and 1000 <= value < 60000), default=999) + 1
+    for value in range(start, 60000):
         if value not in used:
             return value
-    raise ValueError("没有可用的专用 UID/GID")
+    raise ValueError("专用 UID/GID 已达上限；为避免重新取得旧文件权限，不会复用较小的编号")
 
 def checkpoint(root, state, step):
     job = state.get("operations", {}).get(state.get("activeOperation"))
@@ -808,6 +811,19 @@ def start_operation(root, state, request):
     state["operations"][key] = {"id": key, "op": request["op"], "request": sanitized, "status": "running", "completed": previous.get("completed", []) if previous and previous.get("status") != "done" else []}
     state["activeOperation"] = key
     save(root, state)
+
+def resolve_superseded_member_jobs(state, username, completed_key):
+    """Close failed attempts replaced by a successful creation of this login."""
+    for key, job in state.get('operations', {}).items():
+        if key == completed_key or job.get('status') != 'failed' or job.get('op') not in ('user_create', 'user_import'):
+            continue
+        if job.get('request', {}).get('username') != username:
+            continue
+        job.update(status='done', resolution='已由当前空间重新创建的账号取代')
+        job.pop('error', None)
+        receipt = state.get('memberRequests', {}).get(job.get('request', {}).get('requestId'))
+        if receipt:
+            receipt['status'] = 'done'
 
 def assign_groups(root, state, request):
     username = request.get("username")
@@ -1462,6 +1478,7 @@ def _execute(request):
         checkpoint(root, state, "初始密码已设置")
         assign_groups(root, state, request)
         record["provisioning"] = False
+        resolve_superseded_member_jobs(state, username, state.get('activeOperation'))
     elif op == "user_password":
         username = request.get("username")
         ensure_user(state, username)
