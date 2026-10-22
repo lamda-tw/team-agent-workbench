@@ -127,7 +127,15 @@ export class AgentRuntime {
       cwd: this.executionCwd, ...codexPermissionParams(this.session),
     });
     if (!result.thread?.id || result.thread.id === this.session.nativeId || !result.thread.path) throw new Error('Codex 未返回独立分支，父会话未改变');
-    return { id: String(result.thread.id), path: String(result.thread.path), desktop: !!this.sharedCodex };
+    const id = String(result.thread.id), file = String(result.thread.path), remote = this.session.codexRemote;
+    if (remote) {
+      const relative = path.posix.relative(remote.home, file);
+      if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id) || id.toLowerCase() === this.session.nativeId.toLowerCase() || !path.posix.isAbsolute(file) || !/^(sessions|archived_sessions)\//.test(relative) || relative.split('/').includes('..') || !new RegExp(id + '\\.jsonl(?:\\.zst)?$', 'i').test(path.posix.basename(file)) ||
+          path.posix.normalize(codexRolloutPath(file)) === path.posix.normalize(codexRolloutPath(remote.nativePath)) ||
+          result.thread.cwd && path.posix.normalize(result.thread.cwd) !== path.posix.normalize(remote.cwd) ||
+          result.thread.forkedFromId && result.thread.forkedFromId !== this.session.nativeId) throw new Error('Codex 未返回有效的远程子会话，父会话未改变');
+    }
+    return { id, path: file, desktop: !!this.storage?.sharedEndpoint, ...(remote ? { remote: { ...remote, nativePath: file } } : {}) };
   }
   private async startSession() {
     if (this.initialized) return;
