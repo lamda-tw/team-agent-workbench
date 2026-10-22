@@ -106,7 +106,46 @@ test('recommendations accept or reject without mandatory feedback; close is inde
   assert.equal(rsiReview(suggestionId, (await engine.view('p1')).events).decision, 'rejected');
   await assert.rejects(engine.feedback('p1', { ...reaction, text: 'changed payload' }), /重复请求/);
   assert.equal(calls.length, 1); assert.equal((await engine.view('p1')).events.some(event => event.kind === 'outcome'), false);
-  const final = (await engine.inbox('p1')).items[0]; assert.equal(final.action, initial.action); assert.equal(final.evidence.length, initial.evidence.length);
+  assert.deepEqual((await engine.inbox('p1')).items, []);
+  const final = (await engine.view('p1')).suggestions[0]; assert.equal(final.action, initial.action); assert.equal(final.evidenceIds.length, initial.evidence.length);
+}));
+
+for (const decision of ['accepted', 'rejected'] as const) test(`${decision} supplement completes the review atomically, survives restart, and remains available for learning`, async () => fixture(async ({ engine, root, session }) => {
+  const suggestionId = (await recommend(engine)).suggestions[0].id;
+  const intent = await engine.feedback('p1', { suggestionId, kind: decision, requestId: 'decision' });
+  assert.equal((await engine.inbox('p1')).items.length, 1, 'optional feedback remains available before saving');
+  const reaction = { suggestionId, kind: 'supplement', expectedDecisionId: intent.id, text: '请补充当前项目背景，让推荐更具体。', feedbackTarget: 'recommendation', requestId: 'save', ...(decision === 'accepted' ? { linkedSessionId: session.id } : {}) };
+  await assert.rejects(engine.feedback('p1', { ...reaction, expectedDecisionId: 'stale' }), /处理已更新/);
+  assert.equal((await engine.inbox('p1')).items.length, 1);
+  const file = path.join(root, 'rsi-v2.json'), backup = file + '.test-backup';
+  await fs.rename(file, backup); await fs.mkdir(file);
+  try {
+    await assert.rejects(engine.feedback('p1', reaction));
+    assert.equal((await engine.inbox('p1')).items.length, 1, 'failed persistence must not remove the recommendation');
+    assert.equal((await engine.view('p1')).events.length, 1, 'feedback and completion roll back together');
+  } finally { await fs.rmdir(file); await fs.rename(backup, file); }
+  await engine.feedback('p1', reaction); await engine.feedback('p1', reaction);
+  assert.deepEqual((await engine.inbox('p1')).items, []);
+  const view = await engine.view('p1'), review = rsiReview(suggestionId, view.events);
+  assert.equal(view.events.length, 2); assert.equal(review.decision, decision); assert.equal(review.closed, true);
+  assert.equal(review.feedback, reaction.text); assert(!view.events.some(event => event.kind === 'outcome'));
+  const learned = learningReference(view, view.policies.find(policy => policy.id === view.activePolicyId)!);
+  assert(JSON.stringify(learned).includes(reaction.text));
+  const restored = new RsiEngine(root, { scope: () => view.scope, session: () => session, collect: async () => [], changed() {} }, async () => { throw new Error('No model call during restore'); });
+  try {
+    assert.deepEqual((await restored.inbox('p1')).items, []);
+    assert.equal(rsiReview(suggestionId, (await restored.view('p1')).events).feedback, reaction.text);
+    await restored.feedback('p1', { suggestionId, kind: 'reopened', requestId: 'reopen' });
+    assert.equal((await restored.inbox('p1')).items.length, 1, 'explicit reopen overrides saved completion');
+  } finally { await restored.close(); }
+}));
+
+test('closing a pending recommendation removes it without recording a rejection', async () => fixture(async ({ engine }) => {
+  const suggestionId = (await recommend(engine)).suggestions[0].id;
+  await engine.feedback('p1', { suggestionId, kind: 'dismissed', requestId: 'close' });
+  assert.deepEqual((await engine.inbox('p1')).items, []);
+  const view = await engine.view('p1');
+  assert.equal(view.suggestions.length, 1); assert.equal(rsiReview(suggestionId, view.events).decision, 'pending');
 }));
 
 test('session associations validate live eligibility, survive closure, and never change conversation contents', async () => fixture(async ({ engine, session }) => {
@@ -123,9 +162,10 @@ test('session associations validate live eligibility, survive closure, and never
   session.closedAt = new Date().toISOString();
   await engine.feedback('p1', { suggestionId, kind: 'supplement', linkedSessionId: session.id, text: '会话完成后补充反馈', requestId: 'after-close' });
   assert.equal((await engine.inbox('p1')).sessions.length, 0);
-  assert.equal((await engine.inbox('p1')).items[0].review.linkedSessionId, session.id);
+  assert.deepEqual((await engine.inbox('p1')).items, []);
+  assert.equal(rsiReview(suggestionId, (await engine.view('p1')).events).linkedSessionId, session.id);
   await engine.feedback('p1', { suggestionId, kind: 'supplement', linkedSessionId: null, requestId: 'unlink' });
-  assert.equal((await engine.inbox('p1')).items[0].review.linkedSessionId, undefined);
+  assert.equal(rsiReview(suggestionId, (await engine.view('p1')).events).linkedSessionId, undefined);
   await assert.rejects(engine.feedback('p2', { suggestionId, kind: 'accepted', requestId: 'other-project' }), /不属于/);
 }));
 
@@ -153,7 +193,8 @@ test('recommendation feedback retains its evaluation target without becoming a p
   assert.deepEqual(view.config, beforeConfig); assert.deepEqual(session, beforeSession);
   assert.equal(view.events.some(item => ['outcome', 'action'].includes(item.kind)), false);
   assert.equal(JSON.parse(view.evidence.find(item => item.id === event.evidenceId)!.text).feedbackTarget, 'recommendation');
-  assert.equal((await engine.inbox('p1')).items[0].review.feedback, reaction.text);
+  assert.deepEqual((await engine.inbox('p1')).items, []);
+  assert.equal(rsiReview(suggestionId, view.events).feedback, reaction.text);
   const saved = JSON.parse(await fs.readFile(path.join(root, 'rsi-v2.json'), 'utf8'));
   assert.equal(saved.projects['alice:p1'].events.find((item: any) => item.id === event.id).feedbackTarget, 'recommendation');
   await engine.start('p1', 'learn'); await engine.settled();
@@ -392,7 +433,8 @@ test('revised decisions reset current supplements, keep history, and reject stal
   assert.equal(review.decision, 'rejected'); assert.equal(review.feedback, ''); assert.equal(review.linkedSessionId, undefined);
   await assert.rejects(engine.feedback('p1', { suggestionId, kind: 'supplement', expectedDecisionId: accepted.id, text: '迟到的认可说明', requestId: 'late' }), /处理已更新/);
   await engine.feedback('p1', { suggestionId, kind: 'supplement', expectedDecisionId: rejected.id, text: '推荐重点偏离当前问题', feedbackTarget: 'recommendation', requestId: 'correct' });
-  review = (await engine.inbox('p1')).items[0].review;
+  assert.deepEqual((await engine.inbox('p1')).items, []);
+  review = rsiReview(suggestionId, (await engine.view('p1')).events);
   assert.equal(review.feedback, '推荐重点偏离当前问题');
   assert((await engine.view('p1')).events.some(event => event.text === '主要判断有帮助，请补充背景'));
   await engine.start('p1', 'learn'); await engine.settled();

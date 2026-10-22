@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import ReactMarkdown from './math-markdown';
-import remarkGfm from 'remark-gfm';
+import { ConversationMessage } from './conversation-message';
 import type { AgentSession, Message, SessionInput, WorkbenchAPI } from '../shared/types';
 import { quoteSessionText, subsessionParentId } from '../shared/subsessions';
 import { sessionMessageText } from '../shared/session-context-text';
@@ -85,7 +84,7 @@ export function SubsessionChat({ session, sessions, input, edit, api, active, op
     catch (reason: any) { setError(reason.message); }
     finally { lock.current = false; setSending(false); }
   };
-  const render = (message: Message) => <article className={'message ' + message.role} key={message.id}><div className="message-author"><b>{message.role === 'user' ? '你' : message.role === 'assistant' ? 'Codex' : '运行信息'}</b></div><ReactMarkdown remarkPlugins={[remarkGfm]}>{sessionMessageText(session, message)}</ReactMarkdown></article>;
+  const render = (message: Message) => <ConversationMessage key={message.id} message={message} provider={session.provider} text={sessionMessageText(session, message)} sessionId={session.id}/>;
   return <section className="subsession-chat" aria-label={'子会话：' + session.title}>
     <header>
       <div className="subsession-heading"><SessionName key={session.id} title={session.title} variant="subsession" save={async title => { await api.call('session.rename', { id: session.id, title }); await changed(); }}/>{session.closedAt ? <span className="muted small" role="status">已关闭</span> : <SessionStatusIndicator session={session}/>}

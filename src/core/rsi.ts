@@ -167,7 +167,7 @@ export class RsiEngine {
     return { projectId, enabled: view.config.enabled && !view.config.quiet, busy: view.busy, queued: view.queued, lastError: view.lastError,
       sessions: sessions.map(({ id, title }) => ({ id, title })),
       items: [...view.suggestions].reverse().map(suggestion => ({ ...suggestion, review: rsiReview(suggestion.id, view.events),
-        evidence: suggestion.evidenceIds.map(id => view.evidence.find(item => item.id === id)).filter((item): item is RsiEvidence => !!item).map(({ id, source, text, eventAt }) => ({ id, source, text: text.slice(0, 3500), eventAt })) })) };
+        evidence: suggestion.evidenceIds.map(id => view.evidence.find(item => item.id === id)).filter((item): item is RsiEvidence => !!item).map(({ id, source, text, eventAt }) => ({ id, source, text: text.slice(0, 3500), eventAt })) })).filter(item => !item.review.closed) };
   }
   private effectiveConfig(project: RsiProject): RsiConfig {
     const preference = this.preferences[project.scope.account]?.text;

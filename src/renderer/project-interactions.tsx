@@ -29,9 +29,15 @@ export const pendingRecommendations = (inbox?: RsiInbox) => inbox?.items.filter(
 
 export function RsiRecommendations({ inbox, error, call, reload }: { inbox?: RsiInbox; error?: string; call: WorkbenchAPI['call']; reload: () => Promise<void> }) {
   const [selected, setSelected] = useState(''), [drafts, setDrafts] = useState<Record<string, Draft>>({});
-  const [busy, setBusy] = useState(false), [failure, setFailure] = useState(''), [notice, setNotice] = useState('');
+  const [pending, setPending] = useState<{ id: string; kind: RsiReaction['kind'] }>(), [failure, setFailure] = useState(''), [notice, setNotice] = useState('');
+  const [completed, setCompleted] = useState<string[]>([]);
+  const busy = !!pending;
   const lock = useRef(false), retry = useRef<{ signature: string; requestId: string } | undefined>(undefined);
-  const item = inbox?.items.find(value => value.id === selected) || inbox?.items.find(value => !value.review.closed) || inbox?.items[0];
+  const items = inbox?.items.filter(value => !value.review.closed && !completed.includes(value.id)) || [];
+  const item = items.find(value => value.id === selected) || items[0];
+  // Keep acknowledged removals hidden while a refresh is delayed or fails.
+  // Release that local guard once the server snapshot confirms removal.
+  useEffect(() => { if (inbox) setCompleted(current => current.filter(id => inbox.items.some(value => value.id === id && !value.review.closed))); }, [inbox]);
   useEffect(() => { if (item && item.id !== selected) setSelected(item.id); }, [item?.id, selected]);
   const draft = item && (drafts[item.id] || { linkedSessionId: item.review.linkedSessionId || '', text: item.review.feedback, decisionEventId: item.review.decisionEventId || null });
   const staleDraft = !!item && !!draft && draft.decisionEventId !== (item.review.decisionEventId || null);
@@ -42,36 +48,38 @@ export function RsiRecommendations({ inbox, error, call, reload }: { inbox?: Rsi
     const reaction = { suggestionId: item.id, kind, ...(['accepted', 'rejected', 'supplement'].includes(kind) ? { expectedDecisionId: kind === 'supplement' ? draft!.decisionEventId : item.review.decisionEventId || null } : {}), ...(kind === 'supplement' ? { text: draft?.text || '', ...(target ? { feedbackTarget: target } : {}), linkedSessionId: item.review.decision === 'accepted' ? draft?.linkedSessionId || null : null } : {}) };
     const signature = JSON.stringify(reaction);
     if (retry.current?.signature !== signature) retry.current = { signature, requestId: crypto.randomUUID() };
-    lock.current = true; setBusy(true); setFailure(''); setNotice('');
+    lock.current = true; setPending({ id: item.id, kind }); setFailure('');
+    setNotice(kind === 'supplement' ? '正在保存补充…' : kind === 'dismissed' ? '正在关闭推荐…' : '正在保存处理结果…');
     try {
       await call('rsi.feedback', { projectId: inbox.projectId, reaction: { ...reaction, requestId: retry.current.requestId } });
-      if (kind === 'accepted' || kind === 'rejected') setDrafts(current => { const next = { ...current }; delete next[item.id]; return next; });
-      await reload();
       retry.current = undefined;
-      setNotice(kind === 'accepted' ? '已接受，关联会话和反馈均可留空。' : kind === 'rejected' ? '已拒绝，反馈可留空。' : kind === 'dismissed' ? '已关闭，原处理记录保留。' : kind === 'reopened' ? '已重新打开。' : '补充已保存。关联会话不会自动发送消息。');
-    } catch (reason: any) { setFailure(reason.message); if (reason.message.includes('处理已更新')) await reload(); }
-    finally { lock.current = false; setBusy(false); }
+      if (['accepted', 'rejected', 'supplement', 'dismissed'].includes(kind)) setDrafts(current => { const next = { ...current }; delete next[item.id]; return next; });
+      if (kind === 'supplement' || kind === 'dismissed') setCompleted(current => [...current, item.id]);
+      setNotice(kind === 'accepted' ? '已接受。可选填关联会话和反馈，再保存补充。' : kind === 'rejected' ? '已拒绝。可选填反馈，再保存补充。' : kind === 'dismissed' ? `已关闭“${item.title}”，处理记录已保留。` : `“${item.title}”的补充已保存，推荐已移出列表。`);
+      try { await reload(); } catch { setFailure('处理结果已保存，列表暂未刷新，请重试刷新。'); }
+    } catch (reason: any) { setNotice(''); setFailure(reason.message); if (reason.message.includes('处理已更新')) await reload().catch(() => {}); }
+    finally { lock.current = false; setPending(undefined); }
   };
   return <section className="rsi-recommendations" aria-label="项目推荐">
+    {notice && <div className="rsi-notice" role="status" aria-live="polite">{notice}</div>}
     {(error || failure) && <div className="inline-error" role="alert">{failure || error}{error && <button className="text-button" onClick={() => void reload()}>重试</button>}</div>}
     {!inbox ? <p className="muted rsi-empty">{error ? '推荐暂时无法读取。' : '正在读取推荐…'}</p> : <>
       {(!inbox.enabled || inbox.busy || inbox.queued || inbox.lastError) && <div className="rsi-background-status" role="status">{!inbox.enabled ? 'AI推荐已关闭，已有记录保留。' : inbox.busy ? '正在分析项目进展…' : inbox.queued ? '已记录项目变化，稍后在后台分析。' : '本次分析未完成：' + inbox.lastError}</div>}
-      {!item ? <p className="muted rsi-empty">暂无推荐。项目对话或资料更新后，会在后台分析。</p> : <div className="rsi-layout">
-        <nav className="rsi-list" aria-label="推荐列表">{inbox.items.map(value => <button key={value.id} type="button" className={'rsi-list-item' + (value.review.closed ? ' is-closed' : '')} aria-pressed={value.id === item.id} onClick={() => { setSelected(value.id); setFailure(''); setNotice(''); }}><span>{value.title}</span><small>{value.review.closed ? '已关闭' : decisionLabels[value.review.decision]} · {new Date(value.createdAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</small></button>)}</nav>
+      {!item ? <p className="muted rsi-empty">暂无待处理的推荐。</p> : <div className="rsi-layout">
+        <nav className="rsi-list" aria-label="推荐列表">{items.map(value => <button key={value.id} type="button" className="rsi-list-item" aria-pressed={value.id === item.id} onClick={() => { setSelected(value.id); setFailure(''); setNotice(''); }}><span>{value.title}</span><small>{decisionLabels[value.review.decision]} · {new Date(value.createdAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</small></button>)}</nav>
         <article className="rsi-detail" aria-label="推荐详情">
-          <span className={'rsi-decision ' + item.review.decision}>{item.review.closed ? '已关闭' + (item.review.decision !== 'pending' ? ' · ' + decisionLabels[item.review.decision] : '') : decisionLabels[item.review.decision]}</span>
+          <span className={'rsi-decision ' + item.review.decision}>{decisionLabels[item.review.decision]}</span>
           <h3>{item.title}</h3><p>{item.action}</p>
           <details key={item.id}><summary>推荐依据</summary><p>{item.reason}</p>{item.conditions.length > 0 && <p>适用条件：{item.conditions.join('；')}</p>}{item.uncertainty && <p>尚不确定：{item.uncertainty}</p>}<div className="rsi-evidence">{item.evidence.map(evidence => <blockquote key={evidence.id}>{evidence.text}</blockquote>)}</div></details>
-          {item.review.closed ? <div className="rsi-actions"><span className="muted small">{item.review.decision === 'pending' ? '未记录为接受或拒绝。' : '原处理记录与补充仍保留。'}</span><button className="text-button" disabled={busy} onClick={() => void act('reopened')}>重新打开</button></div> : item.review.decision === 'pending' ? <div className="rsi-actions"><button className="primary" disabled={busy} onClick={() => void act('accepted')}>接受</button><button className="secondary" disabled={busy} onClick={() => void act('rejected')}>拒绝</button><button className="text-button rsi-close" disabled={busy} onClick={() => void act('dismissed')}>关闭</button></div> : <form className="rsi-supplement" onSubmit={event => { event.preventDefault(); void act('supplement'); }}>
+          {item.review.decision === 'pending' ? <div className="rsi-actions"><button className="primary" disabled={busy} onClick={() => void act('accepted')}>接受</button><button className="secondary" disabled={busy} onClick={() => void act('rejected')}>拒绝</button><button className="text-button rsi-close" disabled={busy} onClick={() => void act('dismissed')}>{pending?.id === item.id && pending.kind === 'dismissed' ? '正在关闭…' : '关闭'}</button></div> : <form className="rsi-supplement" onSubmit={event => { event.preventDefault(); void act('supplement'); }}>
             <fieldset disabled={busy}>{item.review.decision === 'accepted' && <label>关联会话 <small>选填</small><select aria-label="关联会话" value={draft!.linkedSessionId} onChange={event => update({ linkedSessionId: event.target.value })}><option value="">暂不关联</option>{draft!.linkedSessionId && !inbox.sessions.some(session => session.id === draft!.linkedSessionId) && <option value={draft!.linkedSessionId}>原关联会话（已关闭或不可用）</option>}{inbox.sessions.map(session => <option key={session.id} value={session.id}>{session.title}</option>)}</select></label>}
             <label>推荐反馈 <small>选填</small><textarea aria-label="推荐反馈" rows={3} maxLength={6000} value={draft!.text} onChange={event => update({ text: event.target.value })} placeholder="评价这条推荐：描述是否具体、背景是否充分，或希望它关注哪一层的问题。"/></label>
-            <div className="rsi-actions"><button className="primary" type="submit" disabled={staleDraft}>{busy ? '保存中…' : '保存补充'}</button><button className="text-button" type="button" onClick={() => void act(item.review.decision === 'accepted' ? 'rejected' : 'accepted')}>{item.review.decision === 'accepted' ? '改为拒绝' : '改为接受'}</button><button className="text-button rsi-close" type="button" onClick={() => void act('dismissed')}>关闭</button></div></fieldset>
+            <div className="rsi-actions"><button className="primary" type="submit" disabled={staleDraft}>{pending?.id === item.id && pending.kind === 'supplement' ? '保存中…' : '保存补充'}</button><button className="text-button" type="button" onClick={() => void act(item.review.decision === 'accepted' ? 'rejected' : 'accepted')}>{item.review.decision === 'accepted' ? '改为拒绝' : '改为接受'}</button><button className="text-button rsi-close" type="button" onClick={() => void act('dismissed')}>{pending?.id === item.id && pending.kind === 'dismissed' ? '正在关闭…' : '关闭'}</button></div></fieldset>
           </form>}
           {staleDraft && <div className="inline-error" role="alert">这份草稿对应先前的处理状态。<button className="text-button" onClick={() => setDrafts(current => { const next = { ...current }; delete next[item.id]; return next; })}>重新填写</button></div>}
         </article>
       </div>}
     </>}
-    {notice && <div className="rsi-notice" role="status">{notice}</div>}
   </section>;
 }
 

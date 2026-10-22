@@ -151,7 +151,10 @@ export function rsiFeedbackState(suggestionId: string, events: RsiEvent[]) {
   const feedback = currentEpisode.filter(event => ['supplement', 'feedback', 'accepted', 'rejected'].includes(event.kind)).at(-1);
   const supplement = currentEpisode.filter(event => event.kind === 'supplement').at(-1);
   const outcome = own.filter(event => event.kind === 'outcome').at(-1);
-  const closed = own.filter(event => event.kind === 'dismissed' || event.kind === 'reopened').at(-1)?.kind === 'dismissed';
+  // Saving the optional supplement completes this review in the same durable
+  // event. A new decision starts a new review; an explicit reopen still wins.
+  const closure = own.filter(event => event.kind === 'dismissed' || event.kind === 'reopened' || event.kind === 'supplement' && currentEpisode.includes(event)).at(-1);
+  const closed = closure?.kind === 'dismissed' || closure?.kind === 'supplement';
   return { decision, feedback, supplement, outcome, closed };
 }
 export interface RsiReview {

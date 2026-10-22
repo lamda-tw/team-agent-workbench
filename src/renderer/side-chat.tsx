@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { SideChat, WorkbenchAPI } from '../shared/types';
-import { Markdown } from './markdown';
+import { ConversationMessage } from './conversation-message';
 import { SessionTranscript } from './session-transcript';
 import { RequestCard } from './request-card';
 
@@ -41,7 +41,7 @@ function SideChatConversation({ chat, api, changed }: { chat: SideChat; api: Wor
     {confirmClose && <div className="side-chat-notice" role="alert">关闭后将清除此侧聊。<button className="text-button" onClick={() => setConfirmClose(false)}>保留</button><button className="text-button" onClick={() => void action(() => invoke('sidechat.close'))}>关闭并清除</button></div>}
     <div className="subsession-messages" ref={messages}>
       {!session.messages.length && <p className="muted small">已继承创建时的上下文，可以直接提问。</p>}
-      <SessionTranscript session={session} renderMessage={message => <article className={'message ' + message.role} key={message.id}><div className="message-author"><b>{message.role === 'user' ? '你' : message.role === 'assistant' ? 'Codex' : '运行信息'}</b></div><Markdown text={message.text}/></article>}/>
+      <SessionTranscript session={session} renderMessage={message => <ConversationMessage key={message.id} message={message} provider={session.provider} text={message.text}/>}/>
       {running && <p className="muted small" role="status"><span className="status-pulse"/>{session.status === 'approval' ? '等待你的处理' : '正在回复…'}</p>}
       {!chat.expired && session.approvals.map(request => <RequestCard key={request.id} request={request} onAnswer={(option, answers) => void action(() => invoke('sidechat.answer', { requestId: request.id, option, answers }))}/>)}
       {(error || session.error || chat.expired) && <p className="inline-error" role="alert">{error || (chat.expired ? '原连接已关闭，此侧聊已失效。已有内容仍可查看，请从原会话重新创建侧聊。' : session.error)}</p>}

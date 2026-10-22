@@ -1,0 +1,97 @@
+/* One reading column for every content type. Long code/tables scroll inside
+   their block; inline paths wrap without widening the conversation. */
+.messages, .subsession-messages {
+  --conversation-prose: 700px;
+  --conversation-ink: #262825;
+  --conversation-muted: #70756e;
+  --conversation-line: #e3e6df;
+  padding: 24px 20px;
+  scrollbar-gutter: stable both-edges;
+}
+.messages > .selection-content { max-width: var(--conversation-prose); margin-inline: auto; }
+.message.conversation-message, .subsession-messages .message.conversation-message { max-width: var(--conversation-prose, 700px); min-width: 0; margin: 0 auto 24px; padding: 0; color: var(--conversation-ink, #262825); }
+.message-surface { min-width: 0; }
+.message.conversation-message.user { width: 100%; max-width: var(--conversation-prose, 700px); background: transparent; border: 0; box-shadow: none; }
+.conversation-message.user > .message-surface { width: fit-content; max-width: 93%; margin-left: auto; padding: 11px 15px; background: #f1f3ef; border-radius: 15px; }
+.message.conversation-message.message-pending { background: transparent !important; border: 0; box-shadow: none; }
+.conversation-message.message-pending > .message-surface { border: 1px solid #b8d5c1; background: #f1f8f3; }
+.conversation-message.is-question > .message-surface { background: #e7f6ec; border: 1px solid #7eb896; }
+.conversation-message .message-author { max-width: var(--conversation-prose, 700px); margin: 0 auto 8px; gap: 7px; flex-wrap: wrap; color: var(--conversation-muted, #70756e); }
+.conversation-message .message-author .pending-message-state { font-size: 12px; line-height: 1.5; }
+.conversation-message .message-author time { font-size: 11px; color: inherit; }
+.conversation-message .message-author .provider-icon { display: none; }
+.conversation-message .message-capabilities { max-width: var(--conversation-prose, 700px); margin: 8px auto 0; }
+.conversation-message.system, .conversation-message.tool { max-width: var(--conversation-prose, 700px); }
+.conversation-message .pending-message-text { font-size: 14px; line-height: 1.65; color: #262825; }
+
+.conversation-message-footer { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; max-width: var(--conversation-prose, 700px); margin: 14px auto 0; color: var(--conversation-muted, #70756e); font-size: 11px; }
+.conversation-copy { display: inline-flex; align-items: center; gap: 7px; }
+.conversation-copy-button { display: inline-flex; align-items: center; gap: 5px; padding: 3px 0; color: #70756e; background: transparent; border: 0; font-size: 11px; }
+.conversation-copy-button:hover { color: #262825; }
+.conversation-copy-button:focus-visible { outline: 2px solid #638d72; outline-offset: 3px; }
+.conversation-copy-error { color: #a34236; font-size: 11px; }
+.conversation-sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+.message .markdown { min-width: 0; font-size: 14px; line-height: 1.65; color: #262825; overflow-wrap: anywhere; }
+.message .markdown > * { max-width: var(--conversation-prose, 700px); margin-inline: auto; }
+.message .markdown :where(p, ul, ol) { margin-block: 0 8px; }
+.message .markdown :where(h1, h2, h3, h4, h5, h6) { margin-block: 20px 8px; font-weight: 600; line-height: 1.4; color: #222620; }
+.message .markdown h1 { font-size: 1.5em; }
+.message .markdown h2 { font-size: 1.25em; }
+.message .markdown h3 { font-size: 1.125em; margin-top: 18px; }
+.message .markdown :where(h4, h5, h6) { font-size: 1em; margin-top: 16px; }
+.message .markdown :where(h1, h2, h3, h4, h5, h6) + :where(h1, h2, h3, h4, h5, h6) { margin-top: 8px; }
+.message .markdown strong { font-weight: 600; color: #222620; }
+.message .markdown > p:has(> strong:only-child):not(:first-child) { margin-top: 20px; margin-bottom: 8px; }
+.message .markdown :where(ul, ol) { padding-inline-start: 1.65em; }
+.message .markdown li { margin: 0; padding-inline-start: 2px; }
+.message .markdown li + li { margin-top: 4px; }
+.message .markdown li::marker { color: #747b70; }
+.message .markdown li > p { margin: 0; }
+.message .markdown li > p + p { margin-top: 6px; }
+.message .markdown li > :where(ul, ol) { margin: 4px 0 0; }
+.message .markdown li:has(> p) + li { margin-top: 6px; }
+.message .markdown .contains-task-list { list-style: none; padding-inline-start: 4px; }
+.message .markdown .task-list-item > input { margin: 0 6px 0 0; vertical-align: middle; }
+.message .markdown blockquote { margin-block: 12px; padding: 2px 12px; border-left: 3px solid #d9dfd4; color: #70756e; }
+.message .markdown blockquote > :last-child, .message .markdown li > :last-child { margin-bottom: 0; }
+.message .markdown hr { margin-block: 22px; border: 0; border-top: 1px solid #e3e6df; }
+.message .markdown a { color: #346ca0; text-decoration: none; text-underline-offset: 3px; }
+.message .markdown a:hover { text-decoration: underline; }
+.message .markdown a > svg { margin-left: 2px; vertical-align: baseline; opacity: .6; }
+.message .markdown code { font-size: .92em; padding: 1px 4px; background: #eff2ec; }
+.message .markdown pre { max-width: 100%; margin: 10px 0; padding: 11px 13px; font-size: 12px; line-height: 1.65; white-space: pre; overflow-wrap: normal; overflow-x: auto; background: #f7f8f5; }
+.message .markdown pre code { font-size: inherit; padding: 0; background: none; }
+.message .markdown .markdown-code-block { min-width: 0; max-width: 100%; margin-block: 12px 16px; border: 1px solid #e3e6df; border-radius: 8px; background: #f7f8f5; overflow: hidden; }
+.message .markdown .markdown-code-block > header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; padding: 7px 12px 0; color: #70756e; font-size: 11px; }
+.message .markdown .markdown-code-block > pre { margin: 0; padding: 9px 12px 12px; border: 0; border-radius: 0; }
+.message .markdown .markdown-table { max-width: 100%; overflow-x: auto; margin-block: 12px 16px; }
+.message .markdown table { border-collapse: collapse; width: 100%; margin: 0; font-size: 13px; line-height: 1.6; }
+.message .markdown :where(th, td) { border: 0; border-bottom: 1px solid #e3e6df; padding: 8px 12px 8px 0; min-width: 80px; }
+.message .markdown th { background: transparent; font-weight: 600; color: #262825; border-bottom-color: #c9cec6; }
+.message .markdown :where(th, td):last-child { padding-right: 0; }
+.message .markdown .mermaid-diagram { margin-block: 14px 16px; border-color: #e3e6df; }
+.message .markdown .mermaid-diagram > header { color: #70756e; background: #f7f8f5; }
+.message .markdown .mermaid-diagram > details { margin: 0; border: 0; border-top: 1px solid #e3e6df; border-radius: 0; background: #fff; color: #70756e; }
+.message .markdown :where(.markdown-image-block, .katex-display) { margin-block: 10px; }
+.message .markdown > :first-child { margin-top: 0; }
+.message .markdown > :last-child { margin-bottom: 0; }
+
+.messages :is(.tool-execution-group, .turn-activity-group), .subsession-messages :is(.tool-execution-group, .turn-activity-group) { max-width: var(--conversation-prose, 700px); margin: 2px auto 16px; color: #70756e; }
+.messages .tool-execution-summary, .subsession-messages .tool-execution-summary { min-height: 28px; padding: 4px 0; font-size: 12px; }
+.messages .tool-execution-summary:hover, .subsession-messages .tool-execution-summary:hover { color: #343a30; background: #f5f7f2; }
+.messages :is(.tool-execution-list, .turn-activity-content), .subsession-messages :is(.tool-execution-list, .turn-activity-content) { margin-right: 0; border-left-color: #e0e5da; }
+.messages .tool-execution-preview, .subsession-messages .tool-execution-preview { color: #7b8275; }
+:is(.messages, .subsession-messages) > :is(.thinking, .provider-auth, .inline-error, .approval) { max-width: var(--conversation-prose, 700px); margin-inline: auto; }
+.conversation-message .proposed-plan { max-width: var(--conversation-prose, 700px); margin-inline: auto; }
+.composer-wrap { width: min(740px, calc(100% - 30px)); align-self: center; padding: 8px 20px 12px; }
+.composer-wrap .composer { border-color: #dfe4d9; border-radius: 15px; box-shadow: 0 2px 8px #00000004; }
+.composer-wrap .composer textarea { font-size: 14px; line-height: 1.65; color: #262825; }
+.composer-wrap .composer-note { font-size: 11px; color: #7b8275; }
+.subsession-composer { width: min(740px, calc(100% - 30px)); margin-inline: auto; padding: 12px 20px; }
+@media (max-width: 760px) {
+  .messages, .subsession-messages { padding: 18px 16px; }
+  .composer-wrap { padding-inline: 16px; max-width: 732px; }
+  .subsession-composer { padding-inline: 16px; max-width: 732px; }
+  .conversation-message.user > .message-surface { max-width: 96%; }
+}

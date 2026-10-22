@@ -6,8 +6,9 @@ import { ExternalLink } from 'lucide-react';
 import { loadMarkdownImage, markdownImageSource } from './markdown-images';
 import { MermaidDiagram } from './mermaid-diagram';
 import { isMermaidSource, prepareDiagramMarkdown } from './mermaid-source';
+import { CopyTextButton } from './copy-text-button';
 
-type MarkdownContext = { sessionId?: string; openFile?: (path: string) => void };
+type MarkdownContext = { sessionId?: string; openFile?: (path: string) => void; conversation?: boolean };
 const context = createContext<MarkdownContext>({});
 
 function MarkdownLink({ href, children }: React.ComponentPropsWithoutRef<'a'>) {
@@ -36,16 +37,24 @@ function MarkdownImage({ src, alt, title }: React.ComponentPropsWithoutRef<'img'
 }
 
 function MarkdownPre({ children }: React.ComponentPropsWithoutRef<'pre'>) {
+  const { conversation } = useContext(context);
   if (React.isValidElement<{ className?: string; children?: React.ReactNode }>(children)) {
     const { className, children: content } = children.props;
     const language = /\blanguage-([^\s]+)/.exec(className || '')?.[1];
     if (typeof content === 'string' && isMermaidSource(content, language)) return <MermaidDiagram source={content.replace(/\n$/, '')}/>;
+    if (conversation && typeof content === 'string') return <section className="markdown-code-block" aria-label={language ? language + ' 代码' : '代码'}><header><span>{language || '代码'}</span><CopyTextButton text={content.replace(/\n$/, '')} label="复制代码" caption/></header><pre>{children}</pre></section>;
   }
   return <pre>{children}</pre>;
 }
 
+function MarkdownTable({ children }: React.ComponentPropsWithoutRef<'table'>) {
+  const { conversation } = useContext(context);
+  const table = <table>{children}</table>;
+  return conversation ? <div className="markdown-table">{table}</div> : table;
+}
+
 // Stable component identities keep already-loaded images and diagrams mounted as a reply streams.
-const components: Components = { a: MarkdownLink, img: MarkdownImage, pre: MarkdownPre };
-export function Markdown({ text, openFile, sessionId }: { text: string } & MarkdownContext) {
-  return <context.Provider value={{ sessionId, openFile }}><div className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} urlTransform={(url, key) => key === 'src' ? markdownImageSource(url).kind === 'unsupported' ? '' : url : /^(https?:|file:|[a-z]:[/\\])/i.test(url) || !/^[a-z][a-z\d+.-]*:/i.test(url) ? url : ''} components={components}>{prepareDiagramMarkdown(text)}</ReactMarkdown></div></context.Provider>;
+const components: Components = { a: MarkdownLink, img: MarkdownImage, pre: MarkdownPre, table: MarkdownTable };
+export function Markdown({ text, openFile, sessionId, conversation }: { text: string } & MarkdownContext) {
+  return <context.Provider value={{ sessionId, openFile, conversation }}><div className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} urlTransform={(url, key) => key === 'src' ? markdownImageSource(url).kind === 'unsupported' ? '' : url : /^(https?:|file:|[a-z]:[/\\])/i.test(url) || !/^[a-z][a-z\d+.-]*:/i.test(url) ? url : ''} components={components}>{prepareDiagramMarkdown(text)}</ReactMarkdown></div></context.Provider>;
 }

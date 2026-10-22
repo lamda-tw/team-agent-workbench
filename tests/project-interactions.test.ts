@@ -43,7 +43,10 @@ test('accepted optional supplements, rejected feedback, and independent closure 
   assert.doesNotMatch(render('rejected'), /<select/); assert.match(render('rejected'), /推荐反馈/);
   assert.match(render('accepted'), /评价这条推荐/); assert.match(render('rejected'), /背景是否充分/);
   assert.match(render('accepted'), /改为拒绝/); assert.match(render('rejected'), /改为接受/);
-  assert.match(render('accepted', true), /已关闭 · 已接受/); assert.match(render('accepted', true), /重新打开/);
+  for (const decision of ['accepted', 'rejected'] as const) {
+    assert.match(render(decision, true), /暂无待处理的推荐/);
+    assert.doesNotMatch(render(decision, true), /定位误差|保存补充|重新打开/);
+  }
   assert.equal(pendingRecommendations(inbox), 1); assert.equal(pendingRecommendations({ ...inbox, items: [{ ...inbox.items[0], review: { ...inbox.items[0].review, closed: true } }] }), 0);
 });
 test('embedded questions reuse the shared panel without an extra header or close control', () => {
