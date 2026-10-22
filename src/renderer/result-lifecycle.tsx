@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown from './math-markdown';
 import remarkGfm from 'remark-gfm';
 import { X } from 'lucide-react';
 import { contributionCategoryInfo, titleSubject } from '../shared/content';

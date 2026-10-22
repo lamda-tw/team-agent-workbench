@@ -57,6 +57,7 @@ import { NativeSessionPicker } from './native-sessions';
 import './native-sessions.css';
 import type { AgentCapabilitySelection, AgentSession, ConclusionMatch, ConnectionProfile, ContentUpdate, Draft, FilePreview, Project, Provider, ProviderAuth, RemoteEntry, Settings, Snapshot, WorkspaceAccess } from '../shared/types';
 import './styles.css';
+import 'katex/dist/katex.min.css';
 import './result-card.css';
 import { DraftEditor, draftStatus } from './draft-editor';
 import { DraftTaskList } from './draft-list';

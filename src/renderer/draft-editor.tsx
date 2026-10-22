@@ -5,7 +5,7 @@ import { PreparationReview, type PreparationReviewHandle } from './preparation-r
 import { resultLabelTitle } from '../shared/result-labels';
 import React, { useEffect, useState, useRef } from 'react';
 import { Check, LoaderCircle, ArrowLeft, Square, Trash2 } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown from './math-markdown';
 import remarkGfm from 'remark-gfm';
 import type { AgentSession, Draft, Transfer, Project } from '../shared/types';
 import { contributionCategoryInfo, materialCategories, titleSubject, type ContributionCategory } from '../shared/content';

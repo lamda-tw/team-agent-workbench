@@ -1,6 +1,6 @@
 {
   "name": "team-agent-workbench",
-  "version": "2.2.17",
+  "version": "2.2.18",
   "private": true,
   "description": "Windows team workspace for local Codex, Cursor and Claude Code agents with Linux SFTP sharing",
   "main": "dist/user/main.cjs",
@@ -61,12 +61,15 @@
   },
   "dependencies": {
     "archiver": "^8.0.0",
+    "katex": "^0.19.0",
     "lucide-react": "^1.46.0",
     "mermaid": "12.2.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "react-markdown": "^10.1.0",
+    "rehype-katex": "^7.0.1",
     "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0",
     "ssh2": "^1.17.0",
     "ws": "^8.22.0",
     "zod": "^4.6.5"

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { MessageSquare, ShieldCheck } from 'lucide-react';
 import type { Approval } from '../shared/types';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown from './math-markdown';
 import remarkGfm from 'remark-gfm';
 
 export type RequestAnswers = Record<string, string | string[]>;

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown from './math-markdown';
 import remarkGfm from 'remark-gfm';
 import { assignmentEventLabels, type AssignmentStatusChange, type AssignmentUpload, type ProjectAssignment } from '../shared/assignments';
 import { projectResultTitle, type SharedContent } from '../shared/content';
