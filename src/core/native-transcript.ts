@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import type { Message } from '../shared/types';
+import { assistantMessagePhase } from '../shared/message-phase';
 import { codexRolloutStream, existingCodexRollout } from './codex-rollout';
 
 const transcriptLimit = 300;
@@ -36,13 +37,13 @@ function partsText(content: unknown) {
   return content.map(part => typeof part === 'string' ? part : typeof part?.text === 'string' ? part.text : '').filter(Boolean).join('\n');
 }
 
-function codexItem(payload: any): { id: string; role: Message['role']; text: string; at?: number } | undefined {
+function codexItem(payload: any): { id: string; role: Message['role']; phase?: Message['phase']; text: string; at?: number } | undefined {
   if (payload?.type !== 'item_completed' || !payload.item || typeof payload.item !== 'object') return;
   const item = payload.item, id = String(item.id || ''), at = typeof payload.completed_at_ms === 'number' ? payload.completed_at_ms : undefined;
   if (item.type === 'UserMessage' || item.type === 'AgentMessage') {
     const text = clip(partsText(item.content), textLimit);
     if (!text) return;
-    return { id, role: item.type === 'UserMessage' ? 'user' : 'assistant', text, at };
+    return { id, role: item.type === 'UserMessage' ? 'user' : 'assistant', text, at, ...(item.type === 'AgentMessage' ? { phase: assistantMessagePhase(item.phase) } : {}) };
   }
   if (item.type === 'Reasoning') return;
   if (item.type === 'ContextCompaction') return { id, role: 'system', text: '上下文已压缩', at };
@@ -81,7 +82,7 @@ export async function readCodexTranscript(file: string): Promise<Message[]> {
       const id = 'native:' + (item.id || String(seen));
       if (seenIds.has(id)) continue;
       seenIds.add(id); seen++;
-      messages.push({ id, role: item.role, text: item.text, createdAt: new Date(item.at || 0).toISOString() });
+      messages.push({ id, role: item.role, text: item.text, createdAt: new Date(item.at || 0).toISOString(), ...(item.phase ? { phase: item.phase } : {}) });
     }
   } finally { lines.close(); input.destroy(); }
   return finish(messages, seen);
@@ -125,7 +126,7 @@ export function nativeTranscriptChanged(existing: Message[], next: Message[]) {
   if (existing.length !== next.length) return true;
   return existing.some((message, index) => {
     const other = next[index];
-    return message.id !== other.id || message.role !== other.role || message.text !== other.text || message.userText !== other.userText;
+    return message.id !== other.id || message.role !== other.role || message.text !== other.text || message.userText !== other.userText || message.phase !== other.phase;
   });
 }
 

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { AgentSession, Message } from '../src/shared/types';
-import { SessionTranscript, sessionTranscriptRows, toolExecutionTitle } from '../src/renderer/session-transcript';
+import { SessionTranscript, sessionDisplayRows, sessionTranscriptRows, toolExecutionTitle } from '../src/renderer/session-transcript';
 
 const message = (id: string, role: Message['role'], text = id, extra: Partial<Message> = {}): Message => ({ id, role, text, createdAt: '2026-10-15T02:00:00.000Z', ...extra });
 const render = (messages: Message[], status: AgentSession['status'] = 'idle', closedAt?: string) => renderToStaticMarkup(React.createElement(SessionTranscript, {
@@ -65,4 +65,56 @@ test('structured tool events get readable summaries without truncating the store
   assert.equal(toolExecutionTitle(message('c', 'tool', '\n$ npm test\nfull output')), '$ npm test');
   assert.equal(toolExecutionTitle(message('d', 'tool', '')), '查看工具记录');
   assert.doesNotThrow(() => toolExecutionTitle(message('e', 'tool', '{"incomplete":')));
+});
+
+const display = (messages: Message[], extra: Partial<AgentSession> = {}) => sessionDisplayRows({ messages, status: 'idle', ...extra });
+const layout = (rows: ReturnType<typeof sessionDisplayRows>) => rows.map(row => row.kind === 'message' ? row.id : { kind: row.kind, ids: row.messages.map(m => m.id) });
+const completedTurn = () => [message('u', 'user'), message('progress', 'assistant', '正在检查', { phase: 'commentary' }), message('steps', 'assistant', '执行计划', { kind: 'planSteps', steps: [] }), message('t', 'tool', '$ test\npassed'), message('more', 'assistant', '已完成检查', { phase: 'commentary' }), message('final', 'assistant', '最终结果', { phase: 'final_answer' })];
+
+test('completion folds commentary, plans and tools together, leaving the user and final answer visible', () => {
+  const messages = completedTurn(), original = JSON.stringify(messages);
+  const rows = display(messages);
+  assert.deepEqual(layout(rows), ['u', { kind: 'activity', ids: ['progress', 'steps', 't', 'more'] }, 'final']);
+  assert.equal(JSON.stringify(messages), original);
+  assert.equal(rows[2].kind === 'message' && rows[2].message, messages[5]);
+  const html = render(messages);
+  assert.equal((html.match(/class="turn-activity-group"/g) || []).length, 1);
+  assert.match(html, /工作过程 · 4 项/);
+  assert.doesNotMatch(html, /<details[^>]*\sopen(?:[ =>])/);
+  assert.match(html, /<div class="turn-activity-content">[\s\S]*正在检查[\s\S]*执行计划[\s\S]*passed[\s\S]*已完成检查[\s\S]*<\/details><article data-message-id="final">最终结果<\/article>$/);
+});
+
+test('streaming and pending confirmations stay visible until the turn actually finishes', () => {
+  for (const status of ['starting', 'running', 'approval', 'error'] as const) {
+    assert(!display(completedTurn(), { status }).some(row => row.kind === 'activity'));
+    assert.doesNotMatch(render(completedTurn(), status), /turn-activity-group/);
+  }
+  for (const extra of [{ error: 'connection lost' }, { stoppedAt: 'now' }]) assert(!display(completedTurn(), extra).some(row => row.kind === 'activity'));
+  assert(display(completedTurn()).some(row => row.kind === 'activity'));
+});
+
+test('earlier completed rounds stay collapsed while the next round or a hidden draft is running', () => {
+  const messages = [...completedTurn(), message('next', 'user'), message('next-progress', 'assistant')];
+  assert.deepEqual(layout(display(messages, { status: 'running' })), ['u', { kind: 'activity', ids: ['progress', 'steps', 't', 'more'] }, 'final', 'next', 'next-progress']);
+  const fill = message('fill', 'user', 'private prompt', { context: { questionFill: true, nativeId: '', accepted: true, workRecord: false, sourceHashes: {} } });
+  assert.deepEqual(display([...completedTurn(), fill, message('draft', 'assistant', 'private draft')], { status: 'running' }), display(completedTurn()));
+  const second = completedTurn().map(m => ({ ...m, id: 'next-' + m.id }));
+  assert.equal(display([...completedTurn(), ...second]).filter(row => row.kind === 'activity').length, 2);
+});
+
+test('legacy records use the final reply, with no folding when only commentary or unfinished tools remain', () => {
+  const legacy = completedTurn().map(({ phase, ...m }) => m);
+  assert.deepEqual(layout(display(legacy)), layout(display(completedTurn())));
+  for (const messages of [completedTurn().slice(0, -1), [message('progress', 'assistant'), message('t', 'tool')], [message('commentary', 'assistant', 'working', { phase: 'commentary' })], [message('steps', 'assistant', 'plan', { kind: 'planSteps' })], []]) {
+    assert(!display(messages).some(row => row.kind === 'activity'));
+  }
+  assert.deepEqual(layout(display([message('u', 'user'), message('a', 'assistant')])), ['u', 'a']);
+  assert.deepEqual(layout(display([message('u', 'user'), message('a', 'assistant'), message('plan', 'assistant', '最终方案', { kind: 'plan' })])), ['u', { kind: 'activity', ids: ['a'] }, 'plan']);
+});
+
+test('all final-answer blocks and interleaved user/system messages remain outside the disclosure', () => {
+  const messages = [message('u', 'user'), message('p', 'assistant', 'progress', { phase: 'commentary' }), message('steering', 'user', 'extra requirement', { steering: true }), message('t', 'tool'), message('notice', 'system', 'retry notice'), message('p2', 'assistant'), message('f1', 'assistant', 'part one', { phase: 'final_answer' }), message('f2', 'assistant', 'part two', { phase: 'final_answer' }), message('empty', 'assistant', '', { phase: 'final_answer' })];
+  assert.deepEqual(layout(display(messages)), ['u', { kind: 'activity', ids: ['p'] }, 'steering', { kind: 'activity', ids: ['t'] }, 'notice', { kind: 'activity', ids: ['p2'] }, 'f1', 'f2']);
+  assert(!display(messages, { status: 'running' }).some(row => row.kind === 'activity'), 'steering does not complete the preceding messages');
+  assert.equal(display(completedTurn())[1].id, display([...completedTurn(), message('next', 'user')], { status: 'running' })[1].id, 'stable disclosure identity preserves the user choice on later updates');
 });

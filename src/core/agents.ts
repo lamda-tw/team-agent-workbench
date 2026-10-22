@@ -2,10 +2,12 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { modeOption, planSteps, type SessionModeCatalog } from '../shared/session-mode';
 import type { AgentCapabilityCatalog, AgentCapabilityKind, AgentCapabilityOption, AgentSession, Approval, Message, MessageContext } from '../shared/types';
+import { assistantMessagePhase } from '../shared/message-phase';
 import { CapabilityCache } from './capability-cache';
 import { JsonRpc, type AgentRpc, type RpcMessage } from './rpc';
 import { WebSocketRpc } from './websocket-rpc';
 import { mergeSharedThread } from './codex-live-thread';
+import { codexForkError, forkCodexHistory } from './codex-fork';
 import { CursorNativeRpc, mergeCursorNativeMessages, type CursorNativeSnapshot } from './cursor-native-rpc';
 import { assertCursorSharedSessionAvailable, isCursorFileSession } from '../shared/cursor-session-consistency';
 import { codexPermissionParams, codexTurnPermissionParams, codexPermissions, cursorPermissionArgs, cursorPermissions, permissionIssue, probeCodexCommand } from './permissions';
@@ -75,12 +77,13 @@ export class AgentRuntime {
     this.rpc.on('diagnostic', (value: string) => { if (!this.closing) this.connection.diagnostic(value); });
     this.rpc.on('closed', (e: Error) => { this.initialized = false; this.codexConnected = false; this.capabilityCache.invalidate(); this.fileChanges.clear(); void this.authBridge?.close(); if (!this.closing) { if (session.cursorNative || storage?.sharedEndpoint || session.codexRemote) { session.desktopSyncState = 'disconnected'; session.desktopSyncError = e.message; } this.finish(e.message); } });
   }
-  private message(id: string, role: Message['role'], text: string, append = false, metadata: Pick<Message, 'userText' | 'context'> = {}) {
+  private message(id: string, role: Message['role'], text: string, append = false, metadata: Pick<Message, 'userText' | 'context' | 'phase'> = {}) {
     const existing = this.session.messages.find(x => x.id === id || this.sharedCodex && (x.nativeItemId === id || x.id === 'native:' + id));
     if (existing) {
       existing.text = append ? existing.text + text : text;
       if (metadata.userText !== undefined) existing.userText = metadata.userText;
       if (metadata.context) existing.context = metadata.context;
+      if (metadata.phase) existing.phase = metadata.phase;
     }
     else this.session.messages.push({ id, role, text, createdAt: now(), ...metadata });
     this.hooks.changed();
@@ -119,14 +122,24 @@ export class AgentRuntime {
    * Codex records its interruption in the child, not in the parent. */
   async forkCodexThread(capture?: () => void) {
     if (this.session.provider !== 'codex') throw new Error('当前仅支持 Codex 子会话');
-    await this.start();
-    if (!this.session.nativeId || this.closing) throw new Error('Codex 会话尚未就绪');
+    try { await this.ensureStarted(); }
+    catch (error) {
+      const failure = codexForkError('resume', error);
+      if (!this.turnActive && this.session.status === 'starting') { this.session.status = 'error'; this.session.error = failure.message; this.hooks.changed(); }
+      throw failure;
+    }
+    if (!this.session.nativeId || this.closing) throw codexForkError('resume', new Error('Codex 会话尚未就绪'));
     capture?.();
-    const result = await this.rpc.request('thread/fork', {
+    const revision = this.sharedRevision, nativeId = this.session.nativeId;
+    const repairable = !this.turnActive && this.session.status === 'idle';
+    const result = await forkCodexHistory(this.rpc, {
       threadId: this.session.nativeId, excludeTurns: true,
       cwd: this.executionCwd, ...codexPermissionParams(this.session),
+    }, {
+      canRepair: () => repairable && !this.closing && !this.turnActive && this.session.status === 'idle' && this.session.nativeId === nativeId && this.sharedRevision === revision,
+      recovered: () => this.hooks.event({ method: 'thread/fork/history-recovered', threadId: nativeId }),
     });
-    if (!result.thread?.id || result.thread.id === this.session.nativeId || !result.thread.path) throw new Error('Codex 未返回独立分支，父会话未改变');
+    if (!result.thread?.id || result.thread.id === this.session.nativeId || !result.thread.path) throw codexForkError('fork', new Error('Codex 未返回完整的独立分支信息，请核对原生会话列表后再试'));
     return { id: String(result.thread.id), path: String(result.thread.path), desktop: !!this.sharedCodex };
   }
   private async startSession() {
@@ -159,7 +172,11 @@ export class AgentRuntime {
       let result = expectedId ? await this.rpc.request('thread/resume', { ...params, threadId: expectedId, ...(resumePath && !compressedResume ? { path: resumePath } : {}) }) : await this.rpc.request('thread/start', params);
       if (s.codexPrivateFork && this.storage && !this.storage.sharedEndpoint) {
         if (!sameNativePath(result.thread?.path || '', this.storage.resumePath || '')) throw new Error('未能核对独立副本，原桌面会话保持不变');
-        const fork = await this.rpc.request('thread/fork', { ...params, threadId: expectedId });
+        const revision = this.sharedRevision;
+        const fork = await forkCodexHistory(this.rpc, { ...params, threadId: expectedId! }, {
+          canRepair: () => !this.closing && !this.turnActive && this.sharedRevision === revision,
+          recovered: () => this.hooks.event({ method: 'thread/fork/history-recovered', threadId: expectedId }),
+        });
         const file = String(fork.thread?.path || ''), relative = path.relative(this.storage.home, file);
         if (!fork.thread?.id || fork.thread.id === expectedId || !file || !relative || relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('未能建立工作台独立副本，原会话保留；请重新连接后重试');
         s.nativeSourceId ||= expectedId; s.nativeId = fork.thread.id; s.nativePath = file; delete s.codexPrivateFork;
@@ -508,7 +525,8 @@ export class AgentRuntime {
       if (p.threadId && s.nativeId && p.threadId !== s.nativeId) return;
       if (p.turnId && this.turnId && p.turnId !== this.turnId) return;
       if (method === 'item/agentMessage/delta' || method === 'item/reasoning/textDelta' || method === 'item/reasoning/summaryTextDelta' || method === 'item/completed' && p.item?.type === 'agentMessage') this.connection.responded();
-      if (method === 'item/agentMessage/delta') this.message(p.itemId, 'assistant', p.delta || '', true);
+      if (method === 'item/started' && p.item?.type === 'agentMessage') this.message(p.item.id, 'assistant', '', true, { phase: assistantMessagePhase(p.item.phase) });
+      if (method === 'item/agentMessage/delta') this.message(p.itemId, 'assistant', p.delta || '', true, { phase: assistantMessagePhase(p.phase) });
       if (method === 'item/plan/delta') {
         const message = this.message(p.itemId, 'assistant', p.delta || '', true); message.kind = 'plan';
         s.proposedPlan = { messageId: message.id, text: message.text, ready: false }; this.hooks.changed();
@@ -529,7 +547,7 @@ export class AgentRuntime {
           const message = this.message(i.id, 'assistant', i.text || ''); message.kind = 'plan';
           s.proposedPlan = { messageId: message.id, text: i.text || '', ready: !!i.text?.trim() }; this.hooks.changed();
         }
-        else if (i.type === 'agentMessage') this.message(i.id, 'assistant', i.text || '');
+        else if (i.type === 'agentMessage') this.message(i.id, 'assistant', i.text || '', false, { phase: assistantMessagePhase(i.phase) });
         else if (i.type === 'commandExecution') { if (i.exitCode !== 0 || i.status === 'failed') { const issue = permissionIssue(i.aggregatedOutput); if (issue) { s.permissionIssue = issue; this.hooks.changed(); } } this.message(i.id, 'tool', '$ ' + i.command + '\n' + (i.aggregatedOutput || '') + '\n退出码：' + i.exitCode); }
         else if (i.type !== 'userMessage' && i.type !== 'reasoning') this.message(i.id || randomUUID(), 'tool', pretty(i));
       }

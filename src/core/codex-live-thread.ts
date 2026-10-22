@@ -1,4 +1,5 @@
 import type { Message } from '../shared/types';
+import { assistantMessagePhase } from '../shared/message-phase';
 
 const key = (message: Message) => message.nativeItemId || message.id.replace(/^native:/, '');
 /** Merge authoritative items without deleting local input receipts or newer streamed text. */
@@ -17,7 +18,8 @@ export function mergeSharedThread(existing: Message[], thread: any): Message[] {
     const previous = byId.get(String(item.id)) || (role === 'user' ? existing.find(message => message.role === 'user' && !used.has(message) && !reserved.has(message) && message.text === text) : undefined);
     if (previous) used.add(previous);
     const keepNewer = previous && role !== 'user' && item.status !== 'completed' && previous.text.length > text.length;
-    merged.push({ ...previous, id: previous?.id || String(item.id), nativeItemId: String(item.id), role, text: keepNewer ? previous.text : text, createdAt: previous?.createdAt || new Date().toISOString(), ...(item.type === 'plan' ? { kind: 'plan' as const } : {}) });
+    const phase = item.type === 'agentMessage' ? assistantMessagePhase(item.phase) : undefined;
+    merged.push({ ...previous, id: previous?.id || String(item.id), nativeItemId: String(item.id), role, text: keepNewer ? previous.text : text, createdAt: previous?.createdAt || new Date().toISOString(), ...(phase ? { phase } : {}), ...(item.type === 'plan' ? { kind: 'plan' as const } : {}) });
   }
   const ids = new Set(merged.map(key));
   return [...merged, ...existing.filter(message => !used.has(message) && !ids.has(key(message)))];

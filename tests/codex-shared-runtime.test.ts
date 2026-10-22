@@ -112,6 +112,72 @@ test('snapshot plan items preserve UI identity when live deltas and completion a
     assert.equal(f.session.messages[0].id, 'native:plan'); assert.equal(f.session.proposedPlan?.messageId, 'native:plan'); assert.equal(f.session.messages.length, 1);
   } finally { await f.runtime.close(); }
 });
+
+test('idle native forks recover missing projections without recapturing a later boundary', async () => {
+  const f = setup(), request = f.rpc.request.bind(f.rpc);
+  let ready = false, forks = 0, captures = 0;
+  f.rpc.request = async (method, params) => {
+    if (method === 'thread/turns/list') { ready = true; return { data: [] }; }
+    if (method === 'thread/fork') {
+      forks++;
+      if (!ready) throw Error('failed to prepare paginated fork: missing projection state for paginated thread thread');
+      return { thread: { id: 'child', path: 'C:/fixture/child.jsonl' } };
+    }
+    return request(method, params);
+  };
+  try {
+    const child = await f.runtime.forkCodexThread(() => captures++);
+    assert.equal(child.id, 'child'); assert.equal(child.desktop, true);
+    assert.equal(forks, 2); assert.equal(captures, 1);
+    assert.equal(f.session.nativeId, 'thread'); assert.equal(f.session.status, 'idle');
+  } finally { await f.runtime.close(); }
+});
+
+test('parent starting a new turn during fork repair cancels retry even if that turn already ended', async () => {
+  const f = setup(), request = f.rpc.request.bind(f.rpc);
+  let forks = 0;
+  f.rpc.request = async (method, params) => {
+    if (method === 'thread/turns/list') {
+      f.emit('turn/started', { threadId: 'thread', turn: { id: 'new-turn' } });
+      f.emit('turn/completed', { threadId: 'thread', turn: { id: 'new-turn' } });
+      return { data: [] };
+    }
+    if (method === 'thread/fork') { forks++; throw Error('failed to prepare paginated fork: missing projection state for paginated thread thread'); }
+    return request(method, params);
+  };
+  try {
+    await assert.rejects(f.runtime.forkCodexThread(), /父会话状态已改变/);
+    assert.equal(forks, 1); assert.equal(f.session.status, 'idle');
+  } finally { await f.runtime.close(); }
+});
+
+test('resume failures identify the stage and do not leave the parent permanently starting', async () => {
+  const f = setup();
+  f.rpc.onResume = () => { throw Error('no rollout found for thread id thread'); };
+  try {
+    await assert.rejects(f.runtime.forkCodexThread(), /恢复父会话[\s\S]*no rollout found/);
+    assert.equal(f.session.status, 'error');
+    assert(!f.rpc.calls.some(call => call.method === 'thread/fork'));
+  } finally { await f.runtime.close(); }
+});
+
+test('streamed commentary and final answers retain their phases without replacing native identities', async () => {
+  const f = setup();
+  try {
+    await f.runtime.ensureStarted();
+    f.emit('item/started', { threadId: 'thread', item: { id: 'progress', type: 'agentMessage', phase: 'commentary' } });
+    f.emit('item/agentMessage/delta', { threadId: 'thread', itemId: 'progress', delta: 'checking' });
+    f.emit('item/completed', { threadId: 'thread', item: { id: 'progress', type: 'agentMessage', text: 'checking' } });
+    f.session.messages.push({ id: 'native:final', role: 'assistant', text: 'result', createdAt: 'now' });
+    f.emit('item/started', { threadId: 'thread', item: { id: 'final', type: 'agentMessage', phase: 'final_answer' } });
+    assert.equal(f.session.messages[1].text, 'result', 'a late start must not erase hydrated text');
+    f.emit('item/agentMessage/delta', { threadId: 'thread', itemId: 'final', delta: ' continued' });
+    f.emit('item/completed', { threadId: 'thread', item: { id: 'final', type: 'agentMessage', text: 'result continued', phase: 'final_answer' } });
+    assert.deepEqual(f.session.messages.map(m => [m.id, m.text, m.phase]), [['progress', 'checking', 'commentary'], ['native:final', 'result continued', 'final_answer']]);
+    f.emit('item/completed', { threadId: 'thread', item: { id: 'old', type: 'agentMessage', text: 'legacy', phase: null } });
+    assert.equal(f.session.messages[2].phase, undefined);
+  } finally { await f.runtime.close(); }
+});
 test('changing a loaded shared thread applies permissions on the next turn without interrupting or replacing it', async () => {
   const f = setup(); f.session.permissionMode = 'review';
   try {

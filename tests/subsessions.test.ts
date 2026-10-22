@@ -107,6 +107,10 @@ test('failed native fork and failed persistence never publish a partial child or
     (wb as any).runtime = async () => runtime;
     await assert.rejects(wb.forkSubsession(parent.id, '失败'), /native-fork-failed/);
     assert.equal(wb.store.sessions.length, 1); assert.equal(parent.nativeId, 'parent-native');
+    await (wb as any).eventWrites.get(parent.id);
+    const records = (await fs.readFile(path.join(wb.store.sessionDir(parent.id), 'events.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line).event);
+    assert(records.some(event => event.method === 'subsession/fork/failed' && event.stage === 'fork' && event.error === 'native-fork-failed'));
+    assert.equal(parent.messages.length, 0, 'failure diagnostics do not become conversation context');
     runtime.forkCodexThread = async (capture: () => void) => { capture(); return { id: 'child-native', path: '/fake/child.jsonl' }; };
     const save = wb.store.save.bind(wb.store);
     wb.store.save = async () => { throw new Error('disk-full'); };

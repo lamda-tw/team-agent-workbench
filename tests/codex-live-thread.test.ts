@@ -22,3 +22,12 @@ test('repeated user prompts retain separate receipts and native item identities'
   const result = mergeSharedThread(existing, thread({ id: 'u2', type: 'userMessage', content: [{ type: 'text', text: 'same' }] }));
   assert.equal(result[0].userText, 'second raw'); assert.equal(result.length, 2); assert.equal(result[1].userText, 'first raw');
 });
+
+test('native snapshots retain answer phases across hydration and incomplete older snapshots', () => {
+  const items = [{ id: 'p', type: 'agentMessage', text: 'checking', phase: 'commentary' }, { id: 'f', type: 'agentMessage', text: 'result', phase: 'final_answer' }];
+  const result = mergeSharedThread([], thread(...items));
+  assert.deepEqual(result.map(m => m.phase), ['commentary', 'final_answer']);
+  assert.deepEqual(mergeSharedThread(result, thread(...items)), result);
+  assert.deepEqual(mergeSharedThread(result, thread(...items.map(({ phase, ...item }) => item))), result);
+  assert.equal(mergeSharedThread([], thread({ id: 'f', type: 'agentMessage', text: 'result', phase: 'unknown' }))[0].phase, undefined);
+});

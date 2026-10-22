@@ -41,6 +41,7 @@ import { TransferQueue } from './transfers';
 import { AgentRuntime, clearStoppedNativeFork } from './agents';
 import { ClaudeRuntime } from './claude-runtime';
 import { findCodexRollout, prepareCodexStorage } from './codex-storage';
+import { codexForkError } from './codex-fork';
 import { existingCodexRollout } from './codex-rollout';
 import { CodexRemoteService, type CodexRemoteIntegration, type RemoteImportSource } from './codex-remote-sessions';
 import { nativeSelectionKey, type NativeSessionSelection } from '../shared/native-sessions';
@@ -3012,12 +3013,16 @@ export class Workbench {
     // Dispatch the native fork now, before the lifecycle queue or file copies.
     // In-progress native history is forked as interrupted; the visible partial
     // output below supplements deltas not yet persisted by Codex.
-    const nativeJob = parent.nativeId ? this.runtime(parent).then(runtime => {
+    const nativeJob = parent.nativeId ? this.runtime(parent).catch(error => { throw codexForkError('storage', error); }).then(runtime => {
       if (!(runtime instanceof AgentRuntime)) throw new Error('Codex 运行环境不可用');
       return runtime.forkCodexThread(() => { captured = structuredClone(parent); capturedAt = new Date().toISOString(); });
     }) : Promise.resolve(undefined);
     // Observe failures even while an earlier lifecycle operation holds the queue.
-    const nativeResult = nativeJob.then(value => ({ value }), error => ({ error }));
+    const nativeResult = nativeJob.then(value => ({ value }), error => {
+      const failure = codexForkError('fork', error);
+      this.event(parentId, { method: 'subsession/fork/failed', stage: failure.stage, nativeId: parent.nativeId, code: failure.code, error: failure.originalMessage });
+      return { error: failure };
+    });
     return this.edit('subsession-tree', async () => {
       this.session(parentId);
       const result = await nativeResult;

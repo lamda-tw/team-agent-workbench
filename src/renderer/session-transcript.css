@@ -1,4 +1,4 @@
-.tool-execution-group{max-width:950px;margin:4px auto 16px;color:#6d7f73;font-size:12px}
+.tool-execution-group,.turn-activity-group{max-width:950px;margin:4px auto 16px;color:#6d7f73;font-size:12px}
 .tool-execution-summary{display:flex;align-items:center;gap:8px;min-height:34px;padding:6px 8px;border-radius:7px;cursor:pointer;list-style:none}
 .tool-execution-summary::-webkit-details-marker,.tool-execution-output>summary::-webkit-details-marker{display:none}
 .tool-execution-summary:hover{background:#f0f5f2;color:#355b45}
@@ -8,7 +8,9 @@
 .tool-execution-activity{font-size:11px;color:#527a61}
 .tool-execution-preview{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#84958a;font-family:Consolas,"Microsoft YaHei",monospace;font-size:11px}
 .tool-execution-chevron,.tool-execution-output>summary>svg{transition:transform .15s ease}
-.tool-execution-group[open]>.tool-execution-summary>.tool-execution-chevron,.tool-execution-output[open]>summary>svg{transform:rotate(90deg)}
+.tool-execution-group[open]>.tool-execution-summary>.tool-execution-chevron,.turn-activity-group[open]>.tool-execution-summary>.tool-execution-chevron,.tool-execution-output[open]>summary>svg{transform:rotate(90deg)}
+.turn-activity-content{min-width:0;margin:4px 8px 0 14px;padding-left:16px;border-left:1px solid #dce6df}
+.turn-activity-content>.tool-execution-group:last-child{margin-bottom:0}
 .tool-execution-list{margin:4px 8px 0 14px;padding-left:16px;border-left:1px solid #dce6df}
 .tool-execution-item{min-width:0;padding:4px 0}
 .tool-execution-output>summary{display:flex;align-items:baseline;gap:8px;padding:6px 0;cursor:pointer;list-style:none}

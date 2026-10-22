@@ -97,3 +97,23 @@ test('ordinary imported Codex sessions retarget only private indexes and leave p
     assert.equal(otherError.error, '登录失败');
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
+
+test('failed private imports retain an explicit resume file on retry even after compression and lost indexes', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'wb-fork-retry-'));
+  try {
+    const personal = path.join(root, 'personal'), data = path.join(root, 'data'), nativeId = randomUUID();
+    const source = path.join(personal, 'sessions', 'rollout-' + nativeId + '.jsonl');
+    await fs.mkdir(path.dirname(source), { recursive: true }); await fs.writeFile(source, 'full history');
+    const s = { ...session(root), nativeId, nativeLive: true, nativePath: source };
+    const first = await prepareCodexStorage(data, s, personal);
+    assert.equal(s.codexPrivateFork, true); assert.equal(s.nativeLive, false);
+    const compressed = first.resumePath! + '.zst';
+    await fs.rename(first.resumePath!, compressed);
+    const retry = await prepareCodexStorage(data, s, personal);
+    assert.equal(retry.resumePath, compressed);
+    assert.equal(await fs.readFile(source, 'utf8'), 'full history');
+    await fs.unlink(compressed);
+    await assert.rejects(prepareCodexStorage(data, s, personal), /工作台中的原会话记录未找到/);
+    assert.equal(s.nativeId, nativeId);
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
+});

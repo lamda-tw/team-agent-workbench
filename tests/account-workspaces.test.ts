@@ -5,6 +5,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { randomUUID } from 'node:crypto';
+import { zstdCompressSync } from 'node:zlib';
 import { AccountWorkspacePool, accountDirectory, migrateAccountWorkspace } from '../src/core/account-workspaces';
 import { Store, atomicJson } from '../src/core/store';
 import { Workbench } from '../src/core/workbench';
@@ -27,6 +28,24 @@ async function fixture(t: { after: (fn: () => Promise<void>) => void }) {
   t.after(() => first.close());
   return { root, first, profile };
 }
+
+test('account migration retains owned compressed Codex histories for native resume and fork', async t => {
+  const { root, first, profile } = await fixture(t);
+  const session = await first.createSession('codex', root, offlineProjectId);
+  session.nativeId = randomUUID(); session.codexStorage = 'workbench';
+  const file = path.join(first.store.root, 'codex-home', 'archived_sessions', 'rollout-' + session.nativeId + '.jsonl.zst');
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  const bytes = zstdCompressSync('original history'); await fs.writeFile(file, bytes); session.nativePath = file;
+  const other = path.join(path.dirname(file), 'rollout-' + randomUUID() + '.jsonl.zst'); await fs.writeFile(other, 'foreign');
+  await first.store.save();
+  const destination = await migrateAccountWorkspace(first.store.root, profile), migrated = new Store(destination); await migrated.init();
+  const restored = migrated.sessions.find(value => value.id === session.id)!;
+  const storage = await prepareCodexStorage(destination, restored, path.join(root, 'empty-personal'));
+  assert.equal(restored.codexNeedsRegistration, true);
+  assert.deepEqual(await fs.readFile(storage.resumePath!), bytes);
+  assert.deepEqual(await fs.readFile(file), bytes);
+  assert.deepEqual(await fs.readdir(path.dirname(storage.resumePath!)), [path.basename(file)]);
+});
 
 test('account migration retains evolved RSI policies and progress without importing another account', async t => {
   const { first, profile } = await fixture(t), owner = accountIdentity(profile);

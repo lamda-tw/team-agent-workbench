@@ -5,6 +5,7 @@ import { withoutQuestionFillTurns } from '../shared/session-context-text';
 import { CursorNativeRecord } from './cursor-native-record';
 
 type TranscriptRow = { kind: 'message'; id: string; message: Message } | { kind: 'tools'; id: string; messages: Message[] };
+type DisplayRow = TranscriptRow | { kind: 'activity'; id: string; messages: Message[] };
 
 /** Group only adjacent tools; prose, plans and user turns retain their positions. */
 export function sessionTranscriptRows(messages: Message[]): TranscriptRow[] {
@@ -19,6 +20,41 @@ export function sessionTranscriptRows(messages: Message[]): TranscriptRow[] {
     else rows.push({ kind: 'tools', id: message.id, messages: [message] });
   }
   return rows;
+}
+
+/** Fold completed turns without changing stored history or hiding user input. */
+export function sessionDisplayRows(session: Pick<AgentSession, 'messages' | 'status' | 'error' | 'stoppedAt'>): DisplayRow[] {
+  const turns: Message[][] = [];
+  for (const message of session.messages) {
+    if (!turns.length || message.role === 'user' && !message.steering) turns.push([]);
+    turns[turns.length - 1].push(message);
+  }
+  return turns.flatMap((turn, index): DisplayRow[] => {
+    const messages = withoutQuestionFillTurns(turn);
+    // Partition before filtering so a hidden draft task does not reopen the
+    // preceding completed turn. Stopped/failed turns keep their partial output.
+    if (index === turns.length - 1 && (session.status !== 'idle' || session.error || session.stoppedAt)) return sessionTranscriptRows(messages);
+    const finals = new Set(messages.filter(message => message.role === 'assistant' && message.phase === 'final_answer' && message.text.trim()));
+    if (!finals.size) {
+      // Older records and other providers may not expose a final-answer phase.
+      // Require an answer at the end; tools or steering alone are not a result.
+      const last = [...messages].reverse().find(message => message.role !== 'system' && message.kind !== 'planSteps' && message.text.trim());
+      if (last?.role === 'assistant' && last.phase !== 'commentary') finals.add(last);
+    }
+    if (!finals.size) return sessionTranscriptRows(messages);
+    const rows: DisplayRow[] = [];
+    for (const message of messages) {
+      if (message.role === 'assistant' && !message.text.trim() && !message.kind && !message.nativeDetails) continue;
+      if (finals.has(message) || message.role === 'user' || message.role === 'system') {
+        rows.push({ kind: 'message', id: message.id, message });
+      } else {
+        const last = rows.at(-1);
+        if (last?.kind === 'activity') last.messages.push(message);
+        else rows.push({ kind: 'activity', id: message.id, messages: [message] });
+      }
+    }
+    return rows;
+  });
 }
 
 export function toolExecutionTitle(message: Message): string {
@@ -58,8 +94,14 @@ function ToolExecutionGroup({ messages, activity }: { messages: Message[]; activ
 }
 
 export function SessionTranscript({ session, renderMessage }: { session: AgentSession; renderMessage: (message: Message) => React.ReactNode }) {
-  const rows = sessionTranscriptRows(session.messages);
-  return <>{rows.map((row, index) => row.kind === 'tools'
-    ? <ToolExecutionGroup key={`${session.id}:tools:${row.id}`} messages={row.messages} activity={index === rows.length - 1 && !session.closedAt ? session.status === 'approval' ? '等待确认' : ['running', 'starting'].includes(session.status) ? '本轮进行中' : undefined : undefined}/>
-    : <React.Fragment key={`${session.id}:message:${row.id}`}>{renderMessage(row.message)}</React.Fragment>)}</>;
+  const rows = sessionDisplayRows(session);
+  const renderRow = (row: TranscriptRow, activity?: string) => row.kind === 'tools'
+    ? <ToolExecutionGroup key={`${session.id}:tools:${row.id}`} messages={row.messages} activity={activity}/>
+    : <React.Fragment key={`${session.id}:message:${row.id}`}>{renderMessage(row.message)}</React.Fragment>;
+  return <>{rows.map((row, index) => row.kind === 'activity'
+    ? <details className="turn-activity-group" key={`${session.id}:activity:${row.id}`}>
+        <summary className="tool-execution-summary"><ChevronRight className="tool-execution-chevron" size={14} aria-hidden="true"/><span>工作过程 · {row.messages.length} 项</span></summary>
+        <div className="turn-activity-content">{sessionTranscriptRows(row.messages).map(item => renderRow(item))}</div>
+      </details>
+    : renderRow(row, index === rows.length - 1 && !session.closedAt ? session.status === 'approval' ? '等待确认' : ['running', 'starting'].includes(session.status) ? '本轮进行中' : undefined : undefined))}</>;
 }

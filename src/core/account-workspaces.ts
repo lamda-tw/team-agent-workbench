@@ -133,7 +133,7 @@ export async function migrateAccountWorkspace(root: string, profile: ConnectionP
         if (entry.isSymbolicLink()) continue;
         const file = path.join(directory, entry.name);
         if (entry.isDirectory()) await rollouts(file);
-        else for (const [id, session] of nativeIds) if (entry.name.endsWith('-' + id + '.jsonl')) {
+        else for (const [id, session] of nativeIds) if (entry.name.endsWith('-' + id + '.jsonl') || entry.name.endsWith('-' + id + '.jsonl.zst')) {
           const relative = path.relative(source.directory, file); await copy(file, path.join(staging, relative)); session.nativePath = path.join(destination, relative);
         }
       }
