@@ -1,5 +1,6 @@
 import React, { useRef, useState } from 'react';
 import type { AdminSnapshot, AdminState, ManagedUser } from './types';
+import { existingLinuxAccountCollision } from './member-recovery';
 
 export function useMemberRequestId() {
   const requests = useRef(new Map<string, { body: string; id: string }>());
@@ -13,11 +14,12 @@ export function MemberSyncStatus({ snapshot, refresh }: { snapshot: AdminSnapsho
   const [error, setError] = useState('');
   const sync = snapshot.memberSync;
   if (!sync?.teamId) return null;
+  const pending = sync.pending.filter(item => !existingLinuxAccountCollision(item.error));
   return <section aria-label="成员同步状态">
     <p className="muted small">{snapshot.connected ? '成员自动同步' : '离线查看 · 新成员联网后开通'} · 团队 {sync.teamId.slice(0, 8)}{sync.lastSyncedAt && ` · 上次同步 ${new Date(sync.lastSyncedAt).toLocaleTimeString()}`}</p>
     {sync.error && <p className="inline-error" role="status">成员同步暂未完成：{sync.error}</p>}
     {error && <p className="inline-error" role="alert">{error}</p>}
-    {!!sync.pending.length && <div className="admin-table-card"><header><h3>待开通成员 · {sync.pending.length}</h3></header>{sync.pending.map(item => <div className="callout" key={item.id}><div><b>{item.command.name}（{item.command.username}）</b><small>{item.status === 'blocked' ? '需要处理' : '待开通 · 连接中央节点后自动提交'}</small>{item.error && <small>{item.error}</small>}</div><button className="secondary compact" disabled={snapshot.busy} onClick={() => { setError(''); void window.admin.call('members.removePending', item.id).then(refresh).catch(reason => setError(reason.message)); }}>移除待办</button></div>)}<p className="muted small">移除待办会停止本机后续提交；若服务器已完成开通，已有账号会保留。</p></div>}
+    {!!pending.length && <div className="admin-table-card"><header><h3>待开通成员 · {pending.length}</h3></header>{pending.map(item => <div className="callout" key={item.id}><div><b>{item.command.name}（{item.command.username}）</b><small>{item.status === 'blocked' ? '需要处理' : '待开通 · 连接中央节点后自动提交'}</small>{item.error && <small>{item.error}</small>}</div><button className="secondary compact" disabled={snapshot.busy} onClick={() => { setError(''); void window.admin.call('members.removePending', item.id).then(refresh).catch(reason => setError(reason.message)); }}>移除待办</button></div>)}<p className="muted small">移除待办会停止本机后续提交；若服务器已完成开通，已有账号会保留。</p></div>}
   </section>;
 }
 export function MemberConflict({ baseline, current, state, confirm, busy }: { baseline?: ManagedUser; current?: ManagedUser; state?: AdminState; confirm: () => void; busy: boolean }) {

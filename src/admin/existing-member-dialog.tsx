@@ -1,21 +1,22 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Server, X } from 'lucide-react';
 import type { AdminSnapshot } from './types';
 import { useMemberRequestId } from './member-sync-view';
 
 type ExistingMember = { username: string; login: string; uid: number; marker: string; groups: string[]; contentAdminGroups: string[]; unknownGroups: string[]; identity: string };
 
-export function ExistingMemberDialog({ snapshot, close, done }: { snapshot: AdminSnapshot; close: () => void; done: () => Promise<void> }) {
-  const [username, setUsername] = useState(''), [name, setName] = useState(''), [password, setPassword] = useState('');
+export function ExistingMemberDialog({ snapshot, initialUsername, initialName, close, done }: { snapshot: AdminSnapshot; initialUsername?: string; initialName?: string; close: () => void; done: () => Promise<void> }) {
+  const [username, setUsername] = useState(initialUsername || ''), [name, setName] = useState(initialName || ''), [password, setPassword] = useState('');
   const [found, setFound] = useState<ExistingMember>(), [busy, setBusy] = useState(false), [error, setError] = useState('');
   const requestId = useMemberRequestId();
-  const detect = async () => {
+  const detect = async (candidate = username) => {
     setBusy(true); setError(''); setFound(undefined); setPassword('');
     try {
-      const result = await window.admin.call<{ value: ExistingMember }>('operation', { op: 'user_import_probe', username: username.trim() });
+      const result = await window.admin.call<{ value: ExistingMember }>('operation', { op: 'user_import_probe', username: candidate.trim() });
       setFound(result.value);
     } catch (reason: any) { setError(reason.message); } finally { setBusy(false); }
   };
+  useEffect(() => { if (initialUsername) void detect(initialUsername); }, []);
   const submit = async () => {
     if (!found || !password) return;
     setBusy(true); setError('');
@@ -25,7 +26,7 @@ export function ExistingMemberDialog({ snapshot, close, done }: { snapshot: Admi
       setPassword(''); await done();
     } catch (reason: any) { setError(reason.message); } finally { setBusy(false); }
   };
-  return <div className="modal-backdrop"><section className="modal"><header><h2>接入已有 Linux 账号</h2><button className="icon" aria-label="关闭窗口" disabled={busy} onClick={close}><X size={19}/></button></header><div className="modal-body">
+  return <div className="modal-backdrop"><section className="modal"><header><h2>{initialUsername ? '恢复已有 Linux 账号' : '接入已有 Linux 账号'}</h2><button className="icon" aria-label="关闭窗口" disabled={busy} onClick={close}><X size={19}/></button></header><div className="modal-body">
     {error && <div className="inline-error" role="alert">{error}</div>}
     <div className="admin-target"><Server size={16}/><span>{snapshot.profile?.username}@{snapshot.profile?.host} · {snapshot.profile?.root}</span></div>
     <p className="muted small">只接入由当前团队工作台创建、尚未登记的专用账号。先检测 Linux 身份与现有项目组权限，再用原密码验证；不会重设密码或修改 Linux 用户组。</p>

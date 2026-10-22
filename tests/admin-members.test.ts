@@ -9,6 +9,7 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemberConflict, MemberSyncStatus } from '../src/admin/member-sync-view';
 import { ExistingMemberDialog } from '../src/admin/existing-member-dialog';
+import { existingAccountRecoveries } from '../src/admin/member-recovery';
 import { LocalAdminConnection } from '../src/admin/local-connection';
 import { AdminMemberSync } from '../src/admin/member-sync';
 import { applyMemberDelta, memberCommandSchema, membershipChanges, rebaseMembership, type MemberCommand } from '../src/admin/member-protocol';
@@ -154,6 +155,24 @@ test('one rejected offline draft does not block other pending members', async ()
   } finally { sync.stop(); await f.clean(); }
 });
 
+test('Linux account collision is reported to creation immediately and duplicate clicks do not add drafts', async () => {
+  const f = await fixture(); let attempts = 0;
+  const transport = {
+    get snapshot() { return f.a.snapshot; },
+    memberSync: (team?: string, since?: number, ids?: string[]) => f.a.memberSync(team, since, ids),
+    operation: async () => { attempts++; throw Object.assign(new Error('Linux 账号已存在，工具不会接管已有系统账号'), { remoteRejected: true }); },
+  };
+  const sync = new AdminMemberSync(path.join(f.directory, 'client'), () => transport, () => {});
+  try {
+    await sync.init(); await sync.sync();
+    const first = await sync.create(f.create('taowen'));
+    assert.equal(first.queued, true); assert.match(first.blockedError || '', /Linux 账号已存在/);
+    const second = await sync.create(f.create('taowen'));
+    assert.equal(second.queued, false); assert.match(second.blockedError || '', /Linux 账号已存在/);
+    assert.equal(attempts, 1); assert.equal(sync.view().pending.length, 1);
+  } finally { sync.stop(); await f.clean(); }
+});
+
 test('Linux member protocol validation and transactions (mock OS, no user or service changes)', () => {
   for (const file of ['test_admin_members.py', 'test_admin.py', 'test_team_groups.py', 'test_content.py']) {
     const output = execFileSync('python', ['-m', 'unittest', 'discover', '-s', 'tests', '-p', file, '-v'], { encoding: 'utf8', env: { ...process.env, PYTHONUTF8: '1' } });
@@ -207,4 +226,15 @@ test('existing Linux account import is online-only and asks for the original pas
   const f = await fixture();
   try { await assert.rejects(f.apply(f.a, command), /仅适用于远端中央节点/); }
   finally { await f.clean(); }
+});
+
+test('duplicate account recovery entries are collapsed into one account', () => {
+  const error = 'Linux 账号已存在，工具不会接管已有系统账号';
+  const pending = { id: randomUUID(), createdAt: new Date().toISOString(), command: { op: 'user_create' as const, username: 'taowen', name: '陶文', groups: [], contentAdminGroups: [] }, status: 'blocked' as const, error };
+  const snapshot = { connected: true, verified: true, busy: false, memberSync: { teamId: 'team-a', pending: [pending] }, state: { initialized: true, users: {}, groups: {}, operations: { 'user_create:taowen': { id: 'user_create:taowen', op: 'user_create', request: { username: 'taowen' }, status: 'failed' as const, completed: [], error }, 'member:old': { id: 'member:old', op: 'user_create', request: { username: 'taowen' }, status: 'failed' as const, completed: [], error } } } };
+  assert.deepEqual(existingAccountRecoveries(snapshot), [{ username: 'taowen', name: '陶文' }]);
+  const html = renderToStaticMarkup(React.createElement(MemberSyncStatus, { snapshot, refresh: async () => {} }));
+  assert.doesNotMatch(html, /待开通成员/);
+  const dialog = renderToStaticMarkup(React.createElement(ExistingMemberDialog, { snapshot, initialUsername: 'taowen', initialName: '陶文', close() {}, done: async () => {} }));
+  assert.match(dialog, /恢复已有 Linux 账号/); assert.match(dialog, /value="taowen"/);
 });

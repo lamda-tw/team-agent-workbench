@@ -77,16 +77,20 @@ export class AdminMemberSync {
   }
   async create(raw: unknown, id: string = randomUUID()) {
     const command = memberCreateSchema.parse(raw);
-    await this.serial(async () => {
+    const duplicate = await this.serial(async () => {
       if (!this.cache.teamId || !this.cache.state?.initialized) throw new Error('请先连接并同步团队，再保存待开通成员');
       const previous = this.cache.pending.find(item => item.id === id);
-      if (previous) { if (JSON.stringify(previous.command) !== JSON.stringify(command)) throw new Error('请求编号已用于其他待开通成员'); return; }
+      if (previous) { if (JSON.stringify(previous.command) !== JSON.stringify(command)) throw new Error('请求编号已用于其他待开通成员'); return previous; }
+      const sameAccount = this.cache.pending.find(item => item.command.username.toLowerCase() === command.username.toLowerCase());
+      if (sameAccount) return sameAccount;
       if (this.cache.pending.length >= 1000) throw new Error('待开通成员过多，请先处理已有待办');
       this.cache.pending.push({ id, command, status: 'pending', createdAt: new Date().toISOString() });
       await this.save(); this.changed();
     });
+    if (duplicate?.status === 'blocked') return { queued: false, blockedError: duplicate.error || '此账号的待开通任务已阻塞，请先处理' };
     await this.sync();
-    return { queued: this.cache.pending.some(item => item.id === id) };
+    const current = this.cache.pending.find(item => item.id === (duplicate?.id || id));
+    return { queued: !!current, blockedError: current?.status === 'blocked' ? current.error || '此账号的待开通任务已阻塞，请先处理' : undefined };
   }
   private async sendPending(item: PendingMember) {
     try {
