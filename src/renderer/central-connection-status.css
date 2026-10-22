@@ -1,0 +1,26 @@
+.central-node-control { position: relative; flex: none; }
+.central-node-trigger { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border: 1px solid #dce5df; border-radius: 7px; background: #fff; color: #486251; font-size: 12px; white-space: nowrap; }
+.central-node-trigger:hover, .central-node-trigger[aria-expanded="true"] { background: #eef5f0; border-color: #91b6a0; }
+.central-node-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.central-node-dot.is-disconnected { background: #d34845; }
+.central-node-dot.is-connected { background: #278556; }
+.central-node-panel { position: absolute; top: calc(100% + 10px); right: 0; width: 336px; max-width: calc(100vw - 32px); max-height: calc(100vh - 110px); overflow: auto; padding: 18px; z-index: 15; background: #fff; border: 1px solid #dce5df; border-radius: 12px; box-shadow: 0 12px 40px #17352724; color: #34513e; white-space: normal; }
+.central-node-panel > header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.central-node-panel h2 { margin: 0; font-size: 15px; font-weight: 550; }
+.central-node-state { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.central-node-panel > p { margin: 8px 0 16px; }
+.central-node-profile { display: flex; align-items: flex-start; gap: 10px; padding: 12px; border-radius: 8px; background: #f5f8f6; }
+.central-node-profile > svg { flex: none; margin-top: 2px; }
+.central-node-profile > div { min-width: 0; }
+.central-node-profile b, .central-node-profile span { display: block; overflow-wrap: anywhere; }
+.central-node-profile b { font-size: 12px; font-weight: 550; }
+.central-node-profile span { margin-top: 4px; color: #718578; font-size: 11px; }
+.central-node-connect { width: 100%; justify-content: center; margin-top: 16px; }
+.central-node-actions { display: flex; justify-content: space-between; gap: 12px; margin-top: 12px; }
+.central-node-actions:empty { display: none; }
+.central-node-actions .text-button, .central-node-disconnect { padding: 4px 0; font-size: 12px; }
+.central-node-disconnect { margin-top: 10px; color: #718578; }
+.central-connection-link { font-size: 12px; }
+.toast .central-connection-link { color: #eaf3ed; text-decoration: underline; }
+.central-offline-note { display: flex; align-items: center; gap: 12px; padding: 8px 24px; color: #718578; font-size: 12px; }
+.statusbar > .text-button { padding: 0; font-size: 10px; }

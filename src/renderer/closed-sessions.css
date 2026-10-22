@@ -1,0 +1,28 @@
+.sidebar .closed-toggle {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  height: 28px;
+  margin: 4px 14px 8px;
+  padding: 4px 6px;
+  gap: 6px;
+  font-size: 12px;
+}
+.modal.closed-sessions-dialog { width: 820px; height: min(680px, 85vh); }
+.closed-sessions-dialog > header { padding: 18px 22px; }
+.closed-sessions-dialog > header h2 { display: flex; align-items: center; gap: 9px; }
+.closed-sessions-search { display: flex; align-items: center; gap: 8px; margin: 16px 22px 10px; color: #718578; }
+.closed-sessions-search input { flex: 1; min-width: 0; }
+.closed-sessions-list { flex: 1; min-height: 0; overflow: auto; padding: 0 16px 16px; }
+.closed-session-row { display: flex; align-items: center; gap: 12px; padding: 10px 6px; border-bottom: 1px solid #edf0ed; }
+.closed-session-entry { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 5px; padding: 6px; text-align: left; }
+.closed-session-entry:hover { background: #f1f5f2; }
+.closed-session-entry b { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.closed-session-entry span, .closed-session-entry time { font-size: 11px; color: #718578; overflow-wrap: anywhere; }
+.closed-session-actions { display: flex; align-items: center; gap: 6px; flex: none; }
+.closed-sessions-empty { padding: 48px 12px; text-align: center; }
+.closed-session-heading { display: flex; align-items: center; gap: 12px; padding: 14px 22px; border-bottom: 1px solid #edf0ed; }
+.closed-session-heading > div:first-of-type { flex: 1; min-width: 0; }
+.closed-session-heading h3 { margin: 0 0 4px; font-size: 14px; overflow-wrap: anywhere; }
+.closed-session-heading p { margin: 0; }
+.closed-session-record { flex: 1; min-height: 0; overflow: auto; padding: 20px 26px; }
+.closed-sessions-error { margin: 12px 22px 0; }

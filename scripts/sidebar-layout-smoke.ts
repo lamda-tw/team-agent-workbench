@@ -19,7 +19,7 @@ const errors: string[] = [];
 async function layout(page: Page) {
   return page.evaluate(() => {
     const sidebar = document.querySelector<HTMLElement>('.sidebar')!, rect = sidebar.getBoundingClientRect();
-    const panes = ['workgroup', 'file', 'session'].map(name => {
+    const panes = ['workgroup', 'session'].map(name => {
       const node = document.querySelector<HTMLElement>(`#sidebar-${name}-list`)!;
       const bounds = node.getBoundingClientRect();
       return { name, top: bounds.top, bottom: bounds.bottom, height: bounds.height, scrollTop: node.scrollTop, scrollHeight: node.scrollHeight, clientHeight: node.clientHeight };
@@ -56,11 +56,13 @@ try {
   await admin.operation({ op: 'user_create', username: 'alice', name: 'Alice', password: '123', groups, contentAdminGroups: groups });
   const profile = memberProfile(admin.snapshot.profile!, admin.snapshot.state!, 'alice');
   await member.store.init(); await member.configureWorkspace(profile, '123', data, async () => false);
+  await member.remote.changePassword('123', 'sidebar-test-123');
   const cli = await authLauncher(path.join(data, 'cli'), { status: 'ready', turn: 'success' });
   member.store.settings.providerPaths = { codex: cli.launcher, cursor: cli.launcher };
   const projects = [];
   for (const group of groups) for (let index = 1; index <= 3; index++) projects.push(await member.createProject(`方案迭代 ${index}`, group, { background: '侧栏布局验证', objectives: '独立滚动与窗口缩放', acceptance: '所有入口始终可见', scope: '', deliverables: '', resources: '', constraints: '', collaboration: '' }));
-  const project = projects[0];
+  await member.projectSync.sync();
+  const project = member.projectBinding(projects[0].id).project;
   const projectPath = await diskPath(share, project.remoteRoot);
   for (let index = 1; index <= 24; index++) await fs.writeFile(path.join(projectPath, `迭代记录-${String(index).padStart(2, '0')}.md`), `# 记录 ${index}`);
   for (let index = 1; index <= 16; index++) {
@@ -77,15 +79,18 @@ try {
   await page.waitForLoadState('domcontentloaded');
   const login = page.locator('.modal').filter({ hasText: '连接中央节点' });
   await login.waitFor({ timeout: 1500 }).catch(() => {});
-  await call(page, 'remote.connect', { profile, password: '123', localPath: data });
+  await call(page, 'remote.connect', { profile, password: 'sidebar-test-123', localPath: data });
   if (await login.isVisible()) await login.getByRole('button', { name: '取消', exact: true }).click();
   await page.locator(`[data-project-id="${project.id}"]`).click();
-  await expect.poll(() => page.locator('.file-row').count()).toBeGreaterThanOrEqual(24);
+  await page.getByLabel('代码目录（选填）', { exact: true }).fill(data);
+  await page.getByRole('button', { name: '保存并进入项目', exact: true }).click();
+  await expect(page.locator('#sidebar-file-list')).toHaveCount(0);
+  await expect(page.locator('.sidebar').getByRole('button', { name: '项目成果库', exact: true })).toHaveCount(0);
   await expect(page.locator('.session-row')).toHaveCount(16);
   await verifyBounds(page);
   await page.screenshot({ path: path.join(data, 'sidebar-default.png') });
 
-  for (const pane of ['workgroup', 'file', 'session']) {
+  for (const pane of ['workgroup', 'session']) {
     const node = page.locator(`#sidebar-${pane}-list`);
     await node.hover(); await page.mouse.wheel(0, 600);
     await expect.poll(() => node.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
@@ -110,21 +115,23 @@ try {
   await verifyBounds(page);
   await page.screenshot({ path: path.join(data, 'sidebar-large-saved-panes.png') });
 
-  // The file region can still resize without losing the session controls.
+  // The project region can still resize without losing the session controls.
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1600, 1200));
   await call(page, 'layout.sidebar', { workgroups: 180, files: 220, sessions: 240 });
   await page.reload(); await expect(page.locator('.workgroup')).toHaveCount(4);
-  const splitter = page.getByRole('separator', { name: '调整项目文件高度', exact: true });
+  const splitter = page.getByRole('separator', { name: '调整工作组高度', exact: true });
   const box = await splitter.boundingBox(), original = await layout(page);
   await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2); await page.mouse.down();
   await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2 + 40); await page.mouse.up();
-  await expect.poll(async () => (await layout(page)).panes[1].height).toBeGreaterThan(original.panes[1].height + 30);
+  await expect.poll(async () => (await layout(page)).panes[0].height).toBeGreaterThan(original.panes[0].height + 30);
   const resized = await verifyBounds(page);
-  assert(Math.abs(resized.panes[0].height - original.panes[0].height) < 1);
-  assert(Math.abs(resized.panes[2].height - original.panes[2].height) < 1);
-  await page.getByRole('button', { name: '项目说明', exact: true }).click();
-  await expect(page.locator('.modal')).toContainText('侧栏布局验证');
-  await page.getByRole('dialog', { name: '项目资料', exact: true }).getByRole('button', { name: '关闭', exact: true }).click();
+  const projectGrowth = resized.panes[0].height - original.panes[0].height;
+  const sessionShrink = original.panes[1].height - resized.panes[1].height;
+  assert(Math.abs(projectGrowth - sessionShrink) < 1, 'Session list must fill the space remaining after the project region resizes');
+  await page.locator(`[data-project-id="${project.id}"]`).locator('..').getByRole('button', { name: '项目设置：' + project.name, exact: true }).click();
+  const settingsDialog = page.getByRole('dialog', { name: '项目设置 · ' + project.name, exact: true });
+  await expect(settingsDialog.getByLabel('项目背景', { exact: true })).toHaveValue('侧栏布局验证');
+  await settingsDialog.getByRole('button', { name: '关闭窗口', exact: true }).click();
   await verifyBounds(page);
   assert.deepEqual(errors, []);
   await fs.writeFile(path.join(data, 'result.json'), JSON.stringify({ passed: true, cases: ['four groups and twelve projects', 'independent list scrolling', 'no outer or document scrolling', 'four window sizes', 'oversized saved pane heights', 'independent resizing', 'project brief remains accessible'], screenshots: ['sidebar-default.png', 'sidebar-minimum.png', 'sidebar-large-saved-panes.png'] }, null, 2));

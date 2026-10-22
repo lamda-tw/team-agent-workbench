@@ -2,9 +2,9 @@ import { expect } from '@playwright/test';
 import { createHash } from 'node:crypto';
 
 export async function dismissStartupLogin(page) {
-  const dialog = page.getByRole('heading', { name: '连接中央节点', exact: true });
-  await expect(dialog).toBeVisible();
-  await page.locator('.modal').getByRole('button', { name: /^(取消|跳过)$/ }).click();
+  await expect(page.locator('.topbar')).toBeVisible();
+  const dialog = page.locator('.modal').filter({ has: page.getByRole('heading', { name: /^(连接中央节点|重新连接中央节点)$/ }) });
+  if (await dialog.isVisible()) await dialog.getByRole('button', { name: /^(取消|跳过)$/ }).click();
 }
 
 export async function setConnectionProfile({ page }, profile) {
@@ -13,9 +13,9 @@ export async function setConnectionProfile({ page }, profile) {
     const snapshot = await window.workbench.call('snapshot');
     await window.workbench.call('settings.save', { ...snapshot.settings, connections: [...snapshot.settings.connections.filter(item => item.id !== profile.id), profile] });
   }, profile);
-  await page.locator('.modal').getByRole('button', { name: /^(取消|跳过)$/ }).click();
-  await page.waitForTimeout(250);
-  await page.locator('.topbar').getByRole('button', { name: /^(连接中央节点|重新连接中央节点)$/ }).click();
+  await dismissStartupLogin(page);
+  await page.locator('.topbar').getByRole('button', { name: /^中央节点：/ }).click();
+  await page.getByRole('dialog', { name: '中央节点连接', exact: true }).getByRole('button', { name: /^(连接中央节点|重新连接)$/ }).click();
   await expect(page.getByLabel('成员账号')).toHaveValue(profile.username);
   await expect(page.getByLabel('本地共享区根目录', { exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: '选择共享目录', exact: true })).toHaveCount(0);

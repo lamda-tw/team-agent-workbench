@@ -62,11 +62,11 @@ test('project refresh remains usable while disconnected and only disables for an
   }
 });
 
-test('project settings show the actual server and account with a distinct reconnect action', () => {
+test('project settings show the actual server and account with the shared connection entry', () => {
   const central = createElement(ProjectCentralConnection, { profile, connected: false, configure() {} });
   const html = renderToStaticMarkup(createElement(ProjectSettingsDialog, { project, contextKey: 'scope', admin: false, central, close() {}, directorySaved: async () => {}, briefSaved: async () => {} }));
   assert.match(html, /role="tab"[^>]*>中央节点/);
-  assert.match(html, /node-a:22/); assert.match(html, /成员账号：alice/); assert.match(html, /连接中央节点/);
+  assert.match(html, /node-a:22/); assert.match(html, /成员账号：alice/); assert.match(html, /查看连接/);
   const connected = renderToStaticMarkup(createElement(ProjectCentralConnection, { profile, connected: true, configure() {} }));
   assert.match(connected, /已连接/); assert.match(connected, /查看连接/);
   assert.doesNotMatch(connected, /type="password"/);

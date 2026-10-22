@@ -90,7 +90,7 @@ try {
   await bp.getByTitle('项目成果库', { exact: true }).click(); await bp.getByRole('tab', { name: '团队', exact: true }).click(); await bp.locator('.content-card').filter({ hasText: '第一项结论' }).locator('.content-card-summary').click();
   await bp.locator('.result-card.is-expanded').getByRole('button', { name: '修改自己的提交', exact: true }).click(); await bp.getByLabel('团队成果内容').fill('Bob 补充的验证依据'); await bp.getByRole('button', { name: '保存修改', exact: true }).click();
   await expect(bp.locator('.result-card.is-expanded')).toContainText('Bob 补充的验证依据');
-  await ap.locator('.sidebar').getByRole('button', { name: '项目成果库', exact: true }).click(); await ap.getByRole('tab', { name: '团队', exact: true }).click(); await ap.getByRole('button', { name: '多选语义合并', exact: true }).click();
+  await ap.getByTitle('项目成果库', { exact: true }).click(); await ap.getByRole('tab', { name: '团队', exact: true }).click(); await ap.getByRole('button', { name: '多选语义合并', exact: true }).click();
   await expect(ap.getByLabel('团队成果类别')).toHaveValue('all');
   await ap.getByLabel('选择合并：第一项结论').check();
   await ap.getByLabel('搜索团队成果').fill('不存在的成果'); await expect(ap.locator('.content-card')).toHaveCount(0);

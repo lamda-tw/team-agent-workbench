@@ -69,7 +69,8 @@ try {
   await app.close(); await launch();
   await page.getByRole('button', { name: '跳过' }).click();
   await expect.poll(async () => (await snapshot()).sessions.filter((item: any) => item.purpose === 'work').length).toBe(2);
-  await page.locator('.topbar').getByRole('button', { name: '连接中央节点', exact: true }).click();
+  await page.locator('.topbar').getByRole('button', { name: /^中央节点：/ }).click();
+  await page.getByRole('dialog', { name: '中央节点连接', exact: true }).getByRole('button', { name: /^(连接中央节点|重新连接)$/ }).click();
   await page.getByLabel('登录密码', { exact: true }).fill('123456');
   await page.getByRole('button', { name: '连接', exact: true }).click();
   await expect(page.getByLabel('新密码', { exact: true })).toBeVisible();
@@ -112,14 +113,16 @@ try {
   await page.getByRole('button', { name: '新建会话', exact: true }).click(); await page.getByRole('button', { name: '创建会话', exact: true }).click();
   await expect.poll(async () => (await snapshot()).sessions.filter((item: any) => item.binding?.host === 'personal' && item.purpose === 'work').length).toBe(1);
   const personalId = (await snapshot()).sessions.find((item: any) => item.binding?.host === 'personal' && item.purpose === 'work').id;
-  await page.locator('.topbar').getByRole('button', { name: '连接中央节点', exact: true }).click();
+  await page.locator('.topbar').getByRole('button', { name: /^中央节点：/ }).click();
+  await page.getByRole('dialog', { name: '中央节点连接', exact: true }).getByRole('button', { name: /^(连接中央节点|重新连接)$/ }).click();
   await page.getByLabel('成员账号', { exact: true }).fill('owner'); await page.getByLabel('登录密码', { exact: true }).fill('1');
   await page.getByRole('button', { name: '连接', exact: true }).click();
   await expect.poll(async () => (await snapshot()).connection?.profile.username).toBe('owner');
   assert((await snapshot()).sessions.some((item: any) => item.id === personalId));
   assert(!(await snapshot()).sessions.some((item: any) => item.id === movedSession.id), 'another team account cannot see the migrated record');
   await page.evaluate(() => window.workbench.call('remote.disconnect'));
-  await page.locator('.topbar').getByRole('button', { name: '连接中央节点', exact: true }).click();
+  await page.locator('.topbar').getByRole('button', { name: /^中央节点：/ }).click();
+  await page.getByRole('dialog', { name: '中央节点连接', exact: true }).getByRole('button', { name: /^(连接中央节点|重新连接)$/ }).click();
   await page.getByLabel('成员账号', { exact: true }).fill('member'); await page.getByLabel('登录密码', { exact: true }).fill('1');
   await page.getByRole('button', { name: '连接', exact: true }).click(); await expect(page.getByRole('alert')).toContainText('密码');
   await page.getByLabel('登录密码', { exact: true }).fill('2'); await page.getByRole('button', { name: '连接', exact: true }).click();

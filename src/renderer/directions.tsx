@@ -40,7 +40,7 @@ export function DirectionsBoard({ username, connected, connect }: { username: st
   return <div className="workspace-page directions-page">
     <div className="page-title"><div><span className="eyebrow">MEMBER PROFILES</span><h1>成员名片</h1></div></div>
     <p className="directions-intro">在名片里介绍你正在做的事和可以交流的经验，方便队友找到你。每张名片可以添加多条内容，只能编辑自己的名片。</p>
-    {!connected ? <div className="page-empty"><Compass size={32}/><h2>连接后查看成员名片</h2><p>成员名片保存在中央节点上，连接中央节点后即可查看和编辑。</p><button className="primary" onClick={connect}>连接中央节点</button></div> : <div className="directions-layout">
+    {!connected ? <div className="page-empty"><Compass size={32}/><h2>连接后查看成员名片</h2><p>本机会话可继续使用。</p><button className="text-button central-connection-link" onClick={connect}>查看连接</button></div> : <div className="directions-layout">
       <section className="direction-editor" aria-label="我的名片">
         <header><b>我的名片</b><span>{drafts.length}/{directionLimit}</span></header>
         <p>写清你在做什么、有哪些经验可以交流。同一名称不要重复填写。</p>

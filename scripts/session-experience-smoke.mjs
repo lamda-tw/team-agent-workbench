@@ -21,9 +21,13 @@ try {
   await dismissStartupLogin(page);
   const call = (action, payload) => page.evaluate(([a, p]) => window.workbench.call(a, p), [action, payload]);
   const snap = () => call('snapshot');
-  await page.getByRole('button', { name: '新建工作会话', exact: true }).click();
+  await page.locator(`[data-project-id="${offlineProjectId}"]`).click();
+  await page.getByLabel('代码目录（选填）', { exact: true }).fill(data);
+  await page.getByRole('button', { name: '保存并进入项目', exact: true }).click();
+  await page.getByRole('button', { name: '新建会话', exact: true }).click();
+  await page.getByRole('switch', { name: '与 Codex 桌面版同步', exact: true }).uncheck();
   const authPanel = page.getByLabel('Codex 登录状态', { exact: true });
-  await expect(authPanel.getByText('fake@example.com')).toBeVisible();
+  await expect(authPanel).toContainText('已保存登录');
   await expect(authPanel.getByRole('button', { name: '登录个人账号' })).toBeDisabled();
   await expect(page.getByText('剩余 77%', { exact: true })).toBeVisible();
   await expect(page.getByText('剩余 52%', { exact: true })).toBeVisible();
@@ -42,11 +46,12 @@ try {
   await page.getByRole('button', { name: '关闭会话', exact: true }).click();
   await expect(page.locator('.session-row')).toHaveCount(0);
   await page.getByRole('button', { name: '已关闭会话（1）', exact: true }).click();
-  await expect(page.getByLabel('任务输入', { exact: true })).toHaveCount(0);
-  await page.locator('.session-materials > summary').click();
-  await expect(page.getByRole('button', { name: '更新项目说明', exact: true })).toHaveCount(0);
-  await page.locator('.session-materials > summary').click();
-  await page.getByRole('button', { name: '重新打开会话', exact: true }).click();
+  const closedHistory = page.getByRole('dialog', { name: /已关闭会话/ });
+  await closedHistory.getByRole('button', { name: '查看记录：GPT 模型验证', exact: true }).click();
+  await expect(closedHistory.getByLabel('任务输入', { exact: true })).toHaveCount(0);
+  await expect(closedHistory.getByRole('button', { name: '更新项目说明', exact: true })).toHaveCount(0);
+  await closedHistory.getByRole('button', { name: '重新打开', exact: true }).click();
+  await expect(closedHistory).toHaveCount(0);
   await expect(page.getByLabel('任务输入', { exact: true })).toBeVisible();
   // The phase summary is secondary local source material, read-only until explicitly corrected.
   await expect(page.getByRole('button', { name: '交接文件', exact: true })).toHaveCount(0);

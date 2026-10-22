@@ -33,7 +33,8 @@ try {
   const refresh = page.getByRole('button', { name: '刷新工作组、项目和文件', exact: true });
   await expect(refresh).toBeEnabled();
   await refresh.click();
-  await expect(page.getByRole('heading', { name: '重新连接中央节点', exact: true })).toBeVisible();
+  await page.getByRole('dialog', { name: '中央节点连接', exact: true }).getByRole('button', { name: /^(连接中央节点|重新连接)$/ }).click();
+  await expect(page.getByRole('heading', { name: /^(连接中央节点|重新连接中央节点)$/ })).toBeVisible();
   await page.getByRole('button', { name: '跳过', exact: true }).click();
 
   await assert.rejects(call('remote.connect', { profile, password: 'wrong-password', projectId: unavailableId }), /authentication|密码/i);
@@ -62,6 +63,7 @@ try {
   await call('remote.disconnect');
   await expect.poll(async () => !!(await snapshot()).connection).toBe(false);
   await expect(refresh).toBeEnabled(); await refresh.click();
+  await page.getByRole('dialog', { name: '中央节点连接', exact: true }).getByRole('button', { name: '重新连接', exact: true }).click();
   await expect(page.getByRole('heading', { name: '重新连接中央节点', exact: true })).toBeVisible();
   await expect(page.getByLabel('成员账号', { exact: true })).toHaveValue('taowen');
   await page.getByLabel('登录密码', { exact: true }).fill('test-password');
