@@ -11,7 +11,7 @@ test('nologin SFTP reply identifies incomplete member access configuration', () 
   assert.match(friendlySftp(new Error('Packet length 1416128883 exceeds max length of 262144')).message, /成员登录配置异常.*重新创建该成员账号/);
 });
 test('disconnected SFTP errors point to the visible account login action', () => {
-  assert.throws(() => new SftpConnection().channel(), /连接已断开，请重新登录后再试/);
+  assert.throws(() => new SftpConnection().channel(), /中央节点连接已断开，请重新连接后再试/);
 });
 test('legacy SFTP stays read-only, preserves UTF-8, propagates denial and blocks escaping symlinks', async () => {
   const CODE = utils.sftp.STATUS_CODE, files = new Map([['/project/readme.md', Buffer.from('项目说明：中文')]]), clients: any[] = [], renames: string[][] = [];

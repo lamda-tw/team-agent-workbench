@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import type { AgentSession, FilePreview, SessionFile } from '../shared/types';
 
 export function sessionFilePath(session: Pick<AgentSession, 'cwd'>, value: string) {
+  if ('codexRemote' in session && session.codexRemote) throw new Error('此文件位于远程主机，请在 Codex 远程项目中打开');
   let target = value.trim().replace(/^<|>$/g, '');
   if (/^file:/i.test(target)) { const url = new URL(target); if (url.hostname && url.hostname !== 'localhost') throw new Error('不支持打开网络文件'); target = fileURLToPath(url); }
   else { try { target = decodeURIComponent(target); } catch { /* Plain paths may contain a literal %. */ } }

@@ -35,6 +35,7 @@ export interface SubsessionReport { id: string; version: number; createdAt: stri
 export interface SubsessionReportPreview { childId: string; parentId: string; title: string; body: string; latestReply: string; changedFiles: string[]; messageCount: number; sourceHash: string; nextVersion: number }
 export type SessionNetworkRoute = 'direct' | 'management';
 export interface AgentSession {
+  codexRemote?: { hostId: string; hostName: string; cwd: string; nativePath: string; home: string };
   codexDesktop?: boolean;
   codexSyncRequest?: { requestedAt: string; error?: string };
   nativeSourceId?: string;
