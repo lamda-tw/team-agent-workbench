@@ -3,7 +3,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
 import type { NativeSessionCatalog, NativeSessionEntry, NativeSessionGroup } from '../shared/native-sessions';
-import { findCodexRollout } from './codex-storage';
+import { findCodexRollout, indexCodexRollouts } from './codex-storage';
 import { nativeCwd } from './native-transcript';
 
 const nativeIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -121,10 +121,11 @@ async function listCodex(home: string, linked: Map<string, string>): Promise<Nat
       const name = (section.name || '').trim();
       if (name) groups.push({ id: 'section:' + section.id, name, position: sectionPosition++, kind: 'section' });
     }
+    const rollouts = await indexCodexRollouts(home);
     for (const thread of threads) {
       if (thread.archived) continue;
       if (!nativeIdPattern.test(thread.id)) continue;
-      const rollout = await findCodexRollout(home, thread.id);
+      const rollout = rollouts.get(thread.id.toLowerCase());
       if (!rollout || !nativeRecordAllowed('codex', rollout)) continue;
       let groupId = groupFor(thread);
       if (!groupId && thread.thread_section_id && sectionNames.get(thread.thread_section_id)) groupId = 'section:' + thread.thread_section_id;

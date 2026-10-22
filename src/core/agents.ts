@@ -12,7 +12,7 @@ import { codexPermissionParams, codexTurnPermissionParams, codexPermissions, cur
 import { refreshCodexConfiguration, validateCodexStorage, type CodexStorage } from './codex-storage';
 import { CodexMcp } from './codex-mcp';
 import type { McpMutation } from '../shared/mcp';
-import { sameNativePath } from './native-transcript';
+import { sameCodexRolloutPath } from './native-transcript';
 import { CodexAuthBridge } from './codex-auth-bridge';
 import { permissionLabels } from '../shared/permission-presentation';
 import { codexCapabilities, cursorCommandCapabilities, cursorPluginCapabilities, emptyCapabilityCatalog } from './provider-capabilities';
@@ -149,7 +149,7 @@ export class AgentRuntime {
       if (s.nativeLive && !expectedId && !s.codexDesktop) { const message = '这条会话还没有原会话标识'; this.finish(message); throw new Error(message); }
       let result = expectedId ? await this.rpc.request('thread/resume', { ...params, threadId: expectedId, ...(this.storage?.resumePath ? { path: this.storage.resumePath } : {}) }) : await this.rpc.request('thread/start', params);
       if (s.codexPrivateFork && this.storage && !this.storage.sharedEndpoint) {
-        if (!sameNativePath(result.thread?.path || '', this.storage.resumePath || '')) throw new Error('未能核对独立副本，原桌面会话保持不变');
+        if (!sameCodexRolloutPath(result.thread?.path || '', this.storage.resumePath || '')) throw new Error('未能核对独立副本，原桌面会话保持不变');
         const fork = await this.rpc.request('thread/fork', { ...params, threadId: expectedId });
         const file = String(fork.thread?.path || ''), relative = path.relative(this.storage.home, file);
         if (!fork.thread?.id || fork.thread.id === expectedId || !file || !relative || relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('未能建立工作台独立副本，原会话保留；请重新连接后重试');
@@ -159,7 +159,7 @@ export class AgentRuntime {
       }
       if (s.codexDesktop && this.storage?.sharedEndpoint) {
         const returnedId=String(result.thread?.id||''),returnedPath=String(result.thread?.path||'');
-        if(!returnedId || expectedId && returnedId!==expectedId || this.storage.resumePath && !sameNativePath(returnedPath,this.storage.resumePath)) {
+        if(!returnedId || expectedId && returnedId!==expectedId || this.storage.resumePath && !sameCodexRolloutPath(returnedPath,this.storage.resumePath)) {
           const message=nativeRolloutForkError;this.closing=true;this.finish(message);await this.rpc.close().catch(()=>{});throw new Error(message);
         }
         s.nativeId=returnedId;
@@ -167,11 +167,11 @@ export class AgentRuntime {
         s.nativePath=returnedPath;s.nativeLive=true;delete s.codexStorage;delete s.codexNeedsRegistration;
       } else if (s.nativeLive) {
         const returnedId = String(result.thread?.id || ''), returnedPath = String(result.thread?.path || '');
-        if (returnedId !== expectedId || !this.storage?.resumePath || !sameNativePath(returnedPath, this.storage.resumePath)) {
+        if (returnedId !== expectedId || !this.storage?.resumePath || !sameCodexRolloutPath(returnedPath, this.storage.resumePath)) {
           const message = nativeRolloutForkError;
           this.closing = true; this.finish(message); await this.rpc.close().catch(() => {}); throw new Error(message);
         }
-        s.nativeId = returnedId; s.nativePath = this.storage.resumePath;
+        s.nativeId = returnedId; s.nativePath = returnedPath;
       } else {
         s.nativeId = result.thread.id; s.nativePath = result.thread.path || this.storage?.resumePath || s.nativePath;
         if (this.storage) { s.codexStorage = 'workbench'; delete s.codexNeedsRegistration; }

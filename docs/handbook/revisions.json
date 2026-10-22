@@ -592,9 +592,23 @@
     {
       "updated_at": "2026-10-21T19:35:35+08:00",
       "base_commit": "c58927e22b08a0596271bbf6144b5c9bf22724a7",
-      "document_commit": null,
+      "document_commit": "d953c2b33e861d0538d3aaf60bfe9849553a419c",
       "summary": "发布 v2.2.10：保留 v2.2.9 图片和图表功能，更新 Codex 正式同步、延后同步、账号接入及使用指导。",
       "content_sha256": "9e6006f26b1d6d7f25d5c5e36e3e687ba07394fdd54948466a43b051f1fbdf42"
+    },
+    {
+      "updated_at": "2026-10-22T09:09:17+08:00",
+      "base_commit": "d953c2b33e861d0538d3aaf60bfe9849553a419c",
+      "document_commit": null,
+      "summary": "区分后台同步与主动打开：延后同步完成后仅提示，由用户决定何时打开 Codex。",
+      "content_sha256": "c6ae1bbdde96a75388b3ad54d17fc4cbc4069edfdb3c510a14f61dd2c86e1d66"
+    },
+    {
+      "updated_at": "2026-10-22T10:00:38+08:00",
+      "base_commit": "e13431b8696a8aef87c0e7f63fdba34a2ab6ace4",
+      "document_commit": null,
+      "summary": "修复 Codex 压缩历史漏读与关闭会话计数；后台同步完成后由用户决定何时打开 Codex。",
+      "content_sha256": "c77888004952dbd705253f14c576ed3177431304181493cc30f950fbcad7256b"
     }
   ]
 }

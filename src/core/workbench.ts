@@ -41,6 +41,7 @@ import { TransferQueue } from './transfers';
 import { AgentRuntime, clearStoppedNativeFork } from './agents';
 import { ClaudeRuntime } from './claude-runtime';
 import { findCodexRollout, prepareCodexStorage } from './codex-storage';
+import { resolveCodexRolloutPath } from './codex-rollout';
 import type { McpMutation } from '../shared/mcp';
 import { CursorMcp } from './cursor-mcp';
 import type { SessionMode } from '../shared/session-mode';
@@ -1944,6 +1945,13 @@ export class Workbench {
     for (const [key, state] of this.nativeSyncState) {
       if (this.closing || !this.nativeSyncState.has(key)) return;
       const stat = await fs.stat(state.file).catch(() => undefined);
+      if (!stat || state.file.endsWith('.jsonl.zst')) {
+        const alternate = await resolveCodexRolloutPath(state.file).catch(() => undefined);
+        if (alternate && !sameNativePath(alternate, state.file)) {
+          for (const session of this.store.sessions) if (session.provider === 'codex' && session.nativeLive && session.nativePath && sameNativePath(session.nativePath, state.file)) session.nativePath = alternate;
+          this.ensureNativeTranscriptSync(); this.changed(); return;
+        }
+      }
       if (this.closing || !this.nativeSyncState.has(key) || !stat?.isFile()) continue;
       this.armNativeTranscriptWatch(key, state.file);
       const signature = stat.size + ':' + Math.trunc(stat.mtimeMs);
@@ -1987,11 +1995,14 @@ export class Workbench {
     if (!session.nativeLive || !session.nativePath || this.nativeTranscriptBlocked(session)) return false;
     if (session.provider !== 'codex' && session.provider !== 'cursor') return false;
     if (!nativeRecordAllowed(session.provider, session.nativePath)) throw new Error(session.provider === 'codex' ? 'Codex 关联只能读取 Codex 自己的会话记录' : 'Cursor 关联只能读取 Cursor 自己的会话记录');
+    const previousPath = session.nativePath;
+    if (session.provider === 'codex') session.nativePath = await resolveCodexRolloutPath(session.nativePath) || session.nativePath;
     const parsed = session.provider === 'codex' ? await readCodexTranscript(session.nativePath) : readCursorTranscript(session.nativePath);
     const next = applyNativeTranscript(session.messages, parsed).map(message => ({ ...message }));
     migrateSessionContext({ ...session, messages: next });
-    if (!nativeTranscriptChanged(session.messages, next)) return false;
+    if (!nativeTranscriptChanged(session.messages, next) && sameNativePath(previousPath, session.nativePath)) return false;
     session.messages = next;
+    if (!sameNativePath(previousPath, session.nativePath)) this.ensureNativeTranscriptSync();
     if (persist) { await this.store.save(); this.broadcast(); }
     return true;
   }
@@ -2067,7 +2078,7 @@ export class Workbench {
         await shared.rpc.request('thread/name/set', { threadId: session.nativeId, name: session.title }).catch(() => {});
       }
       this.ensureNativeTranscriptSync(); await this.store.save();
-      if (previous.codexSyncRequest && !this.closing) await this.openCodexDesktopIfClosed(session);
+      // Finishing a background synchronization is not a request to open a window.
       return session;
     } catch (error: any) {
       const runtime = privateReleased && this.runtimes.get(id); if (runtime) { this.runtimes.delete(id); await runtime.close().catch(() => {}); }
@@ -2082,7 +2093,7 @@ export class Workbench {
         try { await this.store.save(); }
         catch (saveError) { session.codexSyncRequest = previous.codexSyncRequest; throw saveError; }
         this.ensureDeferredCodexSync();
-        this.sessionNotice(session, '已安排同步。可继续在工作台对话；方便时退出 Codex，工作台会自动完成同步并重新打开。');
+        this.sessionNotice(session, '已安排同步。可继续工作；方便时退出 Codex，保持工作台打开。同步完成后，可按需点击“在 Codex 中打开”。');
         return session;
       }
       session.desktopSyncError = error.message;
@@ -2122,7 +2133,7 @@ export class Workbench {
         try {
           await this.syncCodexDesktop(s.id);
           if (s.codexDesktop && !this.closing) {
-            this.sessionNotice(s, `“${s.title}”已与 Codex 同步。`);
+            this.sessionNotice(s, `“${s.title}”已与 Codex 同步。需要时可在“…”中点击“在 Codex 中打开”。`);
           }
         } catch (error: any) {
           if (s.codexSyncRequest) s.codexSyncRequest.error = error.message;

@@ -95,11 +95,12 @@ test('whole-group migration checks all members and preserves session/draft/resul
     b.status = 'running';
     await assert.rejects(f.local.movePersonalTo(f.team, project.id, { groupId: group.id }), /先结束/);
     assert.equal(f.local.store.sessions.length, 2); assert.equal(f.team.store.sessions.length, 0);
-    b.status = 'idle';
+    b.status = 'idle'; b.closedAt = new Date().toISOString();
     await assert.rejects(f.local.movePersonalTo(f.team, 'not-authorized', { groupId: group.id }), /本机没有此项目/);
     const moved = await f.local.movePersonalTo(f.team, project.id, { groupId: group.id });
     assert.equal(moved.count, 2); assert.equal(f.local.store.sessions.length, 0); assert.equal(f.local.store.settings.personalGroups!.length, 0);
     assert.deepEqual(f.team.session(a.id).messages, a.messages); assert.equal(f.team.session(a.id).cwd, f.cwd); assert.equal(f.team.session(a.id).networkRoute, 'direct');
+    assert.equal(f.team.session(b.id).closedAt, b.closedAt, 'whole-group moves keep closed conversations');
     assert.equal(f.team.session(a.id).binding!.project.id, project.id); assert.equal(f.team.store.inputs[a.id].text, '尚未发送');
     assert.equal(f.team.draft(draft.id).artifacts![0].target, contributionCategoryDirectory(f.team.session(a.id).binding!, 'finding'));
     assert.equal(f.team.conclusions(project.id)[0].id, result.id); assert.equal(f.team.conclusions(project.id)[0].accountOwner, accountIdentity(f.team.session(a.id).binding!));

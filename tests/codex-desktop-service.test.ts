@@ -107,7 +107,7 @@ test('retry after quitting an ordinary desktop automatically opens the linked th
   const service=new CodexDesktopService({...f.options,running:async()=>running,launchDesktop:async(target,args,env)=>{await f.options.launchDesktop(target,args,env);running=true;return process.pid;}});
   const session={provider:'codex',purpose:'work',codexDesktop:true,networkRoute:'direct',cwd:f.root} as AgentSession;
   try{
-    await assert.rejects(service.storage(session,'ignored',{}),/联动成功后会自动打开/);
+    await assert.rejects(service.storage(session,'ignored',{}),/首次联动请保存工作并退出 Codex，再重试/);
     assert.equal(f.counts().starts,0);assert.equal(f.counts().desktopOpens,0);
     running=false;await service.storage(session,'ignored',{});
     session.nativeId=randomUUID();

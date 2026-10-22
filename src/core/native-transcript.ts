@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import type { Message } from '../shared/types';
+import { openCodexRollout } from './codex-rollout';
 
 const transcriptLimit = 300;
 const textLimit = 8000;
@@ -27,6 +28,11 @@ export function nativeCwd(value: string) {
   if (!cwd) return '';
   if (cwd.startsWith('file:')) { try { cwd = fileURLToPath(cwd); } catch { return ''; } }
   return path.resolve(cwd.replace(/^\\\\\?\\/, ''));
+}
+
+export function sameCodexRolloutPath(returned: string, expected: string) {
+  // Native resume expands compressed storage in place; any other redirection is still rejected.
+  return sameNativePath(returned, expected) || expected.endsWith('.jsonl.zst') && sameNativePath(returned, expected.slice(0, -4));
 }
 
 function partsText(content: unknown) {
@@ -68,8 +74,9 @@ function finish(messages: Message[], seen: number) {
 export async function readCodexTranscript(file: string): Promise<Message[]> {
   const messages: Message[] = [], seenIds = new Set<string>();
   let seen = 0;
-  const lines = readline.createInterface({ input: fs.createReadStream(file, { encoding: 'utf8' }), crlfDelay: Infinity });
-  for await (const line of lines) {
+  const input = openCodexRollout(file);
+  const lines = readline.createInterface({ input, crlfDelay: Infinity });
+  try { for await (const line of lines) {
     if (!line.trim()) continue;
     let payload: any;
     try { payload = JSON.parse(line).payload; } catch { continue; }
@@ -79,7 +86,7 @@ export async function readCodexTranscript(file: string): Promise<Message[]> {
     if (seenIds.has(id)) continue;
     seenIds.add(id); seen++;
     messages.push({ id, role: item.role, text: item.text, createdAt: new Date(item.at || 0).toISOString() });
-  }
+  } } finally { lines.close(); input.destroy(); }
   return finish(messages, seen);
 }
 

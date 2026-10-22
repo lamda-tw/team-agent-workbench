@@ -61,13 +61,33 @@ async function locateRollout(root: string, id: string, keep?: string): Promise<s
     if (item.isSymbolicLink()) continue;
     const file = path.join(root, item.name);
     if (item.isDirectory()) { const found = await locateRollout(file, id, keep); if (found) return found; }
-    else if (item.isFile() && item.name.endsWith('-' + id + '.jsonl') && (!keep || !sameNativePath(file, keep))) return file;
+    else if (item.isFile() && (item.name.endsWith('-' + id + '.jsonl') || item.name.endsWith('-' + id + '.jsonl.zst')) && (!keep || !sameNativePath(file, keep))) return file;
   }
+}
+
+export async function indexCodexRollouts(home: string) {
+  const paths = new Map<string, string>();
+  async function visit(root: string, entries: Map<string, string>) {
+    for (const item of await fs.readdir(root, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return []; throw error; })) {
+      if (item.isSymbolicLink()) continue;
+      const file = path.join(root, item.name);
+      if (item.isDirectory()) await visit(file, entries);
+      else if (item.isFile()) {
+        const match = item.name.match(/-([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})\.jsonl(\.zst)?$/i);
+        if (match && (!entries.has(match[1].toLowerCase()) || !match[2])) entries.set(match[1].toLowerCase(), file);
+      }
+    }
+  }
+  for (const directory of ['sessions', 'archived_sessions']) {
+    const entries = new Map<string, string>(); await visit(path.join(home, directory), entries);
+    for (const [id, file] of entries) if (!paths.has(id)) paths.set(id, file);
+  }
+  return paths;
 }
 
 export async function findCodexRollout(home: string, id: string) {
   if (!/^[a-f0-9-]{36}$/i.test(id)) return;
-  return await locateRollout(path.join(home, 'sessions'), id) || await locateRollout(path.join(home, 'archived_sessions'), id);
+  return (await indexCodexRollouts(home)).get(id.toLowerCase());
 }
 
 async function releaseIsolatedNativeCopy(home: string, id: string, resumePath: string) {

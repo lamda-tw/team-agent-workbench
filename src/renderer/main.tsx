@@ -2,6 +2,7 @@ import { projectConnectionError } from '../shared/project-connection';
 import { ProjectCentralConnection, LocalProjectConnection } from './project-connection';
 import { personalFamilyIds, PERSONAL_PROJECT_ID, personalProfile, isPersonalBinding } from '../shared/personal-workspace';
 import { PersonalSection, SessionOrganization, PersonalMoveDialog, type MoveSelection } from './personal-workspace';
+import './personal-workspace.css';
 import { newAccountPasswordSchema } from '../shared/accounts';
 import { SessionTranscript } from './session-transcript';
 import './session-transcript.css';

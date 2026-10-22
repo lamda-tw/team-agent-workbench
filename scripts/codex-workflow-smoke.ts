@@ -152,12 +152,14 @@ async function main(){
     const beforeAttach=requests.length;desktopRunning=false;
     await (wb as any).drainDeferredCodexSync();
     assert.equal(requests.length,beforeAttach,'association must not run another model turn');
-    assert.equal(existing.codexSyncRequest,undefined);assert.equal(desktopOpens,3,'the waiting request automatically reopens the shared desktop');
+    assert.equal(existing.codexSyncRequest,undefined);assert.equal(desktopOpens,2,'completing background sync must not open the desktop');
     assert.equal(existing.nativeId,privateId);assert.equal(existing.codexDesktop,true);assert.notEqual(existing.nativePath,privateFile);
     assert((await fs.readFile(existing.nativePath!,'utf8')).startsWith(privateRecord),'native tools and compaction remain intact');
     assert.equal(wb.store.inputs[existing.id].text,'还没发送的草稿');
     const linkedHistory=(await peer.request('thread/read',{threadId:privateId,includeTurns:true})).thread;
     assert(JSON.stringify(linkedHistory).includes('WF_TASK_C_PRIVATE'));assert(JSON.stringify(linkedHistory).includes('WF_TASK_C_WAITING'));
+    await (wb as any).drainDeferredCodexSync();assert.equal(desktopOpens,2,'a repeated background scan must not open the desktop');
+    await wb.openCodexDesktop(existing.id);assert.equal(desktopOpens,3,'only the explicit open action opens this synchronized conversation');
     await wb.send(existing.id,'WF_TASK_C_AFTER_ATTACH');await until(()=>existing.status==='idle');
     assert.equal(existing.nativeId,privateId);assert(requests.at(-1)!.includes('WF_REPLY_WF_TASK_C_PRIVATE'),'next turn must use the native compacted context');
     assert(requests.at(-1)!.includes('WF_REPLY_WF_TASK_C_WAITING'),'work done while waiting must also reach the next turn');
@@ -255,7 +257,7 @@ async function main(){
       peer.respond(nativeApprovals[0].id, { decision: nativeApprovals[0].params.availableDecisions?.includes('cancel') ? 'cancel' : 'decline' }); await until(() => a.status === 'idle'); assert.equal(a.desktopWaitingApproval, false);
       extendedCases.push('real CLI approvals route only to the initiating client and observers never reject');
     }
-    const result={passed:true,root,backendStarts:starts,nativeThreadCount:process.argv.includes('--ui')?6:4,maxConcurrent,requests:requests.length,externalModelRequests:0,ui:process.argv.includes('--ui'),cases:['lazy creation','single shared manager','automatic window launch on concurrent first sends','automatic reopen on restore without resending','later sends reuse the window without refocusing','independent native thread IDs','parallel model requests','no cross-thread messages','closing one does not close others','native peer receives shared context','closing Workbench preserves native turn','resume after restart','ordinary desktop queues sync without closing the private executor','continue a real CLI turn while waiting','desktop exit completes queued sync and reopens the shared window','existing private native history attaches without inference','compacted context continues after attachment','input draft and original native ID preserved',...(process.argv.includes('--ui')?['sync only in more menu', 'new-session option without Beta', 'ordinary session attaches and continues through UI']:[]),...extendedCases]};
+    const result={passed:true,root,backendStarts:starts,nativeThreadCount:process.argv.includes('--ui')?6:4,maxConcurrent,requests:requests.length,externalModelRequests:0,ui:process.argv.includes('--ui'),cases:['lazy creation','single shared manager','automatic window launch on concurrent first sends','automatic reopen on restore without resending','later sends reuse the window without refocusing','independent native thread IDs','parallel model requests','no cross-thread messages','closing one does not close others','native peer receives shared context','closing Workbench preserves native turn','resume after restart','ordinary desktop queues sync without closing the private executor','continue a real CLI turn while waiting','desktop exit completes queued sync without opening the window','explicit user action opens the synchronized conversation','existing private native history attaches without inference','compacted context continues after attachment','input draft and original native ID preserved',...(process.argv.includes('--ui')?['sync only in more menu', 'new-session option without Beta', 'ordinary session attaches and continues through UI']:[]),...extendedCases]};
     await fs.writeFile(path.join(root,'result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result,null,2));
   }catch(error){
     if(application){const page=await application.firstWindow();await page.screenshot({path:path.join(root,'failure.png')}).catch(()=>{});await fs.writeFile(path.join(root,'failure.txt'),await page.locator('body').innerText()).catch(()=>{});}

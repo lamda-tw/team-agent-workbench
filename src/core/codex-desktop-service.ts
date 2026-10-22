@@ -20,7 +20,7 @@ const run = promisify(execFile), pause = (ms: number) => new Promise(resolve => 
 export interface CodexDesktopTarget { app: string; executable: string; archive?: string }
 export interface CodexDesktopOpenOptions { ifClosed?: boolean }
 export class CodexDesktopRestartRequired extends Error {
-  constructor() { super('Codex 当前以普通方式运行。首次联动请保存工作并退出 Codex，再重试；联动成功后会自动打开 Codex，不会自动关闭你的聊天'); }
+  constructor() { super('Codex 当前以普通方式运行。首次联动请保存工作并退出 Codex，再重试；不会自动关闭你的聊天'); }
 }
 export interface CodexDesktopIntegration {
   readyToPrepare(): Promise<boolean>;

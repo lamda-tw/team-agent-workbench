@@ -149,7 +149,7 @@ test('empty old sessions can be associated without a text-only synthetic rollout
   }finally{await f.close();}
 });
 
-test('an ordinary desktop defers synchronization without closing the private runtime or copying its live history',async()=>{
+test('deferred synchronization keeps latest history but leaves the desktop closed until an explicit open',async()=>{
   const f=await fixture();let closed=0;
   try{
     f.setReady(false);const privateRuntime={session:f.session,close:async()=>{closed++;}};(f.wb as any).runtimes.set(f.session.id,privateRuntime);
@@ -163,9 +163,12 @@ test('an ordinary desktop defers synchronization without closing the private run
     await fs.appendFile(f.session.nativePath!,newTurn);f.setReady(true);f.session.status='running';
     await (f.wb as any).drainDeferredCodexSync();assert.equal(closed,0);assert.equal(f.counts().prepares,0);
     f.session.status='idle';await (f.wb as any).drainDeferredCodexSync();
-    assert.equal(closed,1);assert.equal(f.opened(),1);assert.equal(f.session.codexDesktop,true);assert.equal(f.session.codexSyncRequest,undefined);
+    assert.equal(closed,1);assert.equal(f.opened(),0);assert.equal(f.session.codexDesktop,true);assert.equal(f.session.codexSyncRequest,undefined);
     assert.equal(await fs.readFile(f.session.nativePath!,'utf8'),history(f.original.nativeId!)+newTurn);assert.equal(f.session.nativeId,f.original.nativeId);
     assert.equal(f.wb.store.inputs[f.session.id].text,'未发送的草稿');
+    await (f.wb as any).drainDeferredCodexSync();await f.wb.syncCodexDesktop(f.session.id);assert.equal(f.opened(),0);
+    f.wb.store.settings.providerPaths.codex=process.execPath;
+    await f.wb.openCodexDesktop(f.session.id);assert.equal(f.opened(),1);
   }finally{await f.close();}
 });
 
@@ -175,7 +178,7 @@ test('cancelled or closed requests never migrate when the desktop exits; reopeni
     await (f.wb as any).drainDeferredCodexSync();assert.equal(f.session.codexSyncRequest,undefined);assert.equal(f.counts().starts,0);
     f.setReady(false);await f.wb.syncCodexDesktop(f.session.id);await f.wb.closeSession(f.session.id);f.setReady(true);
     await (f.wb as any).drainDeferredCodexSync();assert(f.session.codexSyncRequest);assert.equal(f.counts().starts,0);
-    await f.wb.reopenSession(f.session.id);await (f.wb as any).drainDeferredCodexSync();assert.equal(f.session.codexDesktop,true);assert.equal(f.opened(),1);
+    await f.wb.reopenSession(f.session.id);await (f.wb as any).drainDeferredCodexSync();assert.equal(f.session.codexDesktop,true);assert.equal(f.opened(),0);
   }finally{await f.close();}
 });
 
@@ -195,7 +198,7 @@ test('unavailable history pauses the request with an explanation instead of retr
     await (f.wb as any).drainDeferredCodexSync();assert.match(f.session.codexSyncRequest!.error!,/完整的 Codex/);
     const before=f.counts().prepares;await (f.wb as any).drainDeferredCodexSync();assert.equal(f.counts().prepares,before);
     await fs.writeFile(f.original.nativePath!,history(f.original.nativeId!));await f.wb.syncCodexDesktop(f.session.id);
-    assert.equal(f.session.codexDesktop,true);assert.equal(f.session.codexSyncRequest,undefined);assert.equal(f.opened(),1);
+    assert.equal(f.session.codexDesktop,true);assert.equal(f.session.codexSyncRequest,undefined);assert.equal(f.opened(),0);
   }finally{await f.close();}
 });
 
@@ -204,7 +207,7 @@ test('deferred UI distinguishes waiting from actual sync and exposes cancel and 
   const status=()=>renderToStaticMarkup(React.createElement(NativeDesktopStatus,{session:s}));
   const menu=()=>renderToStaticMarkup(React.createElement(NativeDesktopControls,{session:s,run(){},showStatus:false}));
   assert.match(status(),/等待 Codex 退出后同步/);assert.doesNotMatch(status(),/>同步中</);
-  assert.match(menu(),/取消同步请求/);assert.match(menu(),/可继续工作/);assert.match(menu(),/完成同步并打开 Codex/);
+  assert.match(menu(),/取消同步请求/);assert.match(menu(),/可继续工作/);assert.match(menu(),/完成同步/);assert.doesNotMatch(menu(),/完成同步并打开|自动.*重新打开/);
   s.codexSyncRequest!.error='原记录缺失';assert.match(menu(),/原记录缺失/);assert.match(menu(),/重试同步/);assert.match(status(),/同步待处理/);
 });
 
