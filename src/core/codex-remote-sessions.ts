@@ -7,6 +7,7 @@ import type { AgentSession, Message } from '../shared/types';
 import type { AgentRpc } from './rpc';
 import { CodexSshRpc } from './codex-ssh-rpc';
 import { mergeSharedThread } from './codex-live-thread';
+import { codexAgentSources, codexOriginFields } from './codex-session-origin';
 
 const exec = promisify(execFile);
 const object = (value: unknown): Record<string, any> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {};
@@ -31,10 +32,23 @@ index = max(indexes, key=lambda p: int(re.search(r'state_(\d+)', p).group(1)))
 db = sqlite3.connect(pathlib.Path(index).as_uri() + '?mode=ro', uri=True, timeout=2)
 db.row_factory = sqlite3.Row
 columns = {r[1] for r in db.execute('pragma table_info(threads)')}
-fields = ['id', 'name', 'title', 'first_user_message', 'cwd', 'project_id', 'source', 'archived', 'recency_at_ms', 'updated_at_ms', 'updated_at', 'rollout_path', 'model']
+fields = ['id', 'name', 'title', 'first_user_message', 'cwd', 'project_id', 'archived', 'recency_at_ms', 'updated_at_ms', 'updated_at', 'rollout_path', 'model'] + ${JSON.stringify(codexOriginFields)}
 sql = 'select ' + ', '.join(('"' + k + '"') if k in columns else ('NULL AS "' + k + '"') for k in fields) + ' from threads'
 rows = [dict(r) for r in db.execute(sql)]
+edge_columns = {r[1] for r in db.execute('pragma table_info(thread_spawn_edges)')}
+spawned = {r[0] for r in db.execute('select child_thread_id from thread_spawn_edges')} if 'child_thread_id' in edge_columns else set()
 db.close()
+agent_sources = ${JSON.stringify(codexAgentSources)}
+def agent_source(value):
+    if not value:
+        return False
+    if value.strip().lower() in agent_sources:
+        return True
+    try:
+        parsed = json.loads(value)
+        return (isinstance(parsed, str) and parsed.strip().lower() in agent_sources) or (isinstance(parsed, dict) and any(k in parsed for k in agent_sources))
+    except (ValueError, TypeError):
+        return False
 records = {}
 for folder in ['sessions', 'archived_sessions']:
     for root, dirs, files in os.walk(os.path.join(home, folder), followlinks=False):
@@ -51,12 +65,9 @@ sessions = []
 for row in rows:
     if row['archived'] or not re.fullmatch(r'[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}', row['id'] or ''):
         continue
-    source = row['source'] or ''
-    try:
-        if source.lower() == 'subagent' or 'subagent' in json.loads(source):
-            continue
-    except (ValueError, TypeError):
-        pass
+    agent_path = (row['agent_path'] or '').strip()
+    if row['id'] in spawned or agent_source(row['source']) or agent_source(row['thread_source']) or (row['agent_role'] or '').strip() or (row['agent_nickname'] or '').strip() or (agent_path and agent_path != '/root'):
+        continue
     cwd = row['cwd'] or ''
     unavailable = None
     if row['id'].lower() not in records:
