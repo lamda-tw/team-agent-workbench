@@ -53,7 +53,8 @@ test('Codex steer uses the same active turn, includes newly selected context/cap
     await wb.steer(s.id, 'fake-turn', '继续', [source.id]);
     assert.equal((await t.calls()).filter(m => m.method === 'turn/steer').at(-1).params.input[0].text, '继续');
     await wb.close(); const restored = new Store(wb.store.root); await restored.init();
-    assert.deepEqual(restored.sessions[0].messages, s.messages);
+    // JSON storage omits unset optional fields (for example a legacy reply's phase).
+    assert.deepEqual(restored.sessions[0].messages, JSON.parse(JSON.stringify(s.messages)));
     assert.deepEqual(wb.snapshot().activeTurns, {}, 'runtime turn IDs are never restored from disk');
   } finally { await t.cleanup(); }
 });

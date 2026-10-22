@@ -49,25 +49,37 @@ export function SessionTree({ sessions, selectedId, childId, open, create, promo
   return <>{sessions.filter(value => !subsessionParentId(value) || !sessions.some(parent => parent.id === subsessionParentId(value))).map(value => row(value, new Set()))}</>;
 }
 
-export function SubsessionChat({ session, sessions, input, edit, api, active, open, create, promote, remove, locked, changed }: {
+export function SubsessionChat({ session, sessions, input, edit, api, active, open, sideChat, promote, remove, closed, locked, changed }: {
   session?: AgentSession; sessions: AgentSession[]; input?: SessionInput; edit: (id: string, patch: Partial<SessionInput>) => void;
-  api: WorkbenchAPI; active: boolean; open: (session: AgentSession) => void; create: (session: AgentSession, text?: string) => void;
-  promote: (session: AgentSession) => void; remove: (session: AgentSession) => void; locked?: boolean; changed: () => Promise<void>;
+  api: WorkbenchAPI; active: boolean; open: (session: AgentSession) => void; sideChat?: (session: AgentSession, text?: string) => void;
+  promote: (session: AgentSession) => void; remove: (session: AgentSession) => void; closed: (id: string) => void; locked?: boolean; changed: () => Promise<void>;
 }) {
   const [error, setError] = useState(''), [sending, setSending] = useState(false), [history, setHistory] = useState<Message[]>();
-  const lock = useRef(false), messages = useRef<HTMLDivElement>(null);
+  const lock = useRef(false), availabilityLock = useRef(false), messages = useRef<HTMLDivElement>(null);
+  const [changingAvailability, setChangingAvailability] = useState(false);
   const latestInput = useRef(input); latestInput.current = input;
   useEffect(() => { setError(''); setHistory(undefined); }, [session?.id]);
   useSessionCompletionRead(active ? session : undefined, (id, completionId) => api.call('session.completion.read', { id, completionId }), reason => setError(reason.message));
   useEffect(() => { if (messages.current) messages.current.scrollTop = messages.current.scrollHeight; }, [session?.id, session?.messages.at(-1)?.text]);
-  if (!session) return <div className="subsession-empty">从本地会话的二级菜单创建或打开子会话，也可以选中文字后在子会话中提问。</div>;
+  if (!session) return <div className="subsession-empty">在左侧会话菜单中创建或打开子会话。</div>;
   const current = input || { text: '', sourceIds: [], answers: {} };
   const running = ['starting', 'running', 'approval'].includes(session.status);
   const parent = sessions.find(value => value.id === subsessionParentId(session));
-  const children = sessions.filter(value => subsessionParentId(value) === session.id);
+  const children = sessions.filter(value => subsessionParentId(value) === session.id && !value.closedAt);
   const action = async (job: () => Promise<unknown>) => { try { setError(''); await job(); await changed(); } catch (reason: any) { setError(reason.message); } };
+  const changeAvailability = async () => {
+    if (availabilityLock.current) return;
+    availabilityLock.current = true; setChangingAvailability(true); setError('');
+    const wasClosed = !!session.closedAt;
+    try {
+      await api.call(wasClosed ? 'session.reopen' : 'session.close', { id: session.id });
+      await changed();
+      if (!wasClosed) closed(session.id);
+    } catch (reason: any) { setError(reason.message); }
+    finally { availabilityLock.current = false; setChangingAvailability(false); }
+  };
   const send = async () => {
-    if (lock.current || locked || running || !current.text.trim()) return;
+    if (lock.current || availabilityLock.current || session.closedAt || locked || running || !current.text.trim()) return;
     lock.current = true; setSending(true);
     try { setError(''); await submitComposerInput(api, session.id, current, undefined, () => latestInput.current || current, id => edit(id, { text: '', sourceIds: [], capabilities: [] })); await changed(); }
     catch (reason: any) { setError(reason.message); }
@@ -76,11 +88,11 @@ export function SubsessionChat({ session, sessions, input, edit, api, active, op
   const render = (message: Message) => <article className={'message ' + message.role} key={message.id}><div className="message-author"><b>{message.role === 'user' ? '你' : message.role === 'assistant' ? 'Codex' : '运行信息'}</b></div><ReactMarkdown remarkPlugins={[remarkGfm]}>{sessionMessageText(session, message)}</ReactMarkdown></article>;
   return <section className="subsession-chat" aria-label={'子会话：' + session.title}>
     <header>
-      <div className="subsession-heading"><SessionName key={session.id} title={session.title} variant="subsession" save={async title => { await api.call('session.rename', { id: session.id, title }); await changed(); }}/><SessionStatusIndicator session={session}/>
+      <div className="subsession-heading"><SessionName key={session.id} title={session.title} variant="subsession" save={async title => { await api.call('session.rename', { id: session.id, title }); await changed(); }}/>{session.closedAt ? <span className="muted small" role="status">已关闭</span> : <SessionStatusIndicator session={session}/>}
         <SessionMoreMenu label="更多子会话操作">
           {parent && <div className="session-menu-group"><button type="button" onClick={() => promote(session)}>升级为独立会话</button></div>}
           <div className="session-menu-group">
-            <button type="button" onClick={() => void action(() => api.call(session.closedAt ? 'session.reopen' : 'session.close', { id: session.id }))}>{session.closedAt ? '重新打开' : '关闭会话'}</button>
+            <button type="button" disabled={changingAvailability} onClick={() => void changeAvailability()}>{changingAvailability ? (session.closedAt ? '正在打开…' : '正在关闭…') : session.closedAt ? '重新打开' : '关闭会话'}</button>
             {session.closedAt && <button type="button" className="danger" onClick={() => remove(session)}>删除会话</button>}
           </div>
         </SessionMoreMenu>
@@ -90,7 +102,7 @@ export function SubsessionChat({ session, sessions, input, edit, api, active, op
     </header>
     {children.length > 0 && <details className="subsession-child-list"><summary>下级子会话 · {children.length}</summary><nav className="subsession-child-links" aria-label="下级子会话">{children.map(child => <button key={child.id} title={child.title} onClick={() => open(child)}><span>{child.title}</span><SessionStatusIndicator session={child}/></button>)}</nav></details>}
     <div className="subsession-messages" ref={messages}>
-      <SelectionActions sessionId={session.id} add={!session.closedAt ? text => edit(session.id, { text: current.text + (current.text ? '\n\n' : '') + quoteSessionText(text) }) : undefined} fork={!session.closedAt && session.provider === 'codex' ? text => create(session, text) : undefined}>
+      <SelectionActions sessionId={session.id} add={!session.closedAt ? text => edit(session.id, { text: current.text + (current.text ? '\n\n' : '') + quoteSessionText(text) }) : undefined} sideChat={!session.closedAt && sideChat ? text => sideChat(session, text) : undefined}>
         {session.fork && <details className="inherited-conversation" onToggle={event => { if (event.currentTarget.open && !history) void api.call<Message[]>('subsession.history', { id: session.id }).then(setHistory, reason => setError(reason.message)); }}><summary>创建时的上下文 · {new Date(session.fork.capturedAt).toLocaleTimeString('zh-CN')}{session.fork.parentWasRunning ? ' · 包含当时未完成的回复' : ''}</summary>{history ? <SessionTranscript session={{ ...session, messages: history, status: 'idle' }} renderMessage={render}/> : <p>正在读取固定快照…</p>}</details>}
         <SessionTranscript session={session} renderMessage={render}/>
       </SelectionActions>
@@ -98,6 +110,6 @@ export function SubsessionChat({ session, sessions, input, edit, api, active, op
       {session.approvals.map(request => <RequestCard key={request.id} request={request} onAnswer={(option, answers) => void action(() => api.call('session.answer', { id: session.id, requestId: request.id, option, answers }))}/>)}
       {(error || session.error) && <p role="alert" className="inline-error">{error || session.error}</p>}
     </div>
-    {!session.closedAt && <div className="subsession-composer"><textarea aria-label="子会话输入" value={current.text} placeholder="在这个分支继续提问…" onChange={event => edit(session.id, { text: event.target.value })} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); if (!event.repeat) void send(); } }}/><div className="row"><span className="muted small">{locked ? '关联提问正在自动对话' : 'Enter 发送 · Shift+Enter 换行'}</span><div className="spacer"/>{running && <button className="secondary" onClick={() => void action(() => api.call('session.stop', { id: session.id }))}>停止</button>}<button className="primary" disabled={locked || running || sending || !current.text.trim()} onClick={() => void send()}>{sending ? '正在发送…' : '发送'}</button></div></div>}
+    {!session.closedAt && <div className="subsession-composer"><textarea aria-label="子会话输入" value={current.text} placeholder="在这个分支继续提问…" onChange={event => edit(session.id, { text: event.target.value })} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); if (!event.repeat) void send(); } }}/><div className="row"><span className="muted small">{locked ? '关联提问正在自动对话' : 'Enter 发送 · Shift+Enter 换行'}</span><div className="spacer"/>{running && <button className="secondary" onClick={() => void action(() => api.call('session.stop', { id: session.id }))}>停止</button>}<button className="primary" disabled={locked || running || sending || changingAvailability || !current.text.trim()} onClick={() => void send()}>{sending ? '正在发送…' : '发送'}</button></div></div>}
   </section>;
 }

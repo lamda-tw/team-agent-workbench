@@ -17,7 +17,7 @@ test('deep child selection expands its full ancestor path and keeps running pare
   const html = renderToStaticMarkup(React.createElement(SessionTree, { sessions: [grandchild, child, root], selectedId: root.id, childId: grandchild.id, open() {}, create() {}, promote() {}, rename: async () => {} }));
   assert(html.indexOf('data-session-id="root"') < html.indexOf('data-session-id="child"'));
   assert(html.indexOf('data-session-id="child"') < html.indexOf('data-session-id="grandchild"'));
-  assert.match(html, /创建子会话/); assert.match(html, /升级为独立会话/);
+  assert.match(html, /创建子会话/); assert.doesNotMatch(html, /侧边提问/); assert.match(html, /升级为独立会话/);
   assert.doesNotMatch(html, /disabled=/);
 });
 test('next-turn quotation keeps the stop control and does not become a current-turn steering message', () => {
@@ -33,10 +33,26 @@ test('next-turn quotation keeps the stop control and does not become a current-t
 test('child chat keeps management actions folded, presents inherited context folded, and retains its draft', () => {
   const parent = session('root'), child = session('child', parent.id);
   const api = { call: async () => { throw new Error('no IPC during render'); } } as unknown as WorkbenchAPI;
-  const html = renderToStaticMarkup(React.createElement(SubsessionChat, { session: child, sessions: [parent, child], input: { text: '> 引用\n\n继续问', sourceIds: [], answers: {} }, api, active: true, edit() {}, open() {}, create() {}, promote() {}, remove() {}, changed: async () => {} }));
+  const html = renderToStaticMarkup(React.createElement(SubsessionChat, { session: child, sessions: [parent, child], input: { text: '> 引用\n\n继续问', sourceIds: [], answers: {} }, api, active: true, edit() {}, open() {}, promote() {}, remove() {}, closed() {}, changed: async () => {} }));
   assert.match(html, /更多子会话操作/); assert.doesNotMatch(html, /<button[^>]*>创建子会话/); assert.match(html, /包含当时未完成的回复/);
   assert.match(html, /aria-label="修改会话名称：child"/);
   assert.match(html, /共用工作目录/); assert.match(html, /继续问/);
   assert.match(html, /<details class="inherited-conversation">/);
   assert.match(html, /<button class="primary" disabled="">发送/);
+});
+
+test('closed child chats remain readable in history but do not appear as active descendant links', () => {
+  const parent = session('root'), child = session('child', parent.id);
+  const archived = { ...session('archived-grandchild', child.id), closedAt: '2026-10-22T00:00:00Z' };
+  const active = session('active-grandchild', child.id);
+  const api = { call: async () => { throw new Error('no IPC during render'); } } as unknown as WorkbenchAPI;
+  const props = { session: child, sessions: [parent, child, archived, active], api, active: true, edit() {}, open() {}, promote() {}, remove() {}, closed() {}, changed: async () => {} };
+  const html = renderToStaticMarkup(React.createElement(SubsessionChat, props));
+  assert.match(html, /下级子会话 · 1/);
+  assert.match(html, /active-grandchild/);
+  assert.doesNotMatch(html, /archived-grandchild/);
+  const history = renderToStaticMarkup(React.createElement(SubsessionChat, { ...props, session: archived }));
+  assert.match(history, /role="status">已关闭/);
+  assert.match(history, /重新打开/);
+  assert.doesNotMatch(history, /aria-label="子会话输入"/);
 });

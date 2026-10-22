@@ -34,3 +34,13 @@
 .rsi-notice,.rsi-background-status{font-size:12px;color:var(--muted);padding:10px 16px;flex:none;overflow-wrap:anywhere}.rsi-notice{border-top:1px solid var(--border)}.rsi-background-status{border-bottom:1px solid var(--border)}.rsi-empty{padding:20px;font-size:13px}
 .project-ai-label-button{display:inline-flex;align-items:center;gap:5px;border:0;background:transparent;padding:0;color:inherit;font:inherit}.project-ai-pending{font-size:10px;min-width:16px;text-align:center;border-radius:5px;background:#e6f1e9;color:#287554;padding:1px 4px}
 @container project-interaction (max-width:480px){.rsi-layout{grid-template-columns:1fr}.rsi-list{border-right:0;border-bottom:1px solid var(--border);display:flex;flex-wrap:wrap;gap:4px}.rsi-list-item{flex:1 1 130px;margin:0}.rsi-detail{padding:16px}}
+
+.side-chat-panel,.side-chat-conversation{display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden}
+.side-chat-tabs{display:flex;gap:4px;padding:8px 12px;overflow-x:auto;flex-shrink:0;border-bottom:1px solid var(--border)}
+.side-chat-tabs button{display:flex;align-items:center;gap:5px;white-space:nowrap;font-size:12px;border:0;border-radius:5px;background:transparent;padding:6px 8px;color:var(--muted)}
+.side-chat-tabs button[aria-pressed=true]{background:#edf5ef;color:var(--primary,#287554)}
+.side-chat-parent{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:8px 0 0}
+.side-chat-notice{font-size:12px;padding:10px 16px;margin:0;border-bottom:1px solid var(--border)}
+.side-chat-conversation .subsession-heading{justify-content:space-between}
+.project-interaction-tabs{overflow-x:auto;flex-shrink:0}.project-interaction-tabs>button{white-space:nowrap;flex-shrink:0}
+.selection-actions{flex-wrap:wrap;max-width:calc(100vw - 16px)}

@@ -1,4 +1,4 @@
-import { reusableProjectConnections, connectionProject, separateProjectWindow, projectCreationInputSchema, type ProjectCreationIntent } from '../shared/project-connection';
+import { reusableProjectConnections, connectionProject, connectedProjectSelection, separateProjectWindow, projectCreationInputSchema, type ProjectCreationIntent } from '../shared/project-connection';
 import { assertPersonalRelay } from '../core/personal-relay';
 import { PERSONAL_PROJECT_ID, isPersonalBinding } from '../shared/personal-workspace';
 import { newAccountPasswordSchema } from '../shared/accounts';
@@ -82,7 +82,7 @@ function actionContext(action: string, raw: any, owner: BrowserWindow, preferPer
   if (action.startsWith('local.')) return personalContext;
   if (raw?.projectId && personalContext.workbench.projectSync.projects().some(project => project.id === raw.projectId)) return personalContext;
   if (Array.isArray(raw?.ids)) { const localIds = new Set([...personalContext.workbench.store.sessions, ...personalContext.workbench.store.drafts].map(item => item.id)); if (raw.ids.some((id: string) => localIds.has(id)) && !raw.ids.every((id: string) => localIds.has(id))) throw new Error('请分别处理未分项目和团队项目中的记录'); if (raw.ids.every((id: string) => localIds.has(id))) return personalContext; }
-  const sessionId = raw?.id || raw?.parentId || raw?.sessionId;
+  const sessionId = action.startsWith('sidechat.') ? raw?.parentId : raw?.id || raw?.parentId || raw?.sessionId;
   if (sessionId && !preferPersonal && team.workbench.store.conclusions.some(item => item.id === sessionId)) return team;
   if (sessionId && (personalContext.workbench.store.sessions.some(item => item.id === sessionId) || personalContext.workbench.store.drafts.some(item => item.id === sessionId) || personalContext.workbench.store.conclusions.some(item => item.id === sessionId))) return personalContext;
   if (raw?.projectId && raw.projectId !== PERSONAL_PROJECT_ID) return team;
@@ -99,9 +99,9 @@ async function alignPersonalRelay(team: DataContext, action: string, raw: any) {
   }
   const central = local.store.settings.egress?.viaSharedServer;
   const draft = local.store.drafts.find(item => item.id === raw?.id);
-  const session = action === 'rsi.run' ? local.store.sessions.filter(item => item.purpose === 'work' && !item.closedAt).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0] : local.store.sessions.find(item => item.id === (draft?.sessionId || raw?.id || raw?.parentId || raw?.sessionId));
+  const session = action === 'rsi.run' ? local.store.sessions.filter(item => item.purpose === 'work' && !item.closedAt).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0] : local.store.sessions.find(item => item.id === (draft?.sessionId || (action.startsWith('sidechat.') ? raw?.parentId : raw?.id || raw?.parentId || raw?.sessionId)));
   const route = raw?.networkRoute || session?.networkRoute || (local.store.settings.egress?.enabled ? 'management' : 'direct');
-  const executing = /^(session\.(create|send|retry|mode|model|network|permission|native|codexDesktop|desktopSync)|draft\.(prepare|retry|reorganize)|conclusion\.merge\.prepare|subsession\.create|provider\.(auth|catalog|login$)|rsi\.run|egress\.test)/.test(action);
+  const executing = /^(session\.(create|send|retry|mode|model|network|permission|native|codexDesktop|desktopSync)|draft\.(prepare|retry|reorganize)|conclusion\.merge\.prepare|subsession\.create|sidechat\.(create|send)|provider\.(auth|catalog|login$)|rsi\.run|egress\.test)/.test(action);
   if (central && executing && route === 'management') {
     const identity = team.workbench.remote.connected && team.workbench.remote.profile ? accountIdentity(team.workbench.remote.profile) : undefined;
     assertPersonalRelay(route, central, identity, session);
@@ -141,7 +141,7 @@ async function dispatch(action: string, raw: unknown, owner: BrowserWindow, pref
       const local = personalContext?.workbench.snapshot();
       return { ...snapshot, projectSync: { ...snapshot.projectSync, ...local?.projectSync }, workspaceReady: true, selectedProjectId: active!.selectedProjectId, projectCreation: active!.projectCreation,
         reusableConnections: reusableProjectConnections(liveConnectionContexts().map(value => value.workbench.remote.profile!)),
-        sessions: [...(local?.sessions || []), ...snapshot.sessions], drafts: [...(local?.drafts || []), ...snapshot.drafts],
+        sideChats: [...(local?.sideChats || []), ...(snapshot.sideChats || [])], sessions: [...(local?.sessions || []), ...snapshot.sessions], drafts: [...(local?.drafts || []), ...snapshot.drafts],
         inputs: { ...snapshot.inputs, ...local?.inputs }, activeTurns: { ...snapshot.activeTurns, ...local?.activeTurns },
         activity: { ...snapshot.activity, jobs: [...(snapshot.activity?.jobs || []), ...(local?.activity?.jobs || [])] },
         personal: local && { settings: local.settings, providers: local.providers, auth: local.auth, egress: personalContext!.egress.status() },
@@ -269,6 +269,12 @@ async function dispatch(action: string, raw: unknown, owner: BrowserWindow, pref
     case 'session.cursorNative.queue': { const p=z.object({id,action:z.enum(['cancel','resume','reconcile','confirm','withdraw']),requestId:z.string().uuid().optional(),nativeMessageId:z.string().uuid().optional()}).parse(raw);return workbench.cursorQueueAction(p.id,p.action,p.requestId,p.nativeMessageId); }
     case 'session.codexDesktop.sync': return workbench.syncCodexDesktop(sessionInput.parse(raw).id);
     case 'session.codexDesktop.cancel': return workbench.cancelCodexSync(sessionInput.parse(raw).id);
+    case 'sidechat.create': { const p = z.object({ parentId: id, selectedText: z.string().max(128 * 1024).default('') }).parse(raw); return workbench.createSideChat(p.parentId, p.selectedText); }
+    case 'sidechat.draft': { const p = z.object({ id, parentId: id, text: z.string().max(128 * 1024) }).parse(raw); return workbench.sideChatDraft(p.id, p.text); }
+    case 'sidechat.send': { const p = z.object({ id, parentId: id, text: z.string().max(128 * 1024) }).parse(raw); return workbench.sendSideChat(p.id, p.text); }
+    case 'sidechat.stop': return workbench.stopSideChat(z.object({ id, parentId: id }).parse(raw).id);
+    case 'sidechat.close': return workbench.closeSideChat(z.object({ id, parentId: id }).parse(raw).id);
+    case 'sidechat.answer': { const p = z.object({ id, parentId: id, requestId: z.string(), option: z.string(), answers: z.record(z.string(), z.union([z.string(), z.array(z.string())])).optional() }).parse(raw); return workbench.answerSideChat(p.id, p.requestId, p.option, p.answers); }
     case 'subsession.create': { const p = z.object({ parentId: id, focus: z.string().trim().max(120).default('子会话'), selectedText: z.string().max(128 * 1024).default('') }).parse(raw); return workbench.forkSubsession(p.parentId, p.focus, p.selectedText); }
     case 'subsession.promote': return workbench.promoteSubsession(sessionInput.parse(raw).id);
     case 'subsession.history': return workbench.subsessionHistory(sessionInput.parse(raw).id);
@@ -542,14 +548,15 @@ async function openProjectConnection(owner: BrowserWindow, key: string, projectI
     const profile = source.workbench.remote.profile;
     if (!profile || ![...contexts.values()].some(context => context.workbench === source.workbench) || !source.workbench.remote.connected || accountIdentity(profile) !== key) throw new Error('连接已改变，请重新选择');
     if (owner.isDestroyed() || closingWindows.has(owner) || closing) throw new Error('窗口正在关闭');
-    const selectedProjectId = connectionProject(profile, projectId);
+    const selection = connectedProjectSelection(profile, projectId, source.workbench.remote.workspaces);
+    const selectedProjectId = selection.projectId;
     if (contexts.get(owner)?.workbench === source.workbench) {
       if (createProject) { contexts.get(owner)!.projectCreation = { id: randomUUID(), ...createProject }; source.broadcast(); }
-      return { newWindow: false, projectId: selectedProjectId };
+      return { newWindow: false, projectId: selectedProjectId, notice: selection.notice };
     }
     const window = await createWindow(undefined, true, { profile, projectId: selectedProjectId, projectCreation: createProject ? { id: randomUUID(), ...createProject } : undefined });
     if (process.env.WORKBENCH_TEST !== '1') { window.show(); window.focus(); }
-    return { newWindow: true, projectId: selectedProjectId };
+    return { newWindow: true, projectId: selectedProjectId, notice: selection.notice };
   });
 }
 async function loginWindow(window: BrowserWindow, profile: import('../shared/types').ConnectionProfile, password: string, localPath: string, trust: (fingerprint: string) => Promise<boolean>, egressInput?: z.infer<typeof userEgressInputSchema>, newPassword?: string, projectId?: string, expectedConnection?: string, createProject?: { name: string }) {
@@ -573,7 +580,7 @@ async function loginWindow(window: BrowserWindow, profile: import('../shared/typ
     }
     await verified.loadManifest();
     if (expectedConnection && accountIdentity(result) !== expectedConnection) throw new Error('此项目的中央节点或账号已改变，请重新打开项目设置');
-    connectionProject(result, projectId);
+    const selection = connectedProjectSelection(result, projectId, verified.workspaces);
     return await routeAccount(async () => {
       if (window.isDestroyed() || destination.isDestroyed() || closingWindows.has(window) || closingWindows.has(destination) || closing) throw new Error('窗口正在关闭，请重新连接中央节点');
       const seedRoot = previous.workbench.store.root;
@@ -589,15 +596,15 @@ async function loginWindow(window: BrowserWindow, profile: import('../shared/typ
       target.egress.setUsername(result.username);
       if (target.workbench.store.settings.egress?.enabled) void target.egress.probe().catch(() => {});
       if (window.isDestroyed() || destination.isDestroyed() || closingWindows.has(window) || closingWindows.has(destination) || closing) throw new Error('窗口正在关闭，请重新连接中央节点');
-      await atomicJson(windowStateFile(previous.slot), { profile: target.workbench.remote.profile || result, sidebarProjectHeight: previous.sidebarProjectHeight, sidebarPanes: previous.sidebarPanes, selectedProjectId: projectId || result.projects[0]?.id });
+      await atomicJson(windowStateFile(previous.slot), { profile: target.workbench.remote.profile || result, sidebarProjectHeight: previous.sidebarProjectHeight, sidebarPanes: previous.sidebarPanes, selectedProjectId: selection.projectId });
       try { await previous.release(); }
       catch (error) { await atomicJson(windowStateFile(previous.slot), { profile: previous.workbench.store.settings.workspaceSnapshot?.profile, sidebarProjectHeight: previous.sidebarProjectHeight, sidebarPanes: previous.sidebarPanes, selectedProjectId: previous.selectedProjectId }); throw error; }
-      contexts.set(destination, { ...target, projectCreation: createProject ? { id: randomUUID(), ...createProject } : undefined, slot: previous.slot, selectedProjectId: projectId || result.projects[0]?.id, sidebarProjectHeight: previous.sidebarProjectHeight, sidebarPanes: previous.sidebarPanes, release: acquired.release }); acquired = undefined;
+      contexts.set(destination, { ...target, projectCreation: createProject ? { id: randomUUID(), ...createProject } : undefined, slot: previous.slot, selectedProjectId: selection.projectId, sidebarProjectHeight: previous.sidebarProjectHeight, sidebarPanes: previous.sidebarPanes, release: acquired.release }); acquired = undefined;
       const signedIn = target.workbench.remote.profile || result;
       if (signedIn.mode !== 'local' && signedIn.host) await rememberServerEndpoint(signedIn.host, signedIn.port);
       target.broadcast();
       if (process.env.WORKBENCH_TEST !== '1') { destination.show(); destination.focus(); }
-      return signedIn;
+      return { ...signedIn, selectedProjectId: selection.projectId, connectionNotice: selection.notice };
     });
   } catch (error) { if (destination !== window) await closeWindow(destination); throw error; } finally {
     verified.disconnect();

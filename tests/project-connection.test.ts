@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { accountIdentity } from '../src/shared/account-data';
-import { connectionProject, reusableProjectConnections, separateProjectWindow, projectCreationInputSchema, projectConnectionError } from '../src/shared/project-connection';
+import { connectionProject, connectedProjectSelection, reusableProjectConnections, separateProjectWindow, projectCreationInputSchema, projectConnectionError } from '../src/shared/project-connection';
+import { ProjectRefreshButton } from '../src/renderer/project-refresh';
 import { ProjectBriefEditor } from '../src/renderer/project-brief-editor';
 import { ProjectCentralConnection } from '../src/renderer/project-connection';
 import { ProjectSettingsDialog } from '../src/renderer/project-directory';
@@ -28,6 +29,37 @@ test('project reuse rejects missing or revoked projects instead of falling back 
   assert.throws(() => connectionProject(profile, 'unknown'), /访问权限/);
   assert.throws(() => connectionProject({ ...profile, projects: [] }, 'same-id'), /访问权限/);
   assert.equal(connectionProject({ ...profile, projects: [] }), undefined);
+});
+
+test('successful login survives a stale project selection without selecting another project or granting access', () => {
+  assert.deepEqual(connectedProjectSelection(profile, project.id), { projectId: project.id });
+  assert.deepEqual(connectedProjectSelection(profile), { projectId: project.id });
+  assert.deepEqual(connectedProjectSelection({ ...profile, projects: [] }), { projectId: undefined });
+  for (const projects of [profile.projects, []]) {
+    const selection = connectedProjectSelection({ ...profile, projects }, 'removed-id');
+    assert.equal(selection.projectId, undefined);
+    assert.match(selection.notice!, /已登录.*未出现在当前账号/);
+    assert.doesNotMatch(selection.notice!, /此账号没有/);
+    assert.throws(() => connectionProject({ ...profile, projects }, 'removed-id'));
+  }
+});
+
+test('project discovery failure is reported separately from account permission denial', () => {
+  const selection = connectedProjectSelection({ ...profile, projects: [] }, project.id, [{ groupName: 'research', groupLabel: '研究组', path: '/projects/research', canonicalPath: '/projects/research', canCreateProject: false, accessError: '读取目录超时' }]);
+  assert.equal(selection.projectId, undefined);
+  assert.match(selection.notice!, /研究组（读取目录超时）/);
+  assert.doesNotMatch(selection.notice!, /没有.*权限/);
+});
+
+test('project refresh remains usable while disconnected and only disables for an in-flight refresh or account change', () => {
+  for (const connected of [false, true]) {
+    const html = renderToStaticMarkup(createElement(ProjectRefreshButton, { connected, busy: false, refresh() {} }));
+    assert.doesNotMatch(html, /disabled/);
+    assert.match(html, /aria-label="刷新工作组、项目和文件"/);
+    if (!connected) assert.match(html, /连接中央节点并刷新/);
+    const busy = renderToStaticMarkup(createElement(ProjectRefreshButton, { connected, busy: true, refresh() {} }));
+    assert.match(busy, /disabled/);
+  }
 });
 
 test('project settings show the actual server and account with a distinct reconnect action', () => {

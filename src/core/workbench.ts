@@ -98,6 +98,7 @@ export class Workbench {
   private activityActions = new Set<string>();
   store: Store; remote: SharedFiles; queue: TransferQueue; providers: ProviderInfo[] = [];
   private assignmentUploads: AssignmentUploads;
+  private sideChats = new Map<string, { view: import('../shared/types').SideChat; runtime: AgentRuntime; busy?: boolean }>();
   private runtimes = new Map<string, AgentRuntime | ClaudeRuntime>(); private sending = new Set<string>();
   private steering = new Set<string>();
   private changingSettings = new Set<string>();
@@ -827,7 +828,7 @@ export class Workbench {
     const sessions = this.store.sessions.map(session => sessionWithAvailableReferences(session, this.store.conclusions));
     const allowed = new Map(sessions.map(session => [session.id, new Set(session.sources.map(source => source.id))]));
     const inputs = Object.fromEntries(Object.entries(this.store.inputs).map(([id, input]) => [id, { ...input, sourceIds: input.sourceIds.filter(sourceId => allowed.get(id)?.has(sourceId)) }]));
-    return scopeAccountSnapshot({ questions: this.questions.view(), activity: this.activityView(), publishingConclusions: [...this.publishingConclusions], accountChanging: this.configuring, activeTurns: Object.fromEntries([...this.runtimes].flatMap(([id, runtime]) => runtime.activeTurnId ? [[id, runtime.activeTurnId]] : [])), projectSync: this.projectSync.states(), accountSync: this.accountSync.state, settings: { ...this.store.settings, workspaceSnapshot: this.store.settings.workspaceSnapshot && { ...this.store.settings.workspaceSnapshot, profile: this.localProfile()! } }, sessions, inputs, drafts: this.store.drafts, transfers: this.store.transfers, providers: this.providers, auth: this.accounts.states, workspaceReady: this.workspaceReady, connection: !this.configuring && this.remote.connected && this.remote.profile ? { profile: this.localProfile()!, connected: true, workspace: this.remote.workspace, workspaces: this.remote.workspaces } : undefined });
+    return scopeAccountSnapshot({ sideChats: [...this.sideChats.values()].map(entry => entry.view), questions: this.questions.view(), activity: this.activityView(), publishingConclusions: [...this.publishingConclusions], accountChanging: this.configuring, activeTurns: Object.fromEntries([...this.runtimes].flatMap(([id, runtime]) => runtime.activeTurnId ? [[id, runtime.activeTurnId]] : [])), projectSync: this.projectSync.states(), accountSync: this.accountSync.state, settings: { ...this.store.settings, workspaceSnapshot: this.store.settings.workspaceSnapshot && { ...this.store.settings.workspaceSnapshot, profile: this.localProfile()! } }, sessions, inputs, drafts: this.store.drafts, transfers: this.store.transfers, providers: this.providers, auth: this.accounts.states, workspaceReady: this.workspaceReady, connection: !this.configuring && this.remote.connected && this.remote.profile ? { profile: this.localProfile()!, connected: true, workspace: this.remote.workspace, workspaces: this.remote.workspaces } : undefined });
   }
   private localProfile() { const profile = !this.configuring && this.remote.connected ? this.remote.profile : this.store.settings.workspaceSnapshot?.profile; return profile && { ...profile, projects: this.projectSync?.projects() || profile.projects }; }
   betaFeatureEnabled(feature: BetaFeature) {
@@ -1095,7 +1096,7 @@ export class Workbench {
     }
     const switching = previous && (previous.username !== profile.username || previous.host.toLowerCase() !== profile.host.toLowerCase() || previous.port !== profile.port || previous.localRoot !== profile.localRoot || !!profile.fingerprint && previous.fingerprint !== profile.fingerprint);
     if (switching) this.assertCanLeaveAccount();
-    this.configuring = true; this.accountRevision++; this.broadcast();
+    this.configuring = true; this.accountRevision++; this.broadcast(); await this.clearSideChats();
     try {
       await this.edits; await this.projectSync.settle();
       if (localPath.trim() && (!path.isAbsolute(localPath) || !(await fs.stat(localPath)).isDirectory())) throw new Error('请选择已存在的代码目录，或留空');
@@ -2211,6 +2212,9 @@ export class Workbench {
       this.store.activity.jobs = jobs.filter(job => !ids.has(job.sessionId));
       try { await this.store.save(); }
       catch (error) { this.store.sessions = sessions; this.store.inputs = inputs; this.store.activity.jobs = jobs; throw error; }
+      for (const [key, entry] of this.sideChats) if (ids.has(entry.view.parentId)) {
+        this.sideChats.delete(key); await entry.runtime.close();
+      }
       for (const session of family) {
         if (session.binding) await this.rsi.forgetSession(session.binding.project.id, session.id);
         await this.journal.remove(session);
@@ -3000,6 +3004,72 @@ export class Workbench {
     this.remote.channel(binding);
     for (const file of files) { const frozen = await freezeFile(file, path.join(this.store.root, 'uploads', randomUUID())); await this.queue.enqueueMany([{ name: frozen.name, local: frozen.localPath, binding, folder, kind: 'upload', metadata: { kind: 'file', title: frozen.name.slice(0, 200), description: '', submission: submissionRecord(binding, [{ kind: 'file', title: frozen.name }]) } }]); }
   }
+  async createSideChat(parentId: string, selectedText = '') {
+    const parent = this.session(parentId), epoch = this.accountRevision;
+    this.assertCanWork(parent.binding);
+    if (parent.provider !== 'codex' || parent.closedAt || parent.purpose !== 'work') throw new Error('请选择打开的 Codex 工作会话');
+    if (selectedText.length > 128 * 1024) throw new Error('选中文字过长');
+    const view: import('../shared/types').SideChat = {
+      id: randomUUID(), parentId, projectId: parent.binding!.project.id, parentTitle: parent.title,
+      capturedAt: new Date().toISOString(), draft: selectedText,
+      session: { id: randomUUID(), title: '侧边提问', provider: 'codex', cwd: parent.codexRemote?.cwd || parent.cwd,
+        model: parent.model, reasoningEffort: parent.reasoningEffort, purpose: 'work', permissionMode: 'inherit',
+        createdAt: new Date().toISOString(), status: 'idle', messages: [], approvals: [], sources: [], autoUpload: false, handoffPath: '' },
+    };
+    const parentRuntime = await this.runtime(parent);
+    if (!(parentRuntime instanceof AgentRuntime)) throw new Error('Codex 运行环境不可用');
+    const runtime = await parentRuntime.createSideChat(view.session, { changed: () => this.broadcast(), event: () => {}, done: () => this.broadcast() }, () => {
+      view.capturedAt = new Date().toISOString();
+      const unfinished = ['starting', 'running', 'approval'].includes(parent.status);
+      const lastUser = parent.messages.findLastIndex(message => message.role === 'user' && !message.steering);
+      const partial = unfinished ? parent.messages.slice(Math.max(0, lastUser)).filter(message => message.role === 'assistant').map(message => message.text).join('\n').slice(-64000) : '';
+      return `父会话：${parent.title}\n创建时间：${view.capturedAt}\n${partial ? '父会话本轮尚未结束，创建时已显示的回复末尾如下（可能不完整，仅供参考）：\n' + partial : ''}`;
+    });
+    try {
+      if (this.closing || epoch !== this.accountRevision || parent.closedAt || !this.store.sessions.includes(parent)) throw new Error('原会话或账号已改变，未保留侧聊');
+      this.session(parentId);
+      this.sideChats.set(view.id, { view, runtime });
+      runtime.rpc.once('closed', () => { if (this.sideChats.has(view.id)) { view.expired = true; this.broadcast(); } });
+      this.broadcast(); return view;
+    } catch (error) { await runtime.close(); throw error; }
+  }
+  private sideChat(id: string) {
+    const entry = this.sideChats.get(id);
+    if (!entry) throw new Error('侧边提问已关闭，请重新创建');
+    this.session(entry.view.parentId); // Account ownership is checked on every operation.
+    return entry;
+  }
+  sideChatDraft(id: string, text: string) {
+    const entry = this.sideChat(id);
+    if (text.length > 128 * 1024) throw new Error('输入过长');
+    entry.view.draft = text; return true;
+  }
+  async sendSideChat(id: string, text: string) {
+    const entry = this.sideChat(id);
+    this.assertCanWork(this.session(entry.view.parentId).binding);
+    if (entry.view.expired) throw new Error('侧边提问已失效，请重新创建');
+    if (entry.busy) throw new Error('消息正在提交');
+    if (!text.trim() || text.length > 128 * 1024) throw new Error('请输入有效的问题');
+    entry.busy = true;
+    try {
+      const accepted = await entry.runtime.prompt(text);
+      if (!accepted) throw new Error(entry.view.session.error || '消息未确认送达，请核对侧聊记录');
+      if (entry.view.draft === text) entry.view.draft = '';
+      this.broadcast(); return true;
+    } finally { entry.busy = false; }
+  }
+  async stopSideChat(id: string) { const entry = this.sideChat(id); await entry.runtime.cancel(); this.broadcast(); }
+  async answerSideChat(id: string, requestId: string, option: string, answers?: Record<string, string | string[]>) {
+    return this.sideChat(id).runtime.answer(requestId, option, answers);
+  }
+  async closeSideChat(id: string) {
+    const entry = this.sideChat(id); this.sideChats.delete(id);
+    await entry.runtime.close(); this.broadcast();
+  }
+  private async clearSideChats() {
+    const entries = [...this.sideChats.values()]; this.sideChats.clear();
+    await Promise.all(entries.map(entry => entry.runtime.close()));
+  }
   async forkSubsession(parentId: string, focus: string, selectedText = '') {
     // Freeze renderer-visible output before any asynchronous setup. Never wait for
     // the parent turn to finish or read a later handoff as the fork's context.
@@ -3271,5 +3341,5 @@ export class Workbench {
   async flushEdits() { await this.edits.catch(() => {}); for (const [key, fn] of this.unsavedEdits) { await fn(); if (this.unsavedEdits.get(key) === fn) this.unsavedEdits.delete(key); } await this.store.save(); }
   listDirections() { return this.remote.memberDirections(); }
   saveDirections(directions: unknown) { return this.remote.memberDirections(directions); }
-  async close() { this.closing = true; clearInterval(this.codexSyncTimer); await this.codexSyncJob; await this.rsi.close(); await this.questions.close(); this.stopNativeTranscriptSync(); clearInterval(this.contentWatch); await this.activity.close(); await this.contentSyncJob; for (const timer of this.trajectoryTimers.values()) clearTimeout(timer); this.trajectoryTimers.clear(); await Promise.allSettled(this.archiving.values()); clearTimeout(this.timer); this.timer = undefined; try { await this.flushEdits(); } catch (error) { this.closing = false; this.changed(); throw error; } this.closing = true; for (const timer of this.preparationTimers.values()) clearTimeout(timer); this.preparationTimers.clear(); for (const job of this.catalogJobs.values()) job.controller.abort(); await Promise.allSettled([...this.catalogJobs.values()].map(job => job.promise)); await this.projectSync.close(); await this.accounts.close(); await this.accountSync.close(); const interrupted = this.store.sessions.filter(s => { const runtime = this.runtimes.get(s.id); return !(runtime instanceof AgentRuntime && runtime.sharedDesktop) && s.purpose === 'work' && !s.closedAt && ['starting', 'running', 'approval'].includes(s.status) && !s.stoppedAt; }); await Promise.all([...this.runtimes.values()].map(runtime => runtime.close())); this.remote.disconnect(); for (const s of interrupted) { s.status = 'error'; s.error = '应用关闭时任务尚未完成，已中断；可检查已有结果后继续发送。'; } await Promise.all(this.eventWrites.values()); await this.store.save(); await this.journal.close(); await this.cursorDesktop.close(); }
+  async close() { this.closing = true; await this.clearSideChats(); clearInterval(this.codexSyncTimer); await this.codexSyncJob; await this.rsi.close(); await this.questions.close(); this.stopNativeTranscriptSync(); clearInterval(this.contentWatch); await this.activity.close(); await this.contentSyncJob; for (const timer of this.trajectoryTimers.values()) clearTimeout(timer); this.trajectoryTimers.clear(); await Promise.allSettled(this.archiving.values()); clearTimeout(this.timer); this.timer = undefined; try { await this.flushEdits(); } catch (error) { this.closing = false; this.changed(); throw error; } this.closing = true; for (const timer of this.preparationTimers.values()) clearTimeout(timer); this.preparationTimers.clear(); for (const job of this.catalogJobs.values()) job.controller.abort(); await Promise.allSettled([...this.catalogJobs.values()].map(job => job.promise)); await this.projectSync.close(); await this.accounts.close(); await this.accountSync.close(); const interrupted = this.store.sessions.filter(s => { const runtime = this.runtimes.get(s.id); return !(runtime instanceof AgentRuntime && runtime.sharedDesktop) && s.purpose === 'work' && !s.closedAt && ['starting', 'running', 'approval'].includes(s.status) && !s.stoppedAt; }); await Promise.all([...this.runtimes.values()].map(runtime => runtime.close())); this.remote.disconnect(); for (const s of interrupted) { s.status = 'error'; s.error = '应用关闭时任务尚未完成，已中断；可检查已有结果后继续发送。'; } await Promise.all(this.eventWrites.values()); await this.store.save(); await this.journal.close(); await this.cursorDesktop.close(); }
 }

@@ -75,11 +75,11 @@ export function RsiRecommendations({ inbox, error, call, reload }: { inbox?: Rsi
   </section>;
 }
 
-export type InteractionTab = 'recommendations' | 'questions' | 'subsessions';
-export function ProjectInteractionPanel({ projectName, active, select, close, inbox, error, call, reload, questionCount, questions, subsessions, team = true }: {
+export type InteractionTab = 'recommendations' | 'questions' | 'subsessions' | 'sidechats';
+export function ProjectInteractionPanel({ projectName, active, select, close, inbox, error, call, reload, questionCount, questions, subsessions, sideChats, team = true }: {
   projectName: string; active: InteractionTab | ''; select: (tab: InteractionTab) => void; close: () => void;
   inbox?: RsiInbox; error?: string; call: WorkbenchAPI['call']; reload: () => Promise<void>; questionCount: number; questions: React.ReactNode;
-  subsessions?: React.ReactNode; team?: boolean;
+  subsessions?: React.ReactNode; sideChats?: React.ReactNode; team?: boolean;
 }) {
   const [visitedQuestions, setVisitedQuestions] = useState(active === 'questions');
   const resize = useInteractionPanelResize(!!active);
@@ -87,7 +87,7 @@ export function ProjectInteractionPanel({ projectName, active, select, close, in
   useEffect(() => { if (active) lastTab.current = active; }, [active]);
   useEffect(() => { if (active === 'questions') setVisitedQuestions(true); }, [active]);
   const toggleLabel = active ? '收起侧栏' : '展开侧栏';
-  const reopenTab = lastTab.current === 'subsessions' ? (subsessions ? 'subsessions' : 'recommendations') : (team ? lastTab.current : 'subsessions');
+  const reopenTab = lastTab.current === 'sidechats' && sideChats ? 'sidechats' : lastTab.current === 'subsessions' ? (subsessions ? 'subsessions' : 'recommendations') : (team ? lastTab.current : 'subsessions');
   return <div ref={resize.shell} className={'project-interaction-shell' + (!active ? ' is-collapsed' : '') + (resize.dragging ? ' is-resizing' : '')} style={{ width: active ? resize.width : 60 }}>
     <button type="button" className="icon interaction-toggle" aria-label={toggleLabel} title={toggleLabel} aria-expanded={!!active} aria-controls="project-interaction-panel" onClick={() => active ? close() : select(reopenTab)}>{active ? <PanelRightClose size={17}/> : <PanelRightOpen size={17}/>}</button>
     {active && <button type="button" className="interaction-resize" role="separator" aria-label="调整侧栏宽度" aria-orientation="vertical" aria-controls="project-interaction-panel" aria-valuemin={resize.limits.min} aria-valuemax={resize.limits.max} aria-valuenow={resize.width} aria-valuetext={`${resize.width} 像素`}
@@ -95,15 +95,18 @@ export function ProjectInteractionPanel({ projectName, active, select, close, in
     {!active && <nav className="interaction-reopen" aria-label="侧栏内容">
     {team && <><button aria-label="展开 AI推荐" onClick={() => select('recommendations')}><Sparkles size={16}/><span>AI推荐</span></button><button aria-label="展开提问" onClick={() => select('questions')}><MessageSquare size={16}/><span>提问</span></button></>}
     {subsessions && <button aria-label="展开子会话" onClick={() => select('subsessions')}><MessageSquare size={16}/><span>子会话</span></button>}
+    {sideChats && <button aria-label="展开侧边提问" onClick={() => select('sidechats')}><MessageSquare size={16}/><span>侧边提问</span></button>}
   </nav>}<aside id="project-interaction-panel" className="project-interaction-panel" aria-label="项目工作区" hidden={!active}>
     <header><span>{projectName}</span></header>
     <div className="project-interaction-tabs" role="tablist" aria-label="项目工作区内容">
       {team && <><button id="project-ai-tab" role="tab" aria-selected={active === 'recommendations'} aria-controls="project-ai-panel" onClick={() => select('recommendations')}><Sparkles size={14}/>AI推荐{pendingRecommendations(inbox) > 0 && <span>{pendingRecommendations(inbox)}</span>}</button>
       <button id="project-questions-tab" role="tab" aria-selected={active === 'questions'} aria-controls="project-questions-panel" onClick={() => select('questions')}><MessageSquare size={14}/>提问{questionCount > 0 && <span>{questionCount}</span>}</button></>}
       {subsessions && <button id="project-subsessions-tab" role="tab" aria-selected={active === 'subsessions'} aria-controls="project-subsessions-panel" onClick={() => select('subsessions')}><MessageSquare size={14}/>子会话</button>}
+      {sideChats && <button id="project-sidechats-tab" role="tab" aria-selected={active === 'sidechats'} aria-controls="project-sidechats-panel" onClick={() => select('sidechats')}><MessageSquare size={14}/>侧边提问</button>}
     </div>
     <div className="project-interaction-pane" id="project-ai-panel" role="tabpanel" aria-labelledby="project-ai-tab" hidden={active !== 'recommendations'}><RsiRecommendations inbox={inbox} error={error} call={call} reload={reload}/></div>
     <div className="project-interaction-pane" id="project-questions-panel" role="tabpanel" aria-labelledby="project-questions-tab" hidden={active !== 'questions'}>{(visitedQuestions || active === 'questions') && questions}</div>
     {subsessions && <div className="project-interaction-pane" id="project-subsessions-panel" role="tabpanel" aria-labelledby="project-subsessions-tab" hidden={active !== 'subsessions'}>{subsessions}</div>}
+    {sideChats && <div className="project-interaction-pane" id="project-sidechats-panel" role="tabpanel" aria-labelledby="project-sidechats-tab" hidden={active !== 'sidechats'}>{sideChats}</div>}
   </aside></div>;
 }

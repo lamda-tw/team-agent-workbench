@@ -8,6 +8,7 @@ import { JsonRpc, type AgentRpc, type RpcMessage } from './rpc';
 import { WebSocketRpc } from './websocket-rpc';
 import { mergeSharedThread } from './codex-live-thread';
 import { codexForkError, forkCodexHistory } from './codex-fork';
+import { CodexSideRpc, sideConversationInstructions } from './codex-side-rpc';
 import { CursorNativeRpc, mergeCursorNativeMessages, type CursorNativeSnapshot } from './cursor-native-rpc';
 import { assertCursorSharedSessionAvailable, isCursorFileSession } from '../shared/cursor-session-consistency';
 import { codexPermissionParams, codexTurnPermissionParams, codexPermissions, cursorPermissionArgs, cursorPermissions, permissionIssue, probeCodexCommand } from './permissions';
@@ -62,6 +63,7 @@ export class AgentRuntime {
   private nativeEffort?: string | null;
   private connecting?: Promise<void>;
   private connection: CliConnectionTracker;
+  private sideConnections = new Map<string, CodexSideRpc>();
   private get sharedCodex() { return !!this.storage?.sharedEndpoint || !!this.session.codexRemote; }
   private get executionCwd() { return this.session.codexRemote?.cwd || this.session.cwd; }
   constructor(readonly session: AgentSession, executable: string, private hooks: AgentHooks, private storage?: CodexStorage, networkEnv: NodeJS.ProcessEnv = {}, remoteRpc?: AgentRpc) {
@@ -149,6 +151,34 @@ export class AgentRuntime {
           result.thread.forkedFromId && result.thread.forkedFromId !== this.session.nativeId) throw codexForkError('fork', new Error('Codex 未返回有效的远程子会话，父会话未改变'));
     }
     return { id, path: file, desktop: !!this.storage?.sharedEndpoint, ...(remote ? { remote: { ...remote, nativePath: file } } : {}) };
+  }
+  async createSideChat(session: AgentSession, hooks: AgentHooks, boundary: () => string) {
+    if (this.session.provider !== 'codex') throw new Error('侧边提问目前仅支持 Codex');
+    await this.ensureStarted();
+    if (this.closing || !this.session.nativeId) throw new Error('原会话连接已关闭');
+    const context = boundary();
+    // One native snapshot, including an unfinished turn. Never compact or retry
+    // a potentially accepted fork at a later point in the parent's history.
+    const result = await this.rpc.request('thread/fork', {
+      threadId: this.session.nativeId, ephemeral: true, excludeTurns: true,
+      cwd: this.executionCwd, developerInstructions: sideConversationInstructions,
+    });
+    const threadId = result.thread?.id;
+    if (!threadId || threadId === this.session.nativeId) throw new Error('Codex 未返回独立的临时侧聊');
+    const borrowed = new CodexSideRpc(this.rpc, threadId);
+    this.sideConnections.set(threadId, borrowed);
+    borrowed.once('closed', () => this.sideConnections.delete(threadId));
+    try {
+      if (this.closing || result.thread.ephemeral !== true) throw new Error('当前 Codex 未建立临时侧聊，请更新 Codex 后重试');
+      await borrowed.request('thread/inject_items', { threadId, items: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: sideConversationInstructions + '\n\n侧聊边界：此前的内容仅供参考。\n' + context }] }] });
+      if (this.closing) throw new Error('原会话连接已关闭');
+      session.nativeId = threadId; session.permissions = codexPermissions(result, 'runtime');
+      session.resolvedModel = result.model || this.session.resolvedModel;
+      const child = new AgentRuntime(session, '', hooks, undefined, {}, borrowed);
+      child.initialized = true; child.codexConnected = true;
+      child.nativeModel = result.model || this.nativeModel; child.nativeEffort = result.reasoningEffort ?? this.nativeEffort;
+      return child;
+    } catch (error) { await borrowed.close(); throw error; }
   }
   private async startSession() {
     if (this.initialized) return;
@@ -684,5 +714,5 @@ export class AgentRuntime {
     else if (this.session.provider === 'cursor' && this.session.nativeId) { if(isCursorFileSession(this.session))await this.rpc.request('session/cancel',{sessionId:this.session.nativeId});else this.rpc.notify('session/cancel', { sessionId: this.session.nativeId }); }
     else this.close();
   }
-  async close() { this.closing = true; this.turnActive = false; clearTimeout(this.sharedRefresh); this.sharedRefresh = undefined; this.session.desktopSyncPending = false; this.session.desktopWaitingApproval = false; this.session.desktopSyncState = undefined; this.session.desktopSyncError = undefined; this.connection.stop(); for (const done of this.cursorCommandWaiters) done(); this.cursorCommandWaiters.clear(); this.session.status = 'idle'; this.session.approvals = []; this.hooks.changed(); await Promise.all([this.rpc.close(), this.authBridge?.close()]); }
+  async close() { this.closing = true; await Promise.all([...this.sideConnections.values()].map(connection => connection.close())); this.turnActive = false; clearTimeout(this.sharedRefresh); this.sharedRefresh = undefined; this.session.desktopSyncPending = false; this.session.desktopWaitingApproval = false; this.session.desktopSyncState = undefined; this.session.desktopSyncError = undefined; this.connection.stop(); for (const done of this.cursorCommandWaiters) done(); this.cursorCommandWaiters.clear(); this.session.status = 'idle'; this.session.approvals = []; this.hooks.changed(); await Promise.all([this.rpc.close(), this.authBridge?.close()]); }
 }

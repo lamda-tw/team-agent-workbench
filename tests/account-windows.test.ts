@@ -129,7 +129,15 @@ test('production window routing reuses project connections, separates nodes and 
       assert.equal((await snapshot(nodeTwoAlias)).projectCreation?.name, '复用节点新项目');
       assert.equal((await snapshot(nodeTwo)).projectCreation?.name, '第二节点新项目');
       assert.equal((await snapshot(nodeTwoAlias)).selectedProjectId, project.id);
-      await assert.rejects(call(first, 'project.connection.open', { key: accountIdentity(nodeTwoProfile), projectId: 'revoked' }), /访问权限/);
+      const missing = await call(first, 'project.connection.open', { key: accountIdentity(nodeTwoProfile), projectId: 'revoked' });
+      assert.equal(missing.newWindow, true); assert.equal(missing.projectId, undefined);
+      assert.match(missing.notice, /已登录.*项目列表/);
+      const missingProjectWindow = opened.at(-1)!;
+      const missingState = await snapshot(missingProjectWindow);
+      assert.equal(missingState.connection?.profile.port, otherServer.profile('alice').port);
+      assert.equal(missingState.selectedProjectId, undefined, 'a missing project must not silently select another');
+      await assert.rejects(call(missingProjectWindow, 'remote.list', { projectId: 'revoked', path: otherProject.remoteRoot }), /项目入口不存在/);
+      missingProjectWindow.close(); await until(() => missingProjectWindow.destroyed);
       nodeTwo.close(); await until(() => nodeTwo.destroyed);
       assert.equal((await snapshot(nodeTwoAlias)).connection?.connected, true);
       assert.equal((await snapshot(first)).connection?.connected, true);
