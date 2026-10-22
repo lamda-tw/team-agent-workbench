@@ -7,6 +7,7 @@ import { projectDirectoryKey } from '../shared/project-directory';
 import type { AgentSession, ConnectionProfile, Draft, ProjectConclusion, Settings, Transfer } from '../shared/types';
 import { atomicJson } from './store';
 import { settingsSchema } from './config';
+import { recoverAccountWindows, resumeAccountRecovery, type AccountMigration } from './account-workspace-recovery';
 
 export const accountDirectory = (root: string, profile: ConnectionProfile) => path.join(root, 'account-workspaces', createHash('sha256').update(accountIdentity(profile)).digest('hex'));
 async function json<T>(file: string, fallback: T): Promise<T> {
@@ -14,8 +15,13 @@ async function json<T>(file: string, fallback: T): Promise<T> {
   catch (error: any) { if (error.code === 'ENOENT') return fallback; throw new Error('无法读取本地账号资料，原文件已保留：' + file); }
 }
 export async function legacyWindowRoots(root: string) {
-  const entries = await fs.readdir(path.join(root, 'instances'), { withFileTypes: true }).catch((error: any) => { if (error.code === 'ENOENT') return []; throw error; });
-  return [root, ...entries.filter(entry => entry.isDirectory() && /^[1-9]\d*$/.test(entry.name)).sort((a, b) => Number(a.name) - Number(b.name)).map(entry => path.join(root, 'instances', entry.name))];
+  const directories = [root];
+  for (const name of ['instances', 'window-state']) {
+    const parent = path.join(root, name);
+    const entries = await fs.readdir(parent, { withFileTypes: true }).catch((error: any) => { if (error.code === 'ENOENT') return []; throw error; });
+    directories.push(...entries.filter(entry => entry.isDirectory() && !entry.isSymbolicLink() && /^[1-9]\d*$/.test(entry.name)).sort((a, b) => Number(a.name) - Number(b.name)).map(entry => path.join(parent, entry.name)));
+  }
+  return directories;
 }
 const inside = (root: string, file: string) => { const relative = path.relative(root, file); return !!relative && !path.isAbsolute(relative) && relative !== '..' && !relative.startsWith('..' + path.sep); };
 async function copy(source: string, target: string) {
@@ -31,12 +37,17 @@ async function copy(source: string, target: string) {
  */
 export async function migrateAccountWorkspace(root: string, profile: ConnectionProfile, seedRoot?: string) {
   const destination = accountDirectory(root, profile), owner = accountIdentity(profile);
-  const existing = await json<{ owner: string } | undefined>(path.join(destination, 'migration.json'), undefined);
-  if (existing) { if (existing.owner !== owner) throw new Error('账号数据目录身份不匹配'); return destination; }
-  if (await fs.stat(destination).catch(() => undefined)) throw new Error('账号数据目录缺少迁移记录，请保留目录后检查：' + destination);
+  await resumeAccountRecovery(destination, owner, copy);
+  const existing = await json<AccountMigration | undefined>(path.join(destination, 'migration.json'), undefined);
+  if (existing && existing.owner !== owner) throw new Error('账号数据目录身份不匹配');
+  if (!existing && await fs.stat(destination).catch(() => undefined)) throw new Error('账号数据目录缺少迁移记录，请保留目录后检查：' + destination);
+  const normalize = (directory: string) => process.platform === 'win32' ? path.resolve(directory).toLowerCase() : path.resolve(directory);
+  const scanned = new Set(existing?.sources.map(normalize));
+  const directories = (await legacyWindowRoots(root)).filter(directory => !scanned.has(normalize(directory)));
+  if (existing && !directories.length) return destination;
   const staging = destination + '.migrating-' + randomUUID();
   await fs.mkdir(staging, { recursive: true });
-  const sources = await Promise.all((await legacyWindowRoots(root)).map(async directory => {
+  const sources = await Promise.all(directories.map(async directory => {
     const raw = await json<any>(path.join(directory, 'settings.json'), undefined);
     if (raw?.offlineAuthorization && !raw.workspaceSnapshot) raw.workspaceSnapshot = raw.offlineAuthorization;
     const settings = raw ? settingsSchema.parse(raw) : undefined;
@@ -160,7 +171,11 @@ export async function migrateAccountWorkspace(root: string, profile: ConnectionP
   await atomicJson(path.join(staging, 'settings.json'), settingsSchema.parse(settings));
   for (const [index, name] of ['sessions', 'drafts', 'transfers', 'conclusions'].entries()) await atomicJson(path.join(staging, name + '.json'), [...selected[index].values()]);
   await atomicJson(path.join(staging, 'inputs.json'), inputs);
-  await atomicJson(path.join(staging, 'migration.json'), { version: 1, owner, completedAt: new Date().toISOString(), sources: sources.map(source => source.directory), counts: selected.map(records => records.size), conflicts });
+  await atomicJson(path.join(staging, 'migration.json'), { version: 2, owner, completedAt: new Date().toISOString(), sources: sources.map(source => source.directory), counts: selected.map(records => records.size), recordIds: selected.map(records => [...records.keys()]), conflicts });
+  if (existing) {
+    await recoverAccountWindows(destination, owner, staging, existing, copy);
+    return destination;
+  }
   // Antivirus and file indexers can briefly hold a newly written directory on Windows.
   // Keep the complete staging tree intact and retry only transient locks.
   for (let attempt = 0; ; attempt++) {

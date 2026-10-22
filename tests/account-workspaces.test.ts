@@ -47,6 +47,103 @@ test('account migration retains owned compressed Codex histories for native resu
   assert.deepEqual(await fs.readdir(path.dirname(storage.resumePath!)), [path.basename(file)]);
 });
 
+test('login discovers imported Codex sessions in window-state without changing native history or importing another account', async t => {
+  const { root, first, profile } = await fixture(t), base = first.store.root;
+  const window = new Workbench(path.join(base, 'window-state', '2'), () => {}, () => {});
+  t.after(() => window.close()); await window.store.init(); grantTestWorkspace(window, root);
+  const session = await window.createSession('codex', root, offlineProjectId);
+  session.nativeId = randomUUID(); session.nativeLive = true;
+  session.nativePath = path.join(root, 'desktop-history.jsonl');
+  session.messages = [{ id: randomUUID(), role: 'assistant', text: '桌面端原始回复', createdAt: session.createdAt }];
+  await fs.writeFile(session.nativePath, 'native desktop history');
+  await window.saveInput(session.id, { text: '登录前尚未发送', sourceIds: [], answers: {} });
+  window.store.settings.workspaceSnapshot!.profile.username = 'bob';
+  const foreign = await window.createSession('codex', root, offlineProjectId); await window.store.save();
+  const before = await fs.readFile(path.join(window.store.root, 'sessions.json'));
+  const restored = new Store(await migrateAccountWorkspace(base, profile, window.store.root)); await restored.init();
+  assert.deepEqual(restored.sessions.map(item => item.id), [session.id]);
+  assert(!restored.sessions.some(item => item.id === foreign.id));
+  assert.equal(restored.sessions[0].nativeId, session.nativeId);
+  assert.equal(restored.sessions[0].nativePath, session.nativePath);
+  assert.deepEqual(restored.sessions[0].messages, session.messages);
+  assert.equal(restored.inputs[session.id].text, '登录前尚未发送');
+  assert.deepEqual(await fs.readFile(path.join(window.store.root, 'sessions.json')), before);
+  assert.equal(await fs.readFile(session.nativePath, 'utf8'), 'native desktop history');
+});
+
+test('v1 migration repairs previously omitted windows once, preserves newer edits, and never resurrects deleted sessions', async t => {
+  const { root, first, profile } = await fixture(t), base = first.store.root;
+  const deleted = await first.createSession('codex', root, offlineProjectId); await first.store.save();
+  const destination = await migrateAccountWorkspace(base, profile), current = new Store(destination); await current.init();
+  const fresh = { ...structuredClone(deleted), id: randomUUID(), title: '新版已有会话', messages: [] };
+  current.sessions = [fresh]; await current.save();
+  const manifest = JSON.parse(await fs.readFile(path.join(destination, 'migration.json'), 'utf8'));
+  manifest.version = 1; delete manifest.recordIds; await atomicJson(path.join(destination, 'migration.json'), manifest);
+  const window = new Workbench(path.join(base, 'window-state', '1'), () => {}, () => {});
+  t.after(() => window.close()); await window.store.init(); grantTestWorkspace(window, root);
+  const imported = await window.createSession('codex', root, offlineProjectId);
+  imported.title = '旧窗口的桌面会话'; imported.nativeId = randomUUID(); imported.nativeLive = true;
+  await window.saveInput(imported.id, { text: '待发送草稿', sourceIds: [], answers: {} });
+  await fs.writeFile(imported.handoffPath, '阶段摘要原文');
+  window.store.sessions.push(structuredClone(deleted), { ...structuredClone(fresh), title: '更早的名称' });
+  await window.store.save();
+  const oldBytes = await fs.readFile(path.join(window.store.root, 'sessions.json'));
+  await migrateAccountWorkspace(base, profile);
+  const repaired = new Store(destination); await repaired.init();
+  assert.deepEqual(new Set(repaired.sessions.map(item => item.id)), new Set([fresh.id, imported.id]));
+  assert.equal(repaired.sessions.find(item => item.id === fresh.id)!.title, fresh.title);
+  assert.equal(repaired.inputs[imported.id].text, '待发送草稿');
+  assert.equal(await fs.readFile(repaired.sessions.find(item => item.id === imported.id)!.handoffPath, 'utf8'), '阶段摘要原文');
+  assert.deepEqual(await fs.readFile(path.join(window.store.root, 'sessions.json')), oldBytes);
+  const backups = await fs.readdir(path.join(destination, 'migrations'));
+  assert.equal(backups.length, 1);
+  assert.deepEqual(JSON.parse(await fs.readFile(path.join(destination, 'migrations', backups[0], 'sessions.json'), 'utf8')).map((item: any) => item.id), [fresh.id]);
+  repaired.sessions = [fresh]; await repaired.save();
+  await migrateAccountWorkspace(base, profile);
+  const reopened = new Store(destination); await reopened.init();
+  assert.deepEqual(reopened.sessions.map(item => item.id), [fresh.id]);
+});
+
+test('interrupted omitted-window recovery resumes before the account opens and retains pre-repair backup', async t => {
+  const { root, first, profile } = await fixture(t), base = first.store.root;
+  const destination = await migrateAccountWorkspace(base, profile);
+  const window = new Workbench(path.join(base, 'window-state', '3'), () => {}, () => {});
+  t.after(() => window.close()); await window.store.init(); grantTestWorkspace(window, root);
+  const session = await window.createSession('codex', root, offlineProjectId); await window.store.save();
+  await window.saveInput(session.id, { text: '恢复中断后仍要保留', sourceIds: [], answers: {} });
+  const rename = fs.rename.bind(fs);
+  const mock = t.mock.method(fs, 'rename', async (from: string, to: string) => {
+    if (to === path.join(destination, 'inputs.json')) throw Object.assign(new Error('interrupted repair'), { code: 'EIO' });
+    return rename(from, to);
+  });
+  try { await assert.rejects(migrateAccountWorkspace(base, profile), /interrupted repair/); }
+  finally { mock.mock.restore(); }
+  await fs.access(path.join(destination, 'account-recovery.pending.json'));
+  await migrateAccountWorkspace(base, profile);
+  const repaired = new Store(destination); await repaired.init();
+  assert.deepEqual(repaired.sessions.map(item => item.id), [session.id]);
+  assert.equal(repaired.inputs[session.id].text, '恢复中断后仍要保留');
+  await assert.rejects(fs.access(path.join(destination, 'account-recovery.pending.json')), { code: 'ENOENT' });
+  const backups = await fs.readdir(path.join(destination, 'migrations'));
+  assert.deepEqual(JSON.parse(await fs.readFile(path.join(destination, 'migrations', backups[0], 'sessions.json'), 'utf8')), []);
+});
+
+test('a damaged omitted window leaves an existing account unchanged until the source is repaired', async t => {
+  const { root, first, profile } = await fixture(t), base = first.store.root;
+  const session = await first.createSession('codex', root, offlineProjectId); await first.store.save();
+  const destination = await migrateAccountWorkspace(base, profile);
+  const before = await Promise.all(['sessions.json', 'settings.json', 'migration.json'].map(name => fs.readFile(path.join(destination, name))));
+  const window = path.join(base, 'window-state', '4'); await fs.mkdir(window, { recursive: true });
+  await atomicJson(path.join(window, 'sessions.json'), [{ ...session, id: randomUUID() }]);
+  await fs.writeFile(path.join(window, 'drafts.json'), '{incomplete');
+  await assert.rejects(migrateAccountWorkspace(base, profile), /无法读取本地账号资料/);
+  assert.deepEqual(await Promise.all(['sessions.json', 'settings.json', 'migration.json'].map(name => fs.readFile(path.join(destination, name)))), before);
+  await assert.rejects(fs.access(path.join(destination, 'account-recovery.pending.json')), { code: 'ENOENT' });
+  await atomicJson(path.join(window, 'drafts.json'), []);
+  await migrateAccountWorkspace(base, profile);
+  const repaired = new Store(destination); await repaired.init(); assert.equal(repaired.sessions.length, 2);
+});
+
 test('account migration retains evolved RSI policies and progress without importing another account', async t => {
   const { first, profile } = await fixture(t), owner = accountIdentity(profile);
   await first.rsi.observe(offlineProjectId, [{ source: 'project', sourceId: 'goal', factKey: 'goal', version: '1', eventAt: new Date().toISOString(), text: '保留策略与学习记录', actor: 'alice', assertion: 'explicit' }]);

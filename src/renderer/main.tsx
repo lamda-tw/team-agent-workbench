@@ -4,6 +4,7 @@ import { projectConnectionError } from '../shared/project-connection';
 import { needsCentralConnection } from '../shared/central-connection';
 import { CentralConnectionError, CentralReconnectAction } from './central-connection-error';
 import { CentralConnectionStatus } from './central-connection-status';
+import { inProjectWorkgroup } from '../shared/project-session-scope';
 import './central-connection-status.css';
 import { ProjectCentralConnection, LocalProjectConnection } from './project-connection';
 import { personalFamilyIds, PERSONAL_PROJECT_ID, personalProfile, isPersonalBinding } from '../shared/personal-workspace';
@@ -333,7 +334,7 @@ function AccountWorkspace({ state, refresh }: { state: Snapshot; refresh: () => 
   const referenceSession = state.sessions.find(s => s.id === referenceSessionId);
   const referenceHashes = referenceSession ? acceptedSessionContext(referenceSession).sourceHashes : {};
   const includedSources = uniqueSources(referenceSession?.sources || []).filter(source => referenceHashes[source.id] === source.sha256);
-  const workSessions = state.sessions.filter(s => s.purpose === 'work' && (personal ? isPersonalBinding(s.binding) && s.binding?.project.id === projectId && (projectId !== PERSONAL_PROJECT_ID || personalGroup === '*' || (s.personalGroupId || '') === personalGroup) : !isPersonalBinding(s.binding) && s.binding?.project.groupName === project?.groupName));
+  const workSessions = state.sessions.filter(s => s.purpose === 'work' && (personal ? isPersonalBinding(s.binding) && s.binding?.project.id === projectId && (projectId !== PERSONAL_PROJECT_ID || personalGroup === '*' || (s.personalGroupId || '') === personalGroup) : !isPersonalBinding(s.binding) && inProjectWorkgroup(s.binding?.project, project, teamProjects)));
   const preparingCount = state?.drafts.filter(d => !d.submitted && d.generation === 'running').length || 0;
   const readyCount = state?.drafts.filter(needsPreparationConfirmation).length || 0;
   const sessionDraft = state?.drafts.find(d => d.sessionId === sessionId && !d.submitted);
